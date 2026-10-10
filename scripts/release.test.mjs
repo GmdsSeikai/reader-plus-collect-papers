@@ -27,7 +27,13 @@ function run(script, cwd, env = {}, args = []) {
   return spawnSync(process.execPath, [join(scripts, script), ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, RELEASE_TAG: "", GITHUB_OUTPUT: "", ...env },
+    env: {
+      ...process.env,
+      RELEASE_TAG: "",
+      GITHUB_OUTPUT: "",
+      MAC_ONLY: "false",
+      ...env,
+    },
     timeout: 10000,
   });
 }
@@ -77,6 +83,28 @@ test("release checks installer format before writing hashes", async () => {
   const result = run("release-assets.mjs", cwd);
   expect(result.status).not.toBe(0);
   expect(result.stderr).toContain("Invalid installer format");
+});
+test("Mac-only release accepts only the DMG and update ZIP", async () => {
+  const cwd = await fixture();
+  const files = await installers(cwd);
+  await rm(join(cwd, "release/Reader-0.2.0-win-x64.exe"));
+  expect(run("release-assets.mjs", cwd).status).not.toBe(0);
+  expect(run("release-assets.mjs", cwd, { MAC_ONLY: "true" }).status).toBe(0);
+  const hashes = await readFile(join(cwd, "release/SHA256SUMS.txt"), "utf8");
+  expect(hashes.split("\n").filter(Boolean)).toHaveLength(2);
+  for (const { file, bytes } of files.filter(
+    ({ file }) => !file.endsWith(".exe"),
+  ))
+    expect(hashes).toContain(
+      `${createHash("sha256").update(bytes).digest("hex")}  ${file}\n`,
+    );
+  await writeFile(
+    join(cwd, "release/Reader-0.2.0-win-x64.exe"),
+    files[2].bytes,
+  );
+  expect(run("release-assets.mjs", cwd, { MAC_ONLY: "true" }).status).not.toBe(
+    0,
+  );
 });
 test("complete artifacts get correct hashes and upload requires the matching tag", async () => {
   const cwd = await fixture();

@@ -39,6 +39,8 @@ gh secret set MAC_SIGN_P12_PASSWORD < ~/reader-mac-sign/password.txt
 
 触发事件为 `release: published`，适用于正式版和预发布版。保存草稿、单独推送 tag 或修改 Release 描述不会触发。Release 页面会先发布，安装包稍后上传；任一构建失败时上传任务不会运行。GitHub 资产上传不是事务操作，上传过程中网络失败可能留下部分文件；修复后重新运行工作流会覆盖同名资产。不要移动已发布的 tag；代码修复请发布新版本。
 
+只发布 Apple Silicon Mac 测试版时，在创建 Release 的描述中加入 `<!-- reader:mac-only -->`。工作流只运行 macOS 构建，并要求 Release 恰好包含 DMG、原地更新 ZIP 和两者的校验值；Windows 用户不会收到这个版本的安装包。
+
 工作流使用仓库自动提供的 `GITHUB_TOKEN` 和上述两个 macOS 签名 secrets，无需 PAT。构建任务只有 `contents: read`，上传任务才有 `contents: write`。若以后由另一个工作流创建 Release，需要注意：默认 `GITHUB_TOKEN` 产生的事件通常不会触发新的工作流；应改为显式调用构建工作流，或调整发布入口。
 
 ## 本地构建

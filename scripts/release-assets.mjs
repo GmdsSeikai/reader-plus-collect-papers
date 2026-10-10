@@ -9,7 +9,7 @@ const { version } = JSON.parse(
 const expected = [
   `Reader-${version}-mac-arm64.dmg`,
   `Reader-${version}-mac-arm64.zip`,
-  `Reader-${version}-win-x64.exe`,
+  ...(process.env.MAC_ONLY === "true" ? [] : [`Reader-${version}-win-x64.exe`]),
 ].sort();
 const actual = (await readdir("release"))
   .filter((file) => file !== "SHA256SUMS.txt")
@@ -17,7 +17,7 @@ const actual = (await readdir("release"))
 assert.deepEqual(
   actual,
   expected,
-  "Release must contain exactly the Apple Silicon Mac installer and update archive and the Windows x64 installer",
+  "Release must contain exactly the installers selected for this release",
 );
 const checksums = [];
 for (const file of expected) {
@@ -31,11 +31,7 @@ for (const file of expected) {
     : file.endsWith(".zip")
       ? [bytes.subarray(0, 4), "PK\u0003\u0004"]
       : [bytes.subarray(0, 2), "MZ"];
-  assert.equal(
-    header.toString(),
-    magic,
-    `Invalid installer format: ${file}`,
-  );
+  assert.equal(header.toString(), magic, `Invalid installer format: ${file}`);
   checksums.push(
     `${createHash("sha256").update(bytes).digest("hex")}  ${file}`,
   );

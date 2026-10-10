@@ -63,6 +63,7 @@ jobs:
     with:
       ref: ${{ needs.prepare.outputs.sha }}
       release-tag: ${{ github.event.release.tag_name || '' }}
+      mac-only: ${{ contains(github.event.release.body, '<!-- reader:mac-only -->') }}
 
   publish:
     needs: [prepare, desktop]
@@ -70,6 +71,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      MAC_ONLY: ${{ contains(github.event.release.body, '<!-- reader:mac-only -->') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
