@@ -12,7 +12,6 @@ import {
   ArrowLeft,
   BookOpen,
   PanelLeft,
-  PanelRight,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -1090,7 +1089,7 @@ export function Workspace({
             expanded={right}
             onClick={() => setRight(!right)}
           >
-            <PanelRight />
+            <Sparkles />
           </IconButton>
           <IconButton label="设置" onClick={onSettings}>
             <Settings2 />
