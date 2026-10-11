@@ -2200,39 +2200,23 @@ h2 {
   margin-top: 16px;
 }
 .video {
-  margin-top: 22px;
+  margin: 22px 0 0;
   border-radius: 14px;
-  border: 1px dashed var(--line-strong);
-  aspect-ratio: 16 / 7;
-  display: grid;
-  place-items: center;
-  text-align: center;
-  color: var(--muted);
-  background:
-    repeating-linear-gradient(
-      135deg,
-      transparent 0 14px,
-      color-mix(in srgb, var(--ink) 2.5%, transparent) 14px 15px
-    ),
-    var(--bone);
-}
-.video .play {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  margin: 0 auto 12px;
-  background: var(--surface);
+  overflow: hidden;
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  font-size: 20px;
-  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  background: var(--surface);
 }
-.video small {
+.video video {
   display: block;
-  font-size: 12.5px;
-  color: var(--faint);
+  width: 100%;
+  height: auto;
+  background: #000;
+}
+.video figcaption {
+  padding: 12px 16px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* Local data */
@@ -2507,9 +2491,6 @@ footer a:hover {
   }
   .formats thead th:not(:first-child) {
     font-size: 18px;
-  }
-  .video {
-    aspect-ratio: 4 / 3;
   }
   .step {
     padding: 6px 10px;
