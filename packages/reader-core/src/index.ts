@@ -391,6 +391,10 @@ export interface ReaderAdapter {
   focusBlock?(blockId: string, layout: "source" | "parallel"): Promise<void>;
   /** Center the paragraph containing a saved location, like clicking it. */
   focusLocation?(location: DocumentLocation): Promise<void>;
+  /** Center the source block for a chat reference when one can be located. */
+  focusReference?(location: DocumentLocation, text: string): Promise<boolean>;
+  /** Briefly mark the source block after following a chat reference. */
+  flashReference?(location: DocumentLocation, text: string): void;
   cancelBlockFocus?(): void;
   destroy(): Promise<void>;
 }

@@ -135,7 +135,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   expect(input("API 地址")).toBeNull();
   expect(api.testAI).not.toHaveBeenCalled();
   await openAPI();
-  await type("API 地址", "https://api.deepseek.com");
+  expect(input("API 地址").value).toBe("https://api.deepseek.com");
   await type("API Key", "sk-test");
   await submit();
   expect(api.saveAIConfig).toHaveBeenLastCalledWith(
@@ -189,6 +189,7 @@ it("warns when no listed model passes the vision check", async () => {
   listed = { "text-only": false };
   await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
   await openAPI();
+  expect(input("API 地址").value).toBe("https://api.example.com");
   expect(api.testAI).toHaveBeenCalledWith("api", "vision", "text-only");
   expect(toast.warning).toHaveBeenCalledOnce();
   await act(async () =>

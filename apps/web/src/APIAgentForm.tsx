@@ -3,6 +3,8 @@ import type { APIConnection } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
 import { Input } from "@reader/ui/components/input";
 
+const DEFAULT_API_URL = "https://api.deepseek.com";
+
 /** Endpoint and key of the OpenAI-compatible "api" agent. A saved key is
  * never sent back; leaving the field empty keeps it. */
 export function APIAgentForm({
@@ -14,10 +16,10 @@ export function APIAgentForm({
   disabled: boolean;
   onSave: (connection: APIConnection) => Promise<void>;
 }) {
-  const [url, setURL] = useState(connection.url);
+  const [url, setURL] = useState(connection.url || DEFAULT_API_URL);
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
-  useEffect(() => setURL(connection.url), [connection.url]);
+  useEffect(() => setURL(connection.url || DEFAULT_API_URL), [connection.url]);
   const changed = url.trim() !== connection.url || key.trim() !== "";
   const save = async () => {
     setSaving(true);
@@ -49,7 +51,6 @@ export function APIAgentForm({
     >
       <Input
         aria-label="API 地址"
-        placeholder="https://api.deepseek.com"
         autoComplete="off"
         spellCheck={false}
         value={url}

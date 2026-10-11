@@ -58,10 +58,12 @@ export function AssistantPanel({
   session,
   empty,
   extras,
+  references,
 }: {
   session: ChatSession;
   empty: ReactNode;
   extras: (message: Message) => ReactNode;
+  references: (message: Message) => ReactNode;
 }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const scroll = useChatScroll(state.pending?.key);
@@ -123,7 +125,10 @@ export function AssistantPanel({
                     />
                   </Suspense>
                 ) : (
-                  <div>{content}</div>
+                  <>
+                    {message && references(message)}
+                    <div className="chat-question">{content}</div>
+                  </>
                 )}
                 {answer?.fallback && (
                   <p className="chat-status">{answer.fallback}</p>
