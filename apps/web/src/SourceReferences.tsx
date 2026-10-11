@@ -59,7 +59,10 @@ export function SourceReferences({
         target = matches[0].location;
       }
       await onNavigate(target);
-      if (serial === request.current) setCandidates(undefined);
+      if (serial === request.current) {
+        adapter.flashReference?.(target, card.text);
+        setCandidates(undefined);
+      }
     } catch (e) {
       if (serial === request.current) setError((e as Error).message);
     } finally {

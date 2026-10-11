@@ -5,6 +5,7 @@ import {
   isPDFPageDecoration,
   type PDFBlock,
   type PDFBlockAction,
+  type PDFLocation,
 } from "@reader/core";
 export function hitBlock(
   blocks: PDFBlock[],
@@ -28,6 +29,37 @@ export function hitBlock(
         a.bounds.width * a.bounds.height - b.bounds.width * b.bounds.height,
     )[0];
 }
+export function referenceBlock(
+  blocks: PDFBlock[],
+  location: PDFLocation,
+  text: string,
+) {
+  const rect = location.rects?.[0];
+  if (rect) {
+    const hit = hitBlock(
+      blocks,
+      location.page,
+      rect.x + rect.width / 2,
+      rect.y + rect.height / 2,
+    );
+    if (hit) return hit;
+  }
+  const excerpt = (location.quote || text)
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+  if (excerpt) {
+    const needle = excerpt.slice(0, 48);
+    const match = blocks.find(
+      (block) =>
+        block.page === location.page &&
+        block.text.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle),
+    );
+    if (match) return match;
+  }
+  if (location.x !== undefined && location.y !== undefined)
+    return hitBlock(blocks, location.page, location.x, location.y);
+}
 // Pointer observation leaves the PDF text and links as the event targets.
 export class PDFBlockOverlay {
   private blocks: PDFBlock[] = [];
@@ -39,6 +71,9 @@ export class PDFBlockOverlay {
   private linkedId: string | null = null;
   private focusId: string | null = null;
   private focus = document.createElement("div");
+  private referenceFlash = document.createElement("div");
+  private referenceFlashId: string | null = null;
+  private referenceFlashTimer?: ReturnType<typeof setTimeout>;
   private linked = document.createElement("div");
   private searchBlocks = new Map<string, HTMLDivElement>();
   private pressed?: { id: string; x: number; y: number };
@@ -58,6 +93,8 @@ export class PDFBlockOverlay {
     this.linked.setAttribute("aria-hidden", "true");
     this.focus.className = "reader-block-hover reader-block-focus";
     this.focus.setAttribute("aria-hidden", "true");
+    this.referenceFlash.className = "reader-block-reference-flash";
+    this.referenceFlash.setAttribute("aria-hidden", "true");
     this.focus.addEventListener("animationend", () => {
       if (!this.focusId) this.focus.remove();
     });
@@ -254,6 +291,38 @@ export class PDFBlockOverlay {
     delete this.focus.dataset.fading;
     this.paintReadingFocus();
   }
+  flashBlock(blockId: string) {
+    clearTimeout(this.referenceFlashTimer);
+    this.referenceFlashId = blockId;
+    this.paintReferenceFlash();
+    this.referenceFlashTimer = setTimeout(() => {
+      this.referenceFlashId = null;
+      this.referenceFlash.remove();
+      this.referenceFlashTimer = undefined;
+    }, 2000);
+  }
+  private paintReferenceFlash() {
+    const block = this.blocks.find((b) => b.id === this.referenceFlashId);
+    const page =
+      block &&
+      this.host.querySelector<HTMLElement>(
+        `.page[data-page-number="${block.page}"]`,
+      );
+    if (!block || !page) {
+      this.referenceFlash.remove();
+      return;
+    }
+    const b = block.bounds;
+    Object.assign(this.referenceFlash.style, {
+      left: `${b.x * 100}%`,
+      top: `${b.y * 100}%`,
+      width: `${b.width * 100}%`,
+      height: `${b.height * 100}%`,
+    });
+    this.referenceFlash.dataset.blockId = block.id;
+    if (this.referenceFlash.parentElement !== page)
+      page.append(this.referenceFlash);
+  }
   private paintReadingFocus() {
     if (!this.focusId) return;
     this.focus.remove();
@@ -276,6 +345,7 @@ export class PDFBlockOverlay {
     page.append(this.focus);
   }
   repaint() {
+    this.paintReferenceFlash();
     for (const [id, element] of this.searchBlocks) {
       const match = this.blocks.find((block) => block.id === id);
       const page =
@@ -318,6 +388,8 @@ export class PDFBlockOverlay {
     this.show(this.linked, page);
   }
   destroy() {
+    clearTimeout(this.referenceFlashTimer);
+    this.referenceFlash.remove();
     for (const element of this.searchBlocks.values()) element.remove();
     this.searchBlocks.clear();
     this.focusId = null;

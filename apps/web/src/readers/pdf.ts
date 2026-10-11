@@ -1,6 +1,6 @@
 import { selectionAnchor, isSelectionToolbar } from "./selection-anchor";
 import { pdfQuotePoint } from "./pdf-reference-location";
-import { PDFBlockOverlay } from "./pdf-blocks";
+import { PDFBlockOverlay, referenceBlock } from "./pdf-blocks";
 import { PDFReadingNavigation } from "./pdf-navigation";
 import { PDFAnnotationLayer } from "./pdf-annotations";
 import { PDFLinkPreview } from "./pdf-link-preview";
@@ -495,6 +495,11 @@ export class PDFReaderAdapter implements ReaderAdapter {
   setBlocks(blocks: PDFBlock[]) {
     this.blockData = blocks;
     this.blocks.setBlocks(blocks);
+  }
+  flashReference(location: DocumentLocation, text: string) {
+    if (location.type !== "pdf" || this.disposed) return;
+    const block = referenceBlock(this.blockData, location, text);
+    if (block) this.blocks.flashBlock(block.id);
   }
   setSearchBlocks(blockIds: string[]) {
     this.blocks.setSearchBlocks(blockIds);

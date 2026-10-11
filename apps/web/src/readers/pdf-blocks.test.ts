@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { expect, it, vi } from "vitest";
-import { PDFBlockOverlay, hitBlock } from "./pdf-blocks";
+import { PDFBlockOverlay, hitBlock, referenceBlock } from "./pdf-blocks";
 import type { PDFBlock } from "@reader/core";
 const block: PDFBlock = {
   id: "p2-b1",
@@ -15,6 +15,50 @@ it("hits normalized regions only on their source page", () => {
   expect(hitBlock([block], 2, 0.2, 0.3)?.id).toBe(block.id);
   expect(hitBlock([block], 1, 0.2, 0.3)).toBeUndefined();
   expect(hitBlock([block], 2, 0.8, 0.3)).toBeUndefined();
+});
+it("locates a referenced block by saved selection or source text", () => {
+  const textBlock = { ...block, image: undefined, text: "A cited result." };
+  expect(
+    referenceBlock(
+      [textBlock],
+      {
+        type: "pdf",
+        page: 2,
+        rects: [{ x: 0.12, y: 0.21, width: 0.1, height: 0.03 }],
+      },
+      "",
+    ),
+  ).toBe(textBlock);
+  expect(
+    referenceBlock([textBlock], { type: "pdf", page: 2 }, "A cited result."),
+  ).toBe(textBlock);
+  expect(
+    referenceBlock([textBlock], { type: "pdf", page: 1 }, "A cited result."),
+  ).toBeUndefined();
+});
+it("keeps the reference flash for two seconds and restarts it on another jump", () => {
+  vi.useFakeTimers();
+  try {
+    const host = document.createElement("div");
+    host.innerHTML = '<div class="page" data-page-number="2"></div>';
+    const layer = new PDFBlockOverlay(host);
+    layer.setBlocks([block]);
+    layer.flashBlock(block.id);
+    const flash = host.querySelector<HTMLElement>(
+      ".reader-block-reference-flash",
+    )!;
+    expect(flash.style.left).toBe("10%");
+    expect(flash.style.height).toBe("40%");
+    vi.advanceTimersByTime(1500);
+    layer.flashBlock(block.id);
+    vi.advanceTimersByTime(1999);
+    expect(host.contains(flash)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(host.contains(flash)).toBe(false);
+    layer.destroy();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 it("keeps search highlights attached to matching PDF blocks", () => {
   const host = document.createElement("div");

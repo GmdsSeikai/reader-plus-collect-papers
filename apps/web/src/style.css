@@ -1460,6 +1460,13 @@ kbd {
   background: rgb(97 137 113 / 7%);
   box-shadow: 0 0 0 3px rgb(97 137 113 / 3%);
 }
+.reader-block-reference-flash {
+  position: absolute;
+  pointer-events: none;
+  z-index: 6;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+}
 @keyframes processing-light {
   from {
     transform: translateX(-120%);
@@ -1796,7 +1803,7 @@ kbd {
   gap: 2px;
   text-align: left;
   white-space: normal;
-  border-left: 2px solid var(--brand-90);
+  border-left: 2px solid var(--primary);
   border-radius: 0;
   background: transparent;
   line-height: 1.5;
