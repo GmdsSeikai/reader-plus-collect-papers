@@ -707,7 +707,7 @@ export function App() {
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
               <DialogTitle>关于 Reader</DialogTitle>
-              <DialogDescription>EPUB 与 PDF 阅读器</DialogDescription>
+              <DialogDescription>一千万以内最好的阅读器</DialogDescription>
             </DialogHeader>
             <dl className="flex items-center justify-between text-sm">
               <dt className="text-muted-foreground">版本</dt>
