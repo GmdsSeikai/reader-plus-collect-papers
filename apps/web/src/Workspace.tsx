@@ -236,11 +236,14 @@ export function Workspace({
   const navigationRef = useRef(referenceNavigation);
   navigationRef.current = referenceNavigation;
   const [referenceBusy, setReferenceBusy] = useState(false);
-  const visitReference = async (target: DocumentLocation) => {
-    if (!referenceNavigation || referenceNavigation.busy) return;
+  const visitReference = async (target: DocumentLocation, text: string) => {
+    if (!adapter || !referenceNavigation || referenceNavigation.busy) return;
     setReferenceBusy(true);
     try {
-      await referenceNavigation.visit(target);
+      await referenceNavigation.visit(target, async (location) => {
+        if (!(await adapter.focusReference?.(location, text)))
+          await adapter.goTo(location);
+      });
       setReturnLocation(referenceNavigation.origin);
     } finally {
       setReferenceBusy(false);

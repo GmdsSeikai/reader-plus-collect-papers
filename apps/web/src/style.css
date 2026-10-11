@@ -1465,7 +1465,11 @@ kbd {
   pointer-events: none;
   z-index: 6;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--primary) 30%, transparent);
+  background: var(--primary);
+  opacity: 0.3;
+}
+:root[data-theme="sepia"] .reader-block-reference-flash {
+  background: var(--brand);
 }
 @keyframes processing-light {
   from {

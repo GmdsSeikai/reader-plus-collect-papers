@@ -59,6 +59,20 @@ it("returns to the original position after visiting multiple citations", async (
   expect(current).toEqual({ type: "pdf", page: 8, x: 0.1, y: 0.65 });
   expect(navigation.origin).toBeUndefined();
 });
+it("uses block-focused navigation for a source reference and keeps its return point", async () => {
+  const original: DocumentLocation = { type: "pdf", page: 8, y: 0.6 };
+  const target: DocumentLocation = { type: "pdf", page: 2 };
+  const reader = {
+    getLocation: () => original,
+    goTo: vi.fn(async () => {}),
+  };
+  const focus = vi.fn(async () => {});
+  const navigation = new ReferenceNavigation(reader);
+  await navigation.visit(target, focus);
+  expect(focus).toHaveBeenCalledWith(target);
+  expect(reader.goTo).not.toHaveBeenCalled();
+  expect(navigation.origin).toEqual(original);
+});
 it("retains a return point on failed navigation and permits retrying", async () => {
   const reader = {
     getLocation: () => ({

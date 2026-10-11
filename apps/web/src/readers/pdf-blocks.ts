@@ -53,6 +53,7 @@ export function referenceBlock(
     const match = blocks.find(
       (block) =>
         block.page === location.page &&
+        !isPDFPageDecoration(block) &&
         block.text.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle),
     );
     if (match) return match;

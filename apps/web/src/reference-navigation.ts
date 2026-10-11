@@ -10,12 +10,16 @@ export class ReferenceNavigation {
   constructor(
     private reader: Pick<ReaderAdapter, "getLocation" | "goTo" | "isNear">,
   ) {}
-  async visit(target: DocumentLocation) {
+  async visit(
+    target: DocumentLocation,
+    navigate: (target: DocumentLocation) => Promise<void> = (location) =>
+      this.reader.goTo(location),
+  ) {
     if (this.busy) return;
     this.busy = true;
     const origin = this.origin || structuredClone(this.reader.getLocation());
     try {
-      await this.reader.goTo(target);
+      await navigate(target);
       this.origin = origin;
     } finally {
       this.busy = false;

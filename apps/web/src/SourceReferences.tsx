@@ -22,7 +22,7 @@ export function SourceReferences({
   message: Message;
   toc: TOCItem[];
   adapter?: ReaderAdapter;
-  onNavigate: (location: DocumentLocation) => Promise<void>;
+  onNavigate: (location: DocumentLocation, text: string) => Promise<void>;
 }) {
   const [pending, setPending] = useState<string>();
   const [error, setError] = useState("");
@@ -58,7 +58,7 @@ export function SourceReferences({
         }
         target = matches[0].location;
       }
-      await onNavigate(target);
+      await onNavigate(target, card.text);
       if (serial === request.current) {
         adapter.flashReference?.(target, card.text);
         setCandidates(undefined);
