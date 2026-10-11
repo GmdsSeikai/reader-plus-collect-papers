@@ -1413,13 +1413,15 @@ export function Workspace({
                     <>
                       {!!message.attachments?.length &&
                         imageAttachments(message.attachments)}
-                      <SourceReferences
-                        message={message}
-                        toc={toc}
-                        adapter={adapter}
-                        onNavigate={visitReference}
-                      />
                     </>
+                  )}
+                  references={(message) => (
+                    <SourceReferences
+                      message={message}
+                      toc={toc}
+                      adapter={adapter}
+                      onNavigate={visitReference}
+                    />
                   )}
                 />
                 <div className="chat-compose">
