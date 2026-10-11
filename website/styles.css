@@ -325,33 +325,13 @@ button {
   );
   pointer-events: none;
 }
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--muted);
-  padding: 5px 12px 5px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  backdrop-filter: blur(6px);
-}
-.eyebrow b {
-  font-weight: 500;
-  color: var(--ink);
-  background: var(--bone);
-  border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 12px;
-}
 .hero h1 {
   font-family: var(--serif);
   font-weight: 400;
   font-size: clamp(40px, 7vw, 84px);
   line-height: 1.04;
   letter-spacing: -0.025em;
-  margin: 22px 0 18px;
+  margin: 0 0 18px;
 }
 .hero h1 em {
   font-style: italic;

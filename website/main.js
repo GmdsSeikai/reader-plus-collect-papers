@@ -56,17 +56,14 @@
     );
     document.title = titles[lang];
     $("#lang").textContent = lang === "en" ? "中文" : "EN";
-    store.set("reader-site-lang", lang);
   };
-  $("#lang").addEventListener("click", () =>
-    setLang(root.lang === "en" ? "zh" : "en"),
-  );
-  const savedLang = store.get("reader-site-lang");
-  if (
-    savedLang === "en" ||
-    (!savedLang && !/^zh/i.test(navigator.language || ""))
-  )
-    setLang("en");
+  $("#lang").addEventListener("click", () => {
+    const next = root.lang === "en" ? "zh" : "en";
+    setLang(next);
+    store.set("reader-site-lang-choice", next);
+  });
+  const savedLang = store.get("reader-site-lang-choice");
+  if (savedLang === "en") setLang("en");
 
   /* Nav + reveal */
   const nav = $("#nav");
