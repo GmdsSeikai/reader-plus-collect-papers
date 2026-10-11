@@ -300,7 +300,7 @@ export class PDFBlockOverlay {
       this.referenceFlashId = null;
       this.referenceFlash.remove();
       this.referenceFlashTimer = undefined;
-    }, 2000);
+    }, 1000);
   }
   private paintReferenceFlash() {
     const block = this.blocks.find((b) => b.id === this.referenceFlashId);

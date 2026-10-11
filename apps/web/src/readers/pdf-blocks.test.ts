@@ -36,7 +36,7 @@ it("locates a referenced block by saved selection or source text", () => {
     referenceBlock([textBlock], { type: "pdf", page: 1 }, "A cited result."),
   ).toBeUndefined();
 });
-it("keeps the reference flash for two seconds and restarts it on another jump", () => {
+it("keeps the reference flash for one second and restarts it on another jump", () => {
   vi.useFakeTimers();
   try {
     const host = document.createElement("div");
@@ -49,9 +49,9 @@ it("keeps the reference flash for two seconds and restarts it on another jump", 
     )!;
     expect(flash.style.left).toBe("10%");
     expect(flash.style.height).toBe("40%");
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(500);
     layer.flashBlock(block.id);
-    vi.advanceTimersByTime(1999);
+    vi.advanceTimersByTime(999);
     expect(host.contains(flash)).toBe(true);
     vi.advanceTimersByTime(1);
     expect(host.contains(flash)).toBe(false);
