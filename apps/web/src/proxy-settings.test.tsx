@@ -70,6 +70,7 @@ beforeEach(() => {
   }));
   check.mockResolvedValue({
     connected: true,
+    restartRequired: false,
     route: "proxy",
     status: 403,
     elapsedMs: 18,
@@ -133,10 +134,54 @@ it("shows restart only after successful persistence and never restarts automatic
     host: "127.0.0.1",
     port: 7897,
   });
-  expect(host.textContent).toContain("已保存，重启 Reader 后生效。");
+  expect(host.textContent).toContain("代理配置已变化，重启 Reader 后生效。");
   expect(restart).not.toHaveBeenCalled();
   await click("重启 Reader");
   expect(restart).toHaveBeenCalledOnce();
+});
+
+it("reloads a completed save after closing and reopening settings", async () => {
+  let finish!: () => void;
+  let pendingSave: Promise<ProxySettingsState> | undefined;
+  save.mockImplementationOnce((settings) => {
+    pendingSave = new Promise((resolve) => {
+      finish = () => {
+        state = { settings, restartRequired: true };
+        resolve(state);
+      };
+    });
+    return pendingSave;
+  });
+  // The desktop state getter waits for queued persistence before returning.
+  get.mockImplementation(async () => {
+    await pendingSave;
+    return state;
+  });
+  await render();
+  await type("代理端口", "7897");
+  await click("保存代理设置");
+  await render(false);
+  await render();
+  expect(button("检测连接").disabled).toBe(true);
+  await act(async () => finish());
+  expect(input("代理端口").value).toBe("7897");
+  expect(button("重启 Reader")).toBeDefined();
+});
+
+it("offers restart when the system proxy changed during this run", async () => {
+  state = { settings: { mode: "system" }, restartRequired: false };
+  check.mockResolvedValueOnce({
+    connected: true,
+    restartRequired: true,
+    route: "proxy",
+    status: 200,
+    elapsedMs: 2,
+  });
+  await render();
+  await click("检测连接");
+  expect(host.textContent).toContain("代理配置已变化，重启 Reader 后生效。");
+  expect(button("重启 Reader").disabled).toBe(false);
+  expect(restart).not.toHaveBeenCalled();
 });
 
 it("keeps unsaved fields and allows retry when saving fails", async () => {
@@ -177,7 +222,13 @@ it("prevents concurrent checks and drops results from an earlier settings sessio
   await render(false);
   await render();
   await act(async () =>
-    complete({ connected: true, route: "proxy", status: 200, elapsedMs: 2 }),
+    complete({
+      connected: true,
+      restartRequired: false,
+      route: "proxy",
+      status: 200,
+      elapsedMs: 2,
+    }),
   );
   expect(host.querySelector('[role="status"]')).toBeNull();
 });

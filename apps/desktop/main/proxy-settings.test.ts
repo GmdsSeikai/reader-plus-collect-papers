@@ -65,7 +65,7 @@ it.each(["win32", "darwin"] as const)(
       inherited,
       platform,
     );
-    expect(reopened.state().restartRequired).toBe(false);
+    expect((await reopened.state()).restartRequired).toBe(false);
     expect(reopened.activeEnvironment).toEqual({
       PATH: "/bin",
       HTTP_PROXY: "http://[::1]:7890",
@@ -92,7 +92,7 @@ it("retains the previous state when validation or atomic replacement fails", asy
   expect(await readdir(directory)).toEqual([]);
   await mkdir(join(directory, "proxy-settings.json"));
   await expect(service.save({ mode: "direct" })).rejects.toThrow();
-  expect(service.state().settings).toEqual({ mode: "system" });
+  expect((await service.state()).settings).toEqual({ mode: "system" });
   expect(await readdir(directory)).toEqual(["proxy-settings.json"]);
 });
 
@@ -102,20 +102,63 @@ it("serializes saves and allows saving the active setting to cancel a pending re
     service.save({ mode: "direct" }),
     service.save({ mode: "system" }),
   ]);
-  expect(service.state().restartRequired).toBe(false);
+  expect((await service.state()).restartRequired).toBe(false);
   expect(
     JSON.parse(await readFile(join(directory, "proxy-settings.json"), "utf8")),
   ).toEqual({ mode: "system" });
 });
 
+it("waits for pending saves when another settings session reads state", async () => {
+  const service = await ProxySettingsService.open(directory, {}, "linux");
+  const saving = service.save({
+    mode: "manual",
+    host: "127.0.0.1",
+    port: 7897,
+  });
+  const reading = service.state();
+  const [saved, reopened] = await Promise.all([saving, reading]);
+  expect(reopened).toEqual(saved);
+  expect(reopened.settings).toEqual({
+    mode: "manual",
+    host: "127.0.0.1",
+    port: 7897,
+  });
+  expect(reopened.restartRequired).toBe(true);
+});
+
+it("requires a restart when detection observes a changed system proxy", async () => {
+  const original = { PATH: "/old", NO_PROXY: "localhost" };
+  resolveSystem.mockResolvedValue({ env: original });
+  const service = await ProxySettingsService.open(directory, {}, "darwin");
+  execute.mockResolvedValue({
+    stdout: '{"connected":true,"route":"proxy","status":200,"elapsedMs":1}',
+  });
+  resolveSystem.mockResolvedValue({
+    env: { ...original, HTTPS_PROXY: "http://127.0.0.1:7897" },
+  });
+  const detected = await service.check(
+    { mode: "system" },
+    "https://chatgpt.com",
+    "/probe",
+  );
+  expect(detected.restartRequired).toBe(true);
+  expect((await service.state()).restartRequired).toBe(true);
+  expect(service.activeEnvironment).toEqual(original);
+  resolveSystem.mockResolvedValue({ env: { ...original, PATH: "/new" } });
+  expect(
+    (await service.check({ mode: "system" }, "https://chatgpt.com", "/probe"))
+      .restartRequired,
+  ).toBe(false);
+});
+
 it("falls back from corrupt config and reports system-reading failure inside settings", async () => {
   await writeFile(join(directory, "proxy-settings.json"), "{broken");
   let service = await ProxySettingsService.open(directory, {}, "win32");
-  expect(service.state().warning).toContain("无法读取");
+  expect((await service.state()).warning).toContain("无法读取");
   await service.save({ mode: "system" });
   resolveSystem.mockResolvedValue({ env: {}, warning: "无法读取系统代理" });
   service = await ProxySettingsService.open(directory, {}, "win32");
-  expect(service.state().warning).toBe("无法读取系统代理");
+  expect((await service.state()).warning).toBe("无法读取系统代理");
 });
 
 it.each(["win32", "darwin"] as const)(
@@ -158,7 +201,7 @@ it.each(["win32", "darwin"] as const)(
         }),
       }),
     );
-    expect(service.state().settings).toEqual({ mode: "system" });
+    expect((await service.state()).settings).toEqual({ mode: "system" });
     expect(await readdir(directory)).toEqual([]);
   },
 );

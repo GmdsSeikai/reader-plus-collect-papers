@@ -100,7 +100,13 @@ export function ProxySettings({ open }: { open: boolean }) {
       } else if (operation === "check") {
         setResult(undefined);
         const next = await desktop.checkProxy!(draft, target);
-        if (current === revision.current) setResult(next);
+        if (current === revision.current) {
+          setResult(next);
+          setState(
+            (saved) =>
+              saved && { ...saved, restartRequired: next.restartRequired },
+          );
+        }
       } else await desktop.restart?.();
     } catch (cause) {
       if (current === revision.current) setError((cause as Error).message);
@@ -203,7 +209,7 @@ export function ProxySettings({ open }: { open: boolean }) {
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           {state?.restartRequired
-            ? "已保存，重启 Reader 后生效。"
+            ? "代理配置已变化，重启 Reader 后生效。"
             : "修改后需保存并重启 Reader。"}
         </p>
         {state?.warning && (

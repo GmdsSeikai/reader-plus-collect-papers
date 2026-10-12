@@ -12,6 +12,12 @@ import type {
 import { resolveSystemProxyEnvironment, systemProxyEnvironment } from "./proxy";
 
 const execute = promisify(execFile);
+const proxySignature = (env: NodeJS.ProcessEnv) =>
+  JSON.stringify(
+    Object.entries(env)
+      .filter(([key]) => /^(http|https|all|no)_proxy$/i.test(key))
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
 
 export function validateProxySettings(value: unknown): ProxySettings {
   if (!value || typeof value !== "object") throw new Error("代理设置无效。");
@@ -102,6 +108,7 @@ export class ProxySettingsService {
   private saved: ProxySettings;
   private saving: Promise<unknown> = Promise.resolve();
   private checking = false;
+  private systemRestartRequired = false;
   private probeController?: AbortController;
   private constructor(
     private readonly directory: string,
@@ -146,13 +153,21 @@ export class ProxySettingsService {
     );
   }
 
-  state(): ProxySettingsState {
+  private snapshot(): ProxySettingsState {
     return {
       settings: { ...this.saved },
       restartRequired:
-        JSON.stringify(this.saved) !== JSON.stringify(this.activeSettings),
+        JSON.stringify(this.saved) !== JSON.stringify(this.activeSettings) ||
+        this.systemRestartRequired,
       warning: this.warning,
     };
+  }
+
+  async state(): Promise<ProxySettingsState> {
+    // Reopening settings must observe a pending save, even when the old
+    // renderer has unmounted and discarded its save response.
+    await this.saving.catch(() => {});
+    return this.snapshot();
   }
 
   async save(value: unknown): Promise<ProxySettingsState> {
@@ -175,7 +190,7 @@ export class ProxySettingsService {
         } finally {
           await rm(temporary, { force: true });
         }
-        return this.state();
+        return this.snapshot();
       });
     this.saving = operation;
     return operation;
@@ -192,16 +207,22 @@ export class ProxySettingsService {
     this.checking = true;
     const controller = new AbortController();
     this.probeController = controller;
+    let warning: string | undefined;
     try {
-      const { env, warning } = await resolveProxyEnvironment(
+      const resolved = await resolveProxyEnvironment(
         settings,
         this.inherited,
         this.platform,
       );
+      warning = resolved.warning;
+      if (settings.mode === "system" && this.activeSettings.mode === "system")
+        this.systemRestartRequired =
+          proxySignature(resolved.env) !==
+          proxySignature(this.activeEnvironment);
       // A fresh Go process uses the draft env without changing ongoing API/CLI
       // requests or opening a database. Hide Windows console and bound its life.
       const { stdout } = await execute(binary, ["--probe-url", url], {
-        env,
+        env: resolved.env,
         cwd: this.directory,
         timeout: 15000,
         maxBuffer: 16 * 1024,
@@ -220,13 +241,19 @@ export class ProxySettingsService {
             result.status! > 599))
       )
         throw new Error();
-      return { ...result, warning };
+      return {
+        ...result,
+        warning,
+        restartRequired: this.snapshot().restartRequired,
+      };
     } catch {
       return {
         connected: false,
         route: "direct",
         elapsedMs: 0,
         message: "无法完成连接检测，请重试或重新打开 Reader。",
+        warning,
+        restartRequired: this.snapshot().restartRequired,
       };
     } finally {
       this.checking = false;
