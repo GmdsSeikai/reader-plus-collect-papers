@@ -24,6 +24,7 @@ import { writeClipboardText } from "./clipboard";
 import { childProxyEnvironment } from "./proxy";
 import { startUpdateService } from "./update-service";
 import { devIsolation } from "./dev-isolation";
+import { startDiagnosticService } from "./diagnostic-service";
 const isolation = devIsolation({
   isPackaged: app.isPackaged,
   env: process.env,
@@ -34,6 +35,7 @@ if (isolation.userDataDirectory)
     join(app.getPath("appData"), isolation.userDataDirectory),
   );
 let updateService: Awaited<ReturnType<typeof startUpdateService>> | undefined;
+let diagnostics: ReturnType<typeof startDiagnosticService> | undefined;
 let child: ChildProcess | undefined;
 let serverURL = "";
 let serverToken = "";
@@ -46,13 +48,16 @@ async function startServer() {
   let childEnv = { ...process.env };
   try {
     childEnv = await childProxyEnvironment(process.env);
-  } catch {
+  } catch (error) {
+    diagnostics?.record("proxy.read_failed", error);
     dialog.showErrorBox(
       "无法应用系统代理",
       "无法读取系统代理，或代理地址、自动配置、直连例外规则暂不受支持。本次保留原有网络环境，Agent 连接可能不可用。请检查手动系统代理后重启 Reader。",
     );
   }
   serverToken = randomBytes(32).toString("hex");
+  diagnostics?.logs.secrets.push(serverToken);
+  diagnostics?.record("server.start_requested");
   const binary = app.isPackaged
     ? join(
         process.resourcesPath,
@@ -82,6 +87,10 @@ async function startServer() {
     [
       "--port",
       "0",
+      "--logs",
+      diagnostics!.directory,
+      "--session",
+      diagnostics!.logs.sessionId,
       "--data",
       join(app.getPath("userData"), "library"),
       "--web",
@@ -101,25 +110,43 @@ async function startServer() {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  child.stderr?.on("data", (data) => process.stderr.write(data));
+  const stderrLines = createInterface({ input: child.stderr! });
+  stderrLines.on("line", (line) =>
+    diagnostics?.logs.record("server-stderr", {
+      level: "error",
+      event: "server.stderr",
+      detail: line.slice(0, 16000),
+    }),
+  );
+  child.once("close", () => stderrLines.close());
   return new Promise<string>((accept, reject) => {
     const timer = setTimeout(() => {
       child?.kill();
       reject(new Error("本地服务启动超时"));
     }, 20000);
     child!.once("error", (err) => {
+      diagnostics?.record("server.spawn_failed", err);
       clearTimeout(timer);
       reject(err);
     });
     child!.once("exit", (code) => {
+      diagnostics?.logs.record("desktop", {
+        level: quitting ? "info" : "error",
+        event: "server.exited",
+        exitCode: code,
+      });
       clearTimeout(timer);
       reject(new Error(`本地服务已退出 (${code})`));
       if (window && !quitting) {
-        dialog.showErrorBox(
-          "Reader 本地服务已停止",
-          "请重新打开 Reader。已保存的文档和笔记仍保留在本地。",
-        );
-        app.quit();
+        void diagnostics!
+          .failure(
+            "Reader 本地服务已停止",
+            "已保存的文档和笔记仍保留在本地。可先导出诊断包，再重新打开 Reader。",
+          )
+          .then(() => {
+            flushed = true;
+            app.quit();
+          });
       }
     });
     const lines = createInterface({ input: child!.stdout! });
@@ -127,6 +154,7 @@ async function startServer() {
       try {
         const ready = JSON.parse(line);
         serverURL = ready.url;
+        diagnostics?.record("server.ready");
         clearTimeout(timer);
         lines.close();
         accept(serverURL);
@@ -222,6 +250,16 @@ app
   .whenReady()
   .then(async () => {
     if (!primary) return;
+    diagnostics = startDiagnosticService(() => window);
+    ipcMain.on("reader:diagnostic-event", (event, value) =>
+      diagnostics!.receive(event, value),
+    );
+    ipcMain.on("reader:diagnostic-settings", (event, value) =>
+      diagnostics!.receiveSettings(event, value),
+    );
+    ipcMain.handle("reader:export-diagnostics", (event) =>
+      diagnostics!.invoke(event),
+    );
     // Development runs need the entry script registered beside Electron.
     if (isolation.registerProtocol) {
       if (process.defaultApp && process.argv.length >= 2)
@@ -253,6 +291,7 @@ app
     })
       .then((r) => (r.ok ? r.json() : {}))
       .catch(() => ({}));
+    diagnostics.setSettings(preferences);
     const appearance =
       typeof preferences === "object" &&
       preferences !== null &&
@@ -285,6 +324,28 @@ app
         sandbox: true,
       },
     });
+    window.webContents.on("render-process-gone", (_event, details) => {
+      diagnostics!.logs.record("desktop", {
+        level: "error",
+        event: "renderer.exited",
+        reason: details.reason,
+        exitCode: details.exitCode,
+      });
+      if (!quitting)
+        void diagnostics!
+          .failure("Reader 界面已停止", "可先导出诊断包，再重新打开 Reader。")
+          .then(() => {
+            flushed = true;
+            app.quit();
+          });
+    });
+    window.webContents.on("did-fail-load", (_event, code) =>
+      diagnostics?.logs.record("desktop", {
+        level: "error",
+        event: "renderer.load_failed",
+        code,
+      }),
+    );
     window.on("close", (event) => {
       if (flushed) return;
       event.preventDefault();
@@ -306,6 +367,7 @@ app
         clearTimeout(timer);
         ipcMain.removeListener("reader:flushed", handler);
         if (error) {
+          diagnostics?.record("reading.flush_failed", new Error(error));
           const result = await dialog.showMessageBox(window!, {
             type: "warning",
             message: "阅读数据尚未保存",
@@ -487,8 +549,15 @@ app
       return updateService?.check();
     });
   })
-  .catch((error) => {
-    dialog.showErrorBox("无法打开 Reader", String(error));
+  .catch(async (error) => {
+    diagnostics?.record("desktop.start_failed", error);
+    if (diagnostics)
+      await diagnostics.failure(
+        "无法打开 Reader",
+        "可导出启动日志供开发者排查，然后退出重试。",
+      );
+    else dialog.showErrorBox("无法打开 Reader", String(error));
+    flushed = true;
     app.quit();
   });
 app.on("before-quit", (event) => {
@@ -498,6 +567,7 @@ app.on("before-quit", (event) => {
     return;
   }
   quitting = true;
+  diagnostics?.record("desktop.stopping");
   updateService?.stop();
   child?.kill();
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
+  FileText,
   Bot,
   Check,
   CircleCheck,
@@ -13,6 +14,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { DiagnosticExport } from "./DiagnosticExport";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
@@ -510,11 +512,29 @@ export function Settings({
               <Highlighter />
               阅读
             </TabsTrigger>
+            <TabsTrigger value="diagnostics">
+              <FileText />
+              诊断
+            </TabsTrigger>
             <TabsTrigger value="papers">
               <Library />
               论文库
             </TabsTrigger>
           </TabsList>
+          <TabsContent
+            value="diagnostics"
+            className="settings-panel"
+            keepMounted
+          >
+            <section>
+              <h3 className="mb-3 text-sm font-medium">本地日志</h3>
+              <p className="mb-4 text-xs leading-5 text-muted-foreground">
+                导出全部已保留日志和运行环境供开发者排查。凭据、用户路径和翻译诊断中的正文会脱敏；不包含文档、聊天或批注。日志最多保留
+                7 天、100 MiB，仅在本机保存。
+              </p>
+              <DiagnosticExport />
+            </section>
+          </TabsContent>
           <TabsContent value="display" className="settings-panel" keepMounted>
             <section className="mb-6">
               <h3
