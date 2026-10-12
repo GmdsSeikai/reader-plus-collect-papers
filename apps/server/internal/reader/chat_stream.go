@@ -64,22 +64,29 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		_ = controller.SetWriteDeadline(time.Time{})
 	}()
 	started := time.Now()
-	requestID := id()
+	requestID := requestID(ctx)
+	if requestID == "" {
+		requestID = id()
+	}
 	var firstText time.Time
 	var finalErr error
 	out := &chatStreamWriter{w: w, cancel: cancel}
 	defer func() {
-		attrs := []any{"request", requestID, "duration_ms", time.Since(started).Milliseconds()}
+		attrs := []any{"requestId", requestID, "durationMs", time.Since(started).Milliseconds()}
 		if !firstText.IsZero() {
-			attrs = append(attrs, "first_text_ms", firstText.Sub(started).Milliseconds())
+			attrs = append(attrs, "firstTextMs", firstText.Sub(started).Milliseconds())
 		}
 		if !out.firstFlush.IsZero() {
-			attrs = append(attrs, "first_flush_ms", out.firstFlush.Sub(started).Milliseconds())
+			attrs = append(attrs, "firstFlushMs", out.firstFlush.Sub(started).Milliseconds())
 		}
 		if finalErr != nil {
-			attrs = append(attrs, "error_kind", errorKind(finalErr))
+			attrs = append(attrs, "errorCode", errorKind(finalErr))
 		}
-		slog.Info("chat generation finished", attrs...)
+		level := slog.LevelInfo
+		if finalErr != nil {
+			level = slog.LevelError
+		}
+		slog.Log(ctx, level, "chat.finish", attrs...)
 	}()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

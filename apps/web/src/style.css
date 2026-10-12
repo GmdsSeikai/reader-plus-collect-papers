@@ -2571,6 +2571,83 @@ body[data-resizing] * {
   gap: 12px;
   min-width: 0;
 }
+.paper-table-title-stack {
+  min-width: 0;
+  overflow: hidden;
+}
+.journal-rank-badges {
+  position: relative;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 1px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+.journal-rank-badge {
+  flex: none;
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 2px 6px;
+  background: color-mix(in oklch, var(--muted-foreground) 12%, transparent);
+  color: var(--foreground);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.journal-rank-badge[data-tone="high"] {
+  background: color-mix(in oklch, #b254d8 24%, var(--background));
+  color: #762994;
+}
+.journal-rank-badge[data-hidden="true"] {
+  visibility: hidden;
+}
+.journal-rank-badge[data-tone="mid"] {
+  background: color-mix(in oklch, #8d6ad2 22%, var(--background));
+  color: #60419c;
+}
+.journal-rank-badge[data-tone="low"] {
+  background: color-mix(in oklch, #54a96a 22%, var(--background));
+  color: #2c7040;
+}
+.journal-rank-badge[data-tone="basic"] {
+  background: color-mix(in oklch, #cd7d5c 22%, var(--background));
+  color: #905038;
+}
+.journal-rank-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--destructive);
+}
+.journal-rank-refresh {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--background);
+  opacity: 0;
+}
+.journal-rank-badges:hover .journal-rank-refresh,
+.journal-rank-refresh:focus-visible {
+  opacity: 1;
+}
+.dark .journal-rank-badge[data-tone="high"] {
+  color: #e6afea;
+}
+.dark .journal-rank-badge[data-tone="mid"] {
+  color: #c5b3ed;
+}
+.dark .journal-rank-badge[data-tone="low"] {
+  color: #a6d9af;
+}
+.dark .journal-rank-badge[data-tone="basic"] {
+  color: #e5b29c;
+}
 .paper-table-title-content > .paper-row-title {
   flex: 1;
   min-width: 0;

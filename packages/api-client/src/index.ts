@@ -1,3 +1,9 @@
+import { diagnosticFetch, reportDiagnostic } from "./diagnostics";
+import {
+  diagnosticError,
+  diagnosticRoute,
+} from "../../reader-core/src/diagnostics";
+export { setDiagnosticReporter, reportDiagnostic } from "./diagnostics";
 import {
   consumeTranslationStream,
   type TranslationEvent,
@@ -28,6 +34,8 @@ import type {
   PaperMetadata,
   PaperMetadataField,
   ReadingStatus,
+  JournalRankConfig,
+  JournalRankResult,
 } from "@reader/core";
 let sessionToken = "";
 export function configureAPI(token: string) {
@@ -46,7 +54,33 @@ export const client = createClient<paths>();
 client.use({
   onRequest({ request }) {
     request.headers.set("Authorization", `Bearer ${sessionToken}`);
+    reportDiagnostic({
+      level: "info",
+      event: "api.start",
+      route: diagnosticRoute(new URL(request.url).pathname),
+      method: request.method,
+    });
     return request;
+  },
+  onResponse({ request, response }) {
+    reportDiagnostic({
+      level: response.ok ? "info" : "error",
+      event: "api.finish",
+      route: diagnosticRoute(new URL(request.url).pathname),
+      method: request.method,
+      status: response.status,
+      requestId: response.headers.get("X-Reader-Request-ID") || undefined,
+    });
+    return response;
+  },
+  onError({ request, error }) {
+    reportDiagnostic({
+      level: "error",
+      event: "api.failed",
+      route: diagnosticRoute(new URL(request.url).pathname),
+      method: request.method,
+    });
+    return;
   },
 });
 /** A failed request; `code` and `pages` identify a long paper to confirm. */
@@ -60,7 +94,7 @@ export class RequestError extends Error {
   }
 }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await diagnosticFetch(path, {
     ...init,
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -100,6 +134,22 @@ function annotationRequest<T>(path: string, init: RequestInit): Promise<T> {
 export type ZoteroScan = components["schemas"]["ZoteroScan"];
 export type ZoteroImportResult = components["schemas"]["ZoteroImportResult"];
 export const api = {
+  journalRankConfig: () =>
+    request<JournalRankConfig>("/api/journal-ranks/config"),
+  saveJournalRankConfig: (config: {
+    enabled: boolean;
+    filterMode: JournalRankConfig["filterMode"];
+    selected: string[];
+    key?: string;
+  }) =>
+    request<JournalRankConfig>("/api/journal-ranks/config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+  documentJournalRank: (id: string, refresh = false) =>
+    request<JournalRankResult>(
+      `/api/documents/${encodeURIComponent(id)}/journal-rank${refresh ? "?refresh=1" : ""}`,
+    ),
   connectorStatus: () =>
     request<
       paths["/api/connector/status"]["get"]["responses"][200]["content"]["application/json"]
@@ -149,7 +199,7 @@ export const api = {
     signal: AbortSignal,
     onEvent: (event: TranslationEvent) => void,
   ) => {
-    const response = await fetch(
+    const response = await diagnosticFetch(
       `/api/documents/${encodeURIComponent(id)}/translations/stream`,
       {
         headers: {
@@ -450,7 +500,7 @@ export async function chat(
   onFallback?: (message: string) => void,
   onEvent?: (event: ChatStreamEvent) => void,
 ) {
-  const response = await fetch(`/api/documents/${id}/chat`, {
+  const response = await diagnosticFetch(`/api/documents/${id}/chat`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -470,9 +520,24 @@ export async function chat(
     throw new Error(data.error || `AI 请求失败 (${response.status})`);
   }
   if (!response.body) throw new Error("没有收到 AI 输出");
-  await consumeChatStream(response.body, signal, (event) => {
-    onEvent?.(event);
-    if (event.event === "delta") onDelta(event.data.text);
-    if (event.event === "fallback") onFallback?.(event.data.message);
-  });
+  try {
+    await consumeChatStream(response.body, signal, (event) => {
+      onEvent?.(event);
+      if (event.event === "delta") onDelta(event.data.text);
+      if (event.event === "fallback") onFallback?.(event.data.message);
+    });
+    reportDiagnostic({
+      level: "info",
+      event: "chat.stream_finish",
+      requestId: response.headers.get("X-Reader-Request-ID") || undefined,
+    });
+  } catch (error) {
+    reportDiagnostic({
+      level: signal.aborted ? "info" : "error",
+      event: signal.aborted ? "chat.stream_cancelled" : "chat.stream_failed",
+      requestId: response.headers.get("X-Reader-Request-ID") || undefined,
+      ...diagnosticError(error),
+    });
+    throw error;
+  }
 }

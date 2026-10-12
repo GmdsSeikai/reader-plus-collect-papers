@@ -2,7 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AIConfig, AgentModel } from "@reader/core";
+import type { AIConfig, AgentModel, ProxySettingsState } from "@reader/core";
 import { api } from "@reader/api";
 import { toast } from "sonner";
 import { Settings } from "./Settings";
@@ -11,6 +11,12 @@ import { useReaderStore } from "./store";
 vi.mock("@reader/api", () => ({
   api: {
     connectorStatus: vi.fn(async () => ({ available: true })),
+    journalRankConfig: vi.fn(async () => ({
+      enabled: true,
+      hasKey: false,
+      selected: [],
+      available: [],
+    })),
     providers: vi.fn(),
     aiConfig: vi.fn(),
     saveAIConfig: vi.fn(),
@@ -126,7 +132,48 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete window.readerDesktop;
   vi.unstubAllGlobals();
+});
+
+it("groups proxy settings and log export under diagnostics without a network tab", async () => {
+  const exportLogs = vi.fn(async () => true);
+  window.readerDesktop = {
+    platform: "darwin",
+    proxySettings: vi.fn(async (): Promise<ProxySettingsState> => ({
+      settings: { mode: "manual", host: "127.0.0.1", port: 7890 },
+      restartRequired: false,
+    })),
+    saveProxySettings: vi.fn(),
+    checkProxy: vi.fn(),
+    restart: vi.fn(),
+    exportDiagnostics: exportLogs,
+    checkForUpdates: vi.fn(),
+    writeClipboardText: vi.fn(),
+    setAppearance: vi.fn(),
+    importFiles: vi.fn(),
+    importLargePapers: vi.fn(),
+    showDocumentFile: vi.fn(),
+    openDocumentFile: vi.fn(),
+    openExternal: vi.fn(),
+    onBeforeClose: vi.fn(),
+    onLibraryChanged: vi.fn(),
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const tabs = Array.from(
+    host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  );
+  expect(tabs.map((tab) => tab.textContent)).not.toContain("网络");
+  const diagnostics = tabs.find((tab) => tab.textContent === "诊断")!;
+  await act(async () => diagnostics.click());
+  const panel = input("代理地址").closest('[role="tabpanel"]')!;
+  expect(panel.getAttribute("aria-labelledby")).toBe(diagnostics.id);
+  expect(panel.textContent).toContain("chatgpt.com/robots.txt");
+  const exportButton = Array.from(
+    panel.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((button) => button.textContent === "导出全部日志")!;
+  await act(async () => exportButton.click());
+  expect(exportLogs).toHaveBeenCalledOnce();
 });
 it("saves the API endpoint and key, then tests the new connection", async () => {
   await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
@@ -152,6 +199,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   for (const model of ["deepseek-flash", "deepseek-v4-pro"])
     for (const stage of ["text", "vision"])
       expect(api.testAI).toHaveBeenCalledWith("api", stage, model);
+  expect(api.testAI).toHaveBeenCalledTimes(4);
   expect(
     host.querySelectorAll('.api-model-list [aria-label="图片理解：已通过"]'),
   ).toHaveLength(1);
@@ -168,7 +216,18 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   const card = host.querySelector('[aria-label="配置 API Key"]')!;
   expect(card.querySelector('[aria-label="文本推理：已通过"]')).not.toBeNull();
   expect(card.querySelector('[aria-label="图片理解：已通过"]')).not.toBeNull();
+});
+it("keeps the saved key when changing only the API endpoint and rechecks models", async () => {
+  config.api = { url: "https://api.deepseek.com", model: "", hasKey: true };
+  config.capabilities = {
+    "api:deepseek-flash": { text: true, vision: true, checkedAt: "saved" },
+    "api:deepseek-v4-pro": { text: true, vision: false, checkedAt: "saved" },
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
   await openAPI();
+  expect(input("API Key").value).toBe("");
+  expect(input("API Key").placeholder).toBe("已保存，留空保持不变");
+  expect(api.testAI).not.toHaveBeenCalled();
   // Editing only the address keeps the saved key without resending it.
   await type("API 地址", "https://api.deepseek.com/v1");
   await submit();
@@ -182,7 +241,18 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
       },
     }),
   );
-  expect(api.testAI).toHaveBeenCalledTimes(8);
+  for (const model of ["deepseek-flash", "deepseek-v4-pro"])
+    for (const stage of ["text", "vision"])
+      expect(api.testAI).toHaveBeenCalledWith("api", stage, model);
+  expect(api.testAI).toHaveBeenCalledTimes(4);
+  expect(config.api).toEqual({
+    url: "https://api.deepseek.com/v1",
+    model: "",
+    hasKey: true,
+  });
+  expect(
+    host.querySelectorAll('.api-model-list [aria-label="图片理解：已通过"]'),
+  ).toHaveLength(1);
 });
 it("warns when no listed model passes the vision check", async () => {
   config.api = { url: "https://api.example.com", model: "", hasKey: true };

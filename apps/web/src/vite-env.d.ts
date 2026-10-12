@@ -3,6 +3,11 @@
 interface Window {
   readerDesktop?: {
     platform: string;
+    exportDiagnostics?: () => Promise<boolean>;
+    recordDiagnostic?: (
+      event: import("../../../packages/reader-core/src/diagnostics").DiagnosticEvent,
+    ) => void;
+    diagnosticSettings?: (settings: unknown) => void;
     checkForUpdates: () => Promise<void>;
     proxySettings?: () => Promise<import("@reader/core").ProxySettingsState>;
     saveProxySettings?: (

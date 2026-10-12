@@ -16,6 +16,11 @@ async function proxyRequest(channel: string, ...args: unknown[]) {
 }
 contextBridge.exposeInMainWorld("readerDesktop", {
   platform: process.platform,
+  exportDiagnostics: () => ipcRenderer.invoke("reader:export-diagnostics"),
+  recordDiagnostic: (event: unknown) =>
+    ipcRenderer.send("reader:diagnostic-event", event),
+  diagnosticSettings: (settings: unknown) =>
+    ipcRenderer.send("reader:diagnostic-settings", settings),
   checkForUpdates: () => ipcRenderer.invoke("reader:check-updates"),
   proxySettings: () => proxyRequest("reader:proxy-settings"),
   saveProxySettings: (settings: ProxySettings) =>
