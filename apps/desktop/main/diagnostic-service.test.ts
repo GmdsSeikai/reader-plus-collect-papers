@@ -95,6 +95,22 @@ it("keeps native export usable after failure and rejects events from other frame
     expect(mocks.message).toHaveBeenCalledWith(
       expect.objectContaining({ message: "无法导出诊断包" }),
     );
+    const before = recorded.mock.calls.length;
+    Object.defineProperty(webContents, "mainFrame", {
+      get: () => {
+        throw new Error("Frame disposed");
+      },
+    });
+    expect(() =>
+      service.receive(
+        {
+          sender: webContents,
+          senderFrame: mainFrame,
+        } as Electron.IpcMainEvent,
+        input,
+      ),
+    ).not.toThrow();
+    expect(recorded.mock.calls.length).toBe(before);
   } finally {
     console.warn = originalWarn;
     console.error = originalError;

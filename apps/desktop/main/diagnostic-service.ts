@@ -175,6 +175,20 @@ export function startDiagnosticService(
     };
   }
   record("desktop.start");
+  const validSender = (event: IpcMainEvent | IpcMainInvokeEvent) => {
+    try {
+      const window = getWindow();
+      return (
+        !!window &&
+        !window.isDestroyed() &&
+        !!event.senderFrame &&
+        event.sender === window.webContents &&
+        event.senderFrame === window.webContents.mainFrame
+      );
+    } catch {
+      return false;
+    } // A frame can be disposed between IPC delivery and this check.
+  };
   return {
     logs,
     directory,
@@ -184,31 +198,16 @@ export function startDiagnosticService(
       settings = diagnosticSettings(value);
     },
     receive(event: IpcMainEvent, value: unknown) {
-      const window = getWindow();
-      if (
-        event.sender !== window?.webContents ||
-        event.senderFrame !== window.webContents.mainFrame
-      )
-        return;
+      if (!validSender(event)) return;
       const input = validateDiagnosticEvent(value);
       if (input) logs.record("renderer", input);
     },
     receiveSettings(event: IpcMainEvent, value: unknown) {
-      const window = getWindow();
-      if (
-        event.sender !== window?.webContents ||
-        event.senderFrame !== window.webContents.mainFrame
-      )
-        return;
+      if (!validSender(event)) return;
       settings = diagnosticSettings(value);
     },
     invoke(event: IpcMainInvokeEvent) {
-      const window = getWindow();
-      if (
-        event.sender !== window?.webContents ||
-        event.senderFrame !== window.webContents.mainFrame
-      )
-        throw new Error("Invalid sender");
+      if (!validSender(event)) throw new Error("Invalid sender");
       return exportBundle();
     },
     failure(message: string, detail: string) {
