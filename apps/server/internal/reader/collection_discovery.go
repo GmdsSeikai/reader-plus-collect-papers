@@ -66,14 +66,28 @@ type DateWindow struct {
 func (w DateWindow) Range() scholar.DateRange { return scholar.DateRange{From: w.From, To: w.To} }
 
 // PlanWindows computes the two channels from the run's fixed clock. The hot
-// window clamps month ends (e.g. Mar 31 minus one month lands on Feb 28).
+// window subtracts whole calendar months and clamps the day to the target
+// month end (Mar 31 minus one month is Feb 28/29, never Mar 03).
 func PlanWindows(now time.Time, latestDays, hotMonths int) (DateWindow, DateWindow) {
 	now = now.UTC()
 	latest := DateWindow{From: now.AddDate(0, 0, -latestDays), To: now}
-	hotFrom := now.AddDate(0, -hotMonths, 0)
-	// AddDate already clamps month-end overflow (day 31 → month end).
-	hot := DateWindow{From: hotFrom, To: now}
+	hot := DateWindow{From: subCalendarMonths(now, hotMonths), To: now}
 	return latest, hot
+}
+
+// subCalendarMonths returns t moved back months calendar months, keeping the
+// UTC clock time and clamping the day to the target month's last day.
+func subCalendarMonths(t time.Time, months int) time.Time {
+	year, month, day := t.Date()
+	// Months-since-epoch arithmetic avoids negative-division pitfalls.
+	abs := year*12 + int(month) - 1 - months
+	year = abs / 12
+	month = time.Month(abs%12 + 1)
+	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if day > lastDay {
+		day = lastDay
+	}
+	return time.Date(year, month, day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
 }
 
 // SlicePlan is one coverage unit to scan. P1 uses one slice per branch and

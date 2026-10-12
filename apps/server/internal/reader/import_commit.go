@@ -129,17 +129,22 @@ func importTargetRel(docID, filename string) string {
 // installImportFile moves the staged file to its library path and commits the
 // caller's rows plus the log's committed stage in one transaction. On any
 // failure the staged file is kept for retry and the log row stays open
-// (prepared/installed) for startup reconciliation.
+// (prepared/installed) for startup reconciliation. A destination that already
+// existed and matched the digest is reused, never deleted by failure cleanup,
+// and out-of-transaction log writes happen only after the transaction has
+// fully released the single store connection.
 func (s *Server) installImportFile(ctx context.Context, spec importInstall, commit func(tx *sql.Tx) (Document, error)) (Document, error) {
 	commitID, err := s.Store.beginImportCommit(spec)
 	if err != nil {
 		return Document{}, err
 	}
 	dest := filepath.Join(s.Store.Root, filepath.FromSlash(importTargetRel(spec.DocID, spec.Filename)))
+	installedByUs := false
 	if st, statErr := os.Stat(dest); statErr == nil {
 		// A crash may have installed the file already. Only a verified digest
 		// match may continue; anything else keeps the row open for
-		// reconciliation and refuses to overwrite.
+		// reconciliation and refuses to overwrite. Reused files are never
+		// removed by this request.
 		_, full, _, hashErr := hashImportFile(dest)
 		if hashErr != nil || !strings.EqualFold(full, spec.FullSHA) || st.Size() != spec.Size {
 			_ = s.Store.markImportCommit(commitID, importStagePrepared, "", "目标已存在未登记文件")
@@ -148,19 +153,24 @@ func (s *Server) installImportFile(ctx context.Context, spec importInstall, comm
 	} else if err := os.Rename(spec.Temp, dest); err != nil {
 		_ = s.Store.markImportCommit(commitID, importStagePrepared, "", err.Error())
 		return Document{}, fmt.Errorf("无法保存原文件")
+	} else {
+		installedByUs = true
 	}
 	if err := s.Store.markImportCommit(commitID, importStageInstalled, "", ""); err != nil {
-		_ = os.Remove(dest)
+		if installedByUs {
+			_ = os.Remove(dest)
+		}
 		_ = s.Store.markImportCommit(commitID, importStagePrepared, "", err.Error())
 		return Document{}, fmt.Errorf("无法登记安装结果")
 	}
 	tx, err := s.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
-		_ = os.Remove(dest)
+		if installedByUs {
+			_ = os.Remove(dest)
+		}
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", err.Error())
 		return Document{}, fmt.Errorf("无法写入书库")
 	}
-	defer tx.Rollback()
 	d, err := commit(tx)
 	if err == nil {
 		err = markImportCommitTx(tx, commitID, importStageCommitted, d.ID)
@@ -169,7 +179,12 @@ func (s *Server) installImportFile(ctx context.Context, spec importInstall, comm
 		err = tx.Commit()
 	}
 	if err != nil {
-		_ = os.Remove(dest)
+		// Release the single connection before any non-transactional write;
+		// otherwise the log update deadlocks waiting for this very transaction.
+		_ = tx.Rollback()
+		if installedByUs {
+			_ = os.Remove(dest)
+		}
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", err.Error())
 		return Document{}, fmt.Errorf("书库保存失败")
 	}

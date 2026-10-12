@@ -69,20 +69,22 @@ func main() {
 	}
 	// Background workers use their own context so a cancelled drain can rebuild
 	// them without cancelling in-flight HTTP (the drain status API must work
-	// while workers stop).
+	// while workers stop). The drain owner covers processing AND collection.
 	var bgMu sync.Mutex
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	stopProcessing := server.StartProcessing(workerCtx)
-	// The drain owner stops background work before writes may finish, and a
-	// cancelled exit rebuilds scheduling on a fresh context.
+	stopCollection := server.Collection().StartCollection(workerCtx)
 	server.SetDrainHooks(func() <-chan struct{} {
 		done := make(chan struct{})
 		go func() {
 			bgMu.Lock()
-			cancel, stop := cancelWorkers, stopProcessing
+			cancel, stopP, stopC := cancelWorkers, stopProcessing, stopCollection
 			bgMu.Unlock()
 			cancel()
-			stop()
+			// Processing and collection share the cancelled context; each
+			// stop waits for its own owned work to unwind.
+			stopC()
+			stopP()
 			close(done)
 		}()
 		return done
@@ -91,13 +93,15 @@ func main() {
 		defer bgMu.Unlock()
 		workerCtx, cancelWorkers = context.WithCancel(context.Background())
 		stopProcessing = server.StartProcessing(workerCtx)
+		stopCollection = server.Collection().StartCollection(workerCtx)
 	})
 	defer func() {
 		bgMu.Lock()
-		cancel, stop := cancelWorkers, stopProcessing
+		cancel, stopP, stopC := cancelWorkers, stopProcessing, stopCollection
 		bgMu.Unlock()
 		cancel()
-		stop()
+		stopC()
+		stopP()
 	}()
 	httpServer := &http.Server{Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	ready, _ := json.Marshal(map[string]string{"url": "http://" + listener.Addr().String(), "token": token})
@@ -109,10 +113,11 @@ func main() {
 		// Once the process decides to exit, a drain cannot be cancelled.
 		server.MarkClosing()
 		bgMu.Lock()
-		cancel, bgStop := cancelWorkers, stopProcessing
+		cancel, bgStopP, bgStopC := cancelWorkers, stopProcessing, stopCollection
 		bgMu.Unlock()
 		cancel()
-		bgStop()
+		bgStopC()
+		bgStopP()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(ctx)

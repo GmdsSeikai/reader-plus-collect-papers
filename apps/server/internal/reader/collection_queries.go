@@ -2,9 +2,11 @@ package reader
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -93,15 +95,24 @@ func (s *Store) UpsertSlice(tx *sql.Tx, sl CollectionSlice, runID string, revisi
 }
 
 // CommitScanPage saves one discovered page: candidates, matches and the slice
-// checkpoint advance in the same transaction. Nothing outside this function
-// may advance a checkpoint. A stale exec token rejects the whole page.
+// checkpoint advance in the same transaction. runToken is the token captured
+// when the request was sent, never a refreshed one; the transaction re-checks
+// the run is still open at the same token and the task revision is current.
 func (s *Store) CommitScanPage(tx *sql.Tx, sl CollectionSlice, revision int, runToken int64, runID string, candidates []CollectionCandidate, matches []CollectionMatch) error {
 	var token int64
-	if err := tx.QueryRow("SELECT exec_token FROM collection_runs WHERE run_id=?", runID).Scan(&token); err != nil {
+	var status string
+	if err := tx.QueryRow("SELECT exec_token,status FROM collection_runs WHERE run_id=?", runID).Scan(&token, &status); err != nil {
 		return err
 	}
-	if token != runToken {
+	if token != runToken || (status != runRunning && status != runQueued) {
 		return errors.New("运行已被取消或替换，响应不再有效")
+	}
+	var currentRevision int
+	if err := tx.QueryRow("SELECT query_revision FROM collection_tasks WHERE task_id=?", sl.TaskID).Scan(&currentRevision); err != nil {
+		return err
+	}
+	if currentRevision != revision {
+		return errors.New("任务已修改，响应不再有效")
 	}
 	for _, c := range candidates {
 		if err := s.UpsertCandidate(tx, c); err != nil {
@@ -124,16 +135,59 @@ type CandidateFilter struct {
 	CursorID   string
 	CursorNum  int
 	TaskID     string
+	Channel    string
+	Since      string
 	Search     string
 	Citation   string
 	Sort       string
+	TaskRev    int
 	Limit      int
 	Ignored    *bool
 }
 
-// CollectionCandidates returns one keyset page of candidates with the caller's
-// best effective score. Sorting uses the stable arXiv ID as tie-breaker.
-func (s *Store) CollectionCandidates(f CandidateFilter) ([]CollectionCandidate, []int, string, error) {
+// CandidatePage is one keyset page. Score is the effective relevance; SortKey
+// is the value the caller's sort actually ordered by, used for the cursor.
+type CandidatePage struct {
+	Items      []CollectionCandidate
+	Scores     []int
+	SortKeys   []int
+	NextCursor string
+}
+
+// encodeCursor binds the cursor to the sort mode, channel, task revision and
+// the real sort-key value so it cannot be replayed under other filters.
+func encodeCursor(sort, channel string, taskRev, key int, date, id string) string {
+	raw := fmt.Sprintf("%s|%s|%d|%d|%s|%s", sort, channel, taskRev, key, date, id)
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// DecodeCursor validates a cursor against the active filter identity.
+func DecodeCursor(cursor, sort, channel string, taskRev int) (key int, date, id string, err error) {
+	raw, decErr := base64.RawURLEncoding.DecodeString(cursor)
+	if decErr != nil {
+		return 0, "", "", errors.New("无效的游标")
+	}
+	parts := strings.SplitN(string(raw), "|", 6)
+	if len(parts) != 6 || parts[0] != sort || parts[1] != channel {
+		return 0, "", "", errors.New("无效的游标")
+	}
+	rev, err := strconv.Atoi(parts[2])
+	if err != nil || rev != taskRev {
+		return 0, "", "", errors.New("无效的游标")
+	}
+	key, err = strconv.Atoi(parts[3])
+	if err != nil {
+		return 0, "", "", errors.New("无效的游标")
+	}
+	return key, parts[4], parts[5], nil
+}
+
+// CollectionCandidates returns one keyset page of candidates. The task filter
+// uses EXISTS on the task's current revision so one paper appears once; the
+// channel filter limits to matches found on that window. Sorting by citations
+// orders known counts first; the cursor carries the real sort key.
+func (s *Store) CollectionCandidates(f CandidateFilter) (CandidatePage, error) {
+	page := CandidatePage{Items: []CollectionCandidate{}, Scores: []int{}, SortKeys: []int{}}
 	if f.Limit < 1 || f.Limit > 200 {
 		f.Limit = 50
 	}
@@ -141,11 +195,26 @@ func (s *Store) CollectionCandidates(f CandidateFilter) ([]CollectionCandidate, 
 		f.Sort = "date"
 	}
 	args := []any{}
-	join := "FROM collection_candidates c"
 	where := []string{"1=1"}
+	// Current-revision relationship: one row per candidate regardless of how
+	// many branches or channels found it.
+	rel := "SELECT 1 FROM collection_matches m WHERE m.arxiv_id=c.arxiv_id"
 	if f.TaskID != "" {
-		join += " JOIN collection_matches m ON m.arxiv_id=c.arxiv_id AND m.task_id=?"
-		args = append(args, f.TaskID)
+		rel += " AND m.task_id=? AND m.query_revision=(SELECT query_revision FROM collection_tasks WHERE task_id=?)"
+		args = append(args, f.TaskID, f.TaskID)
+	} else {
+		rel += " AND m.query_revision=(SELECT t.query_revision FROM collection_tasks t WHERE t.task_id=m.task_id)"
+	}
+	if f.Channel != "" {
+		rel += " AND m.channel=?"
+		args = append(args, f.Channel)
+	}
+	if f.TaskID != "" || f.Channel != "" {
+		where = append(where, "EXISTS("+rel+")")
+	}
+	if f.Since != "" {
+		where = append(where, "c.published_at>=?")
+		args = append(args, f.Since)
 	}
 	if f.Ignored != nil {
 		where = append(where, "c.ignored=?")
@@ -164,19 +233,24 @@ func (s *Store) CollectionCandidates(f CandidateFilter) ([]CollectionCandidate, 
 	scoreCol := "(SELECT MAX(COALESCE(m2.ai_score,m2.rule_score)) FROM collection_matches m2 WHERE m2.arxiv_id=c.arxiv_id)"
 	citCol := "(SELECT citation_count FROM collection_citations x WHERE x.arxiv_id=c.arxiv_id)"
 	order := "c.published_at DESC, c.arxiv_id DESC"
+	keyExpr := "0"
 	keyCol := "c.published_at"
 	switch f.Sort {
 	case "citations":
-		order = citCol + " DESC, c.published_at DESC, c.arxiv_id DESC"
-		keyCol = citCol
+		// Known counts first, then unknown; the keyset uses COALESCE so both
+		// groups page without loss.
+		keyExpr = "COALESCE(" + citCol + ",-1)"
+		order = keyExpr + " DESC, c.published_at DESC, c.arxiv_id DESC"
+		keyCol = keyExpr
 	case "relevance":
-		order = scoreCol + " DESC, c.published_at DESC, c.arxiv_id DESC"
-		keyCol = scoreCol
+		keyExpr = "COALESCE(" + scoreCol + ",-1)"
+		order = keyExpr + " DESC, c.published_at DESC, c.arxiv_id DESC"
+		keyCol = keyExpr
 	}
 	if f.CursorID != "" {
 		switch f.Sort {
 		case "citations", "relevance":
-			where = append(where, fmt.Sprintf("(COALESCE(%s,-1) < ? OR (COALESCE(%s,-1) = ? AND (c.published_at < ? OR (c.published_at = ? AND c.arxiv_id < ?))))", keyCol, keyCol))
+			where = append(where, fmt.Sprintf("(%s < ? OR (%s = ? AND (c.published_at < ? OR (c.published_at = ? AND c.arxiv_id < ?))))", keyCol, keyCol))
 			args = append(args, f.CursorNum, f.CursorNum, f.CursorDate, f.CursorDate, f.CursorID)
 		default:
 			where = append(where, "(c.published_at < ? OR (c.published_at = ? AND c.arxiv_id < ?))")
@@ -184,40 +258,38 @@ func (s *Store) CollectionCandidates(f CandidateFilter) ([]CollectionCandidate, 
 		}
 	}
 	query := fmt.Sprintf(`SELECT c.arxiv_id,c.title,c.abstract,c.authors_json,c.categories_json,c.published_at,c.updated_at_src,c.latest_version,c.doi,c.journal_ref,c.canonical_version,c.content_hash,c.first_seen_at,c.last_seen_at,c.ignored,
-		COALESCE(%s,-1) %s WHERE %s ORDER BY %s LIMIT ?`, scoreCol, join, strings.Join(where, " AND "), order)
+		COALESCE(%s,-1),%s FROM collection_candidates c WHERE %s ORDER BY %s LIMIT ?`, scoreCol, keyExpr, strings.Join(where, " AND "), order)
 	args = append(args, f.Limit+1)
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
-		return nil, nil, "", err
+		return page, err
 	}
 	defer rows.Close()
-	out := []CollectionCandidate{}
-	scores := []int{}
 	for rows.Next() {
 		var c CollectionCandidate
 		var authors, cats string
-		var ignored int
-		var score int
-		if err := rows.Scan(&c.ArXivID, &c.Title, &c.Abstract, &authors, &cats, &c.PublishedAt, &c.UpdatedAt, &c.LatestVersion, &c.DOI, &c.JournalRef, &c.CanonicalVer, &c.ContentHash, &c.FirstSeenAt, &c.LastSeenAt, &ignored, &score); err != nil {
-			return nil, nil, "", err
+		var ignored, score, sortKey int
+		if err := rows.Scan(&c.ArXivID, &c.Title, &c.Abstract, &authors, &cats, &c.PublishedAt, &c.UpdatedAt, &c.LatestVersion, &c.DOI, &c.JournalRef, &c.CanonicalVer, &c.ContentHash, &c.FirstSeenAt, &c.LastSeenAt, &ignored, &score, &sortKey); err != nil {
+			return page, err
 		}
 		c.Ignored = ignored != 0
 		_ = json.Unmarshal([]byte(authors), &c.Authors)
 		_ = json.Unmarshal([]byte(cats), &c.Categories)
-		out = append(out, c)
-		scores = append(scores, score)
+		page.Items = append(page.Items, c)
+		page.Scores = append(page.Scores, score)
+		page.SortKeys = append(page.SortKeys, sortKey)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, "", err
+		return page, err
 	}
-	next := ""
-	if len(out) > f.Limit {
-		last := out[f.Limit-1]
-		next = fmt.Sprintf("%s|%s|%d", last.PublishedAt, last.ArXivID, scores[f.Limit-1])
-		out = out[:f.Limit]
-		scores = scores[:f.Limit]
+	if len(page.Items) > f.Limit {
+		last := page.Items[f.Limit-1]
+		page.NextCursor = encodeCursor(f.Sort, f.Channel, f.TaskRev, page.SortKeys[f.Limit-1], last.PublishedAt, last.ArXivID)
+		page.Items = page.Items[:f.Limit]
+		page.Scores = page.Scores[:f.Limit]
+		page.SortKeys = page.SortKeys[:f.Limit]
 	}
-	return out, scores, next, nil
+	return page, nil
 }
 
 // CollectionCandidate loads one candidate with its citation state.
@@ -325,4 +397,68 @@ func (s *Store) UpdateCollectionImport(requestID string, fields map[string]any) 
 	args = append(args, now(), requestID)
 	_, err := s.DB.Exec("UPDATE collection_imports SET "+strings.Join(sets, ", ")+" WHERE request_id=?", args...)
 	return err
+}
+
+// importActive lists the non-terminal import states an owner may still change.
+var importActive = []string{importQueued, importDownloading, importDownloaded, importAwaitingConfirmation, importImporting}
+
+// claimImport atomically moves a request from one of fromStatuses while
+// applying fields. Terminal states are never overwritten by a late publisher;
+// ok=false means another owner holds the request or the state already ended.
+func (s *Store) claimImport(requestID string, fromStatuses []string, fields map[string]any) (bool, error) {
+	if status, ok := fields["status"].(string); ok && !validImportStatus(status) {
+		return false, fmt.Errorf("未知导入状态 %q", status)
+	}
+	sets := []string{}
+	args := []any{}
+	for _, key := range []string{"status", "error", "actual_sha256", "cache_rel_path", "document_id", "library", "confirm_pages", "expected_sha256"} {
+		if v, ok := fields[key]; ok {
+			sets = append(sets, key+"=?")
+			args = append(args, v)
+		}
+	}
+	if len(sets) == 0 {
+		return false, nil
+	}
+	sets = append(sets, "updated_at=?")
+	args = append(args, now(), requestID)
+	ph := make([]string, 0, len(fromStatuses))
+	for _, st := range fromStatuses {
+		ph = append(ph, "?")
+		args = append(args, st)
+	}
+	res, err := s.DB.Exec("UPDATE collection_imports SET "+strings.Join(sets, ", ")+" WHERE request_id=? AND status IN ("+strings.Join(ph, ",")+")", args...)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// MustImport loads a request by id; callers pass ids they just claimed.
+func (s *Store) MustImport(requestID string) CollectionImportRequest {
+	req, _ := s.CollectionImport(requestID)
+	return req
+}
+
+// ActiveCollectionImports lists every non-terminal request so the UI can
+// restore batch state after switching pages.
+func (s *Store) ActiveCollectionImports() ([]CollectionImportRequest, error) {
+	rows, err := s.DB.Query(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,created_at,updated_at
+		FROM collection_imports WHERE status IN ('queued','downloading','downloaded','awaiting_confirmation','importing') ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CollectionImportRequest{}
+	for rows.Next() {
+		var req CollectionImportRequest
+		var snapshot string
+		if err := rows.Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.CreatedAt, &req.UpdatedAt); err != nil {
+			return nil, err
+		}
+		req.MetadataSnapshot = json.RawMessage(snapshot)
+		out = append(out, req)
+	}
+	return out, rows.Err()
 }

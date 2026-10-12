@@ -24,7 +24,14 @@ func testServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { store.DB.Close() })
 	server := NewServer(store, "test-secret", "")
-	t.Cleanup(server.Close)
+	// The service assembly always owns collection work; tests match it.
+	ctx, cancel := context.WithCancel(context.Background())
+	stopCollection := server.Collection().StartCollection(ctx)
+	t.Cleanup(func() {
+		cancel()
+		stopCollection()
+		server.Close()
+	})
 	return server
 }
 func request(t *testing.T, s *Server, method, path string, body io.Reader) *httptest.ResponseRecorder {

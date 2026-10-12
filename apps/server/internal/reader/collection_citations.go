@@ -38,10 +38,13 @@ func (s *Store) UpsertCitation(res scholar.CitationCount, nowTime time.Time) err
 				nowTime.Format(time.RFC3339), "引用数量未知或无效", nowTime.Add(citationRetryHours*time.Hour).Format(time.RFC3339), res.ArXivID)
 			return err
 		}
-		_, err = s.DB.Exec(`INSERT INTO collection_citations(arxiv_id,service_paper_id,citation_count,attempted_at,error,stale)
-			VALUES(?,?,NULL,?,'',0)
-			ON CONFLICT(arxiv_id) DO UPDATE SET attempted_at=excluded.attempted_at,refresh_at=?`,
-			res.ArXivID, res.ServicePaperID, nowTime.Format(time.RFC3339), nowTime.Add(citationRetryHours*time.Hour).Format(time.RFC3339))
+		// First failure/unknown still records the 24h backoff; a NULL
+		// refresh_at would otherwise look immediately due forever.
+		retry := nowTime.Add(citationRetryHours * time.Hour).Format(time.RFC3339)
+		_, err = s.DB.Exec(`INSERT INTO collection_citations(arxiv_id,service_paper_id,citation_count,attempted_at,refresh_at,error,stale)
+			VALUES(?,?,NULL,?,?,'',0)
+			ON CONFLICT(arxiv_id) DO UPDATE SET attempted_at=excluded.attempted_at,refresh_at=excluded.refresh_at`,
+			res.ArXivID, res.ServicePaperID, nowTime.Format(time.RFC3339), retry)
 		return err
 	}
 	refresh := nowTime.Add(citationRefreshDays * 24 * time.Hour).Format(time.RFC3339)

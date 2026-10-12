@@ -224,7 +224,6 @@ func (s *Store) SaveCollectionTask(t CollectionTask, expectedRevision int) (Coll
 		revision = currentRev + 1
 	}
 	t.QueryRevision = revision
-	t.CreatedAt = t.CreatedAt
 	t.UpdatedAt = nowStr
 	res, err := tx.Exec("UPDATE collection_tasks SET name=?,enabled=?,priority=?,config_json=?,config_version=?,query_revision=?,semantic_hash=?,next_run_at=?,updated_at=? WHERE task_id=? AND query_revision=?",
 		t.Name, boolInt(t.Enabled), t.Priority, mustJSONText(t.Config), t.Config.Version, revision, t.SemanticHash, nullIfEmpty(t.NextRunAt), t.UpdatedAt, t.ID, expectedRevision)

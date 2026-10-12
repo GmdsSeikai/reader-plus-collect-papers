@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 )
 
 // collectionFail reports a stable machine-readable error code alongside the
@@ -149,9 +149,27 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 	q := r.URL.Query()
 	f := CandidateFilter{
 		TaskID:   q.Get("task"),
+		Channel:  q.Get("channel"),
 		Search:   q.Get("q"),
 		Citation: q.Get("citation"),
 		Sort:     q.Get("sort"),
+	}
+	if f.Channel != channelLatest && f.Channel != channelHot && f.Channel != "" {
+		collectionFail(w, 400, "query-invalid", "无效的通道")
+		return
+	}
+	if f.Sort == "" {
+		if f.Channel == channelHot {
+			f.Sort = "citations"
+		} else {
+			f.Sort = "date"
+		}
+	}
+	// The window lower bound defaults to the widest enabled-task window for
+	// the channel; an explicit since narrows it.
+	f.Since = q.Get("since")
+	if f.Since == "" && f.Channel != "" {
+		f.Since = s.widestWindowStart(f.Channel)
 	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -165,16 +183,21 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 		t := false
 		f.Ignored = &t
 	}
+	f.TaskRev = 0
+	if f.TaskID != "" {
+		if t, err := s.Store.CollectionTask(f.TaskID); err == nil {
+			f.TaskRev = t.QueryRevision
+		}
+	}
 	if cursor := q.Get("cursor"); cursor != "" {
-		parts := strings.SplitN(cursor, "|", 3)
-		if len(parts) != 3 {
+		key, date, id, err := DecodeCursor(cursor, f.Sort, f.Channel, f.TaskRev)
+		if err != nil {
 			collectionFail(w, 400, "query-invalid", "无效的游标")
 			return
 		}
-		f.CursorDate, f.CursorID = parts[0], parts[1]
-		f.CursorNum, _ = strconv.Atoi(parts[2])
+		f.CursorNum, f.CursorDate, f.CursorID = key, date, id
 	}
-	items, scores, next, err := s.Store.CollectionCandidates(f)
+	page, err := s.Store.CollectionCandidates(f)
 	if err != nil {
 		collectionFail(w, 500, "query-invalid", "查询失败")
 		return
@@ -183,11 +206,35 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 		Candidate CollectionCandidate `json:"candidate"`
 		Score     int                 `json:"score"`
 	}
-	rows := make([]row, 0, len(items))
-	for i, c := range items {
-		rows = append(rows, row{Candidate: c, Score: scores[i]})
+	rows := make([]row, 0, len(page.Items))
+	for i, c := range page.Items {
+		rows = append(rows, row{Candidate: c, Score: page.Scores[i]})
 	}
-	respond(w, 200, map[string]any{"items": rows, "nextCursor": next})
+	respond(w, 200, map[string]any{"items": rows, "nextCursor": page.NextCursor})
+}
+
+// widestWindowStart returns the lower bound for the channel using the widest
+// enabled-task window (or the design defaults when no task is enabled).
+func (s *Server) widestWindowStart(channel string) string {
+	days, months := 30, 12
+	if tasks, err := s.Store.CollectionTasks(); err == nil {
+		for _, t := range tasks {
+			if !t.Enabled {
+				continue
+			}
+			if t.Config.LatestWindowDays > days {
+				days = t.Config.LatestWindowDays
+			}
+			if t.Config.HotWindowMonths > months {
+				months = t.Config.HotWindowMonths
+			}
+		}
+	}
+	now := time.Now().UTC()
+	if channel == channelHot {
+		return subCalendarMonths(now, months).Format(time.RFC3339)
+	}
+	return now.AddDate(0, 0, -days).Format(time.RFC3339)
 }
 
 func (s *Server) collectionCandidateGet(w http.ResponseWriter, r *http.Request) {
@@ -291,3 +338,6 @@ func (s *Server) registerCollectionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/collection/resume", s.collectionResume)
 	s.registerCollectionImportRoutes(mux)
 }
+
+// Collection exposes the manager for service lifecycle wiring in main.
+func (s *Server) Collection() *CollectionManager { return s.collection() }
