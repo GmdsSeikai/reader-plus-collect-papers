@@ -72,6 +72,10 @@ func zoteroRows(ctx context.Context, tx *sql.Tx, query string, args []any, read 
 }
 
 func readZotero(ctx context.Context, directory, linkedBase string) (*zoteroScan, error) {
+	return readZoteroWithBaseResolver(ctx, directory, linkedBase, discoverZoteroLinkedBase)
+}
+
+func readZoteroWithBaseResolver(ctx context.Context, directory, linkedBase string, resolveBase func(string) (string, error)) (*zoteroScan, error) {
 	if strings.TrimSpace(directory) == "" {
 		return nil, errors.New("请选择包含 zotero.sqlite 的资料目录")
 	}
@@ -108,6 +112,9 @@ func readZotero(ctx context.Context, directory, linkedBase string) (*zoteroScan,
 	}
 	defer tx.Rollback()
 	scan := &zoteroScan{ID: id(), Directory: directory, Entries: []*zoteroEntry{}, Warnings: []string{}, expires: time.Now().Add(time.Hour)}
+	linkedBase = strings.TrimSpace(linkedBase)
+	baseResolved := linkedBase != ""
+	var baseError error
 	collections := map[int]zoteroCollection{}
 	err = zoteroRows(ctx, tx, `SELECT collectionID,collectionName,COALESCE(parentCollectionID,0) FROM collections`, nil, func(r *sql.Rows) error {
 		var key int
@@ -247,7 +254,19 @@ func readZotero(ctx context.Context, directory, linkedBase string) (*zoteroScan,
 			}
 			entry.notes = append(entry.notes, notes...)
 			entry.Notes = len(entry.notes)
-			entry.path, entry.root, e = zoteroAttachmentPath(directory, linkedBase, a.key, a.path, a.mode)
+			if a.mode == 2 && strings.HasPrefix(a.path, "attachments:") {
+				if !baseResolved {
+					linkedBase, baseError = resolveBase(directory)
+					baseResolved = true
+					if baseError == nil {
+						scan.Warnings = append(scan.Warnings, "已从 Zotero 本机配置识别链接附件基目录："+linkedBase)
+					}
+				}
+				e = baseError
+			}
+			if e == nil {
+				entry.path, entry.root, e = zoteroAttachmentPath(directory, linkedBase, a.key, a.path, a.mode)
+			}
 			entry.Filename = filepath.Base(entry.path)
 			if e != nil {
 				entry.Issue = e.Error()
@@ -344,7 +363,7 @@ func zoteroAttachmentPath(directory, base, key, path string, mode int) (string, 
 			if base == "" {
 				return "", "", errors.New("此链接附件需要填写 Zotero 的链接附件基目录")
 			}
-			name := filepath.FromSlash(strings.TrimPrefix(path, "attachments:"))
+			name := filepath.FromSlash(strings.ReplaceAll(strings.TrimPrefix(path, "attachments:"), "\\", "/"))
 			if !filepath.IsLocal(name) {
 				return "", "", errors.New("链接附件路径无效")
 			}

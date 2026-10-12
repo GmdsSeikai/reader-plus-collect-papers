@@ -3,7 +3,7 @@
 入口：论文库 → 导入论文 → 从 Zotero 导入。
 
 1. 在 Zotero「设置 → 高级 → 资料目录」确认目录位置。默认使用用户主目录下的 `Zotero`；自定义资料目录可手动填写，桌面版也可以选择目录。目录需要同时包含 `zotero.sqlite` 和附件 `storage`。
-2. 如果采用按需下载，先在 Zotero 中下载需要的 PDF。相对链接附件需要另外填写 Zotero 的链接附件基目录；绝对链接附件直接按本机路径读取。
+2. 如果采用按需下载，先在 Zotero 中下载需要的 PDF。相对链接附件（`attachments:` 路径）在“链接附件基目录”留空时，会尝试从本机 Zotero 的 `prefs.js` 自动读取 `baseAttachmentPath`，并在扫描预览中显示识别到的目录。仅使用资料目录与本次选择一致的配置；多个匹配配置的基目录不一致、目录无法访问或未找到配置时，需要展开“使用链接附件”手动填写。手动填写优先于自动识别。绝对链接附件直接按本机路径读取。
 3. **完全退出 Zotero**，在 macOS 上使用 ⌘Q，关闭窗口不等于退出。Zotero 在运行时持有数据库独占锁，即使不在同步也可能阻止只读扫描。回到 Reader 点击「扫描资料库」，查看可导入和需处理的条目。勾选需要的 PDF 后导入；一个 Zotero 条目有多个 PDF 时，每个附件分别成为 Reader 文档，共用条目信息。
 4. 导入过程中可以停止后续附件；当前附件事务完成后停止。结果区区分新增、合并、已迁移和失败，可以导出 JSON 报告。补齐文件后重新扫描、重试。
 
@@ -19,6 +19,8 @@
 
 ## 数据保护和重试
 
+自动识别只读本机 Zotero 标准配置目录中的 `profiles.ini` 和 `prefs.js`，支持注册在其他位置的配置目录；不执行配置中的 JavaScript、不修改 Zotero 设置，也不遍历磁盘猜测 PDF 位置。单独复制来的资料库或未注册的自定义配置目录可能无法自动匹配，仍可手动指定链接附件基目录。
+
 Zotero SQLite 使用 `mode=ro`、`query_only` 和一致读事务，包含已提交 WAL 数据；扫描完成后关闭源数据库，不复制裸 SQLite 文件，也不向 Zotero 写入。预览快照保留一小时，继续导入会延长有效期；最多保留三次扫描。扫描前需要完全退出 Zotero；遇到 `SQLITE_BUSY` / `SQLITE_LOCKED` 时返回 `409 zotero-locked`，提示释放占用后重试，不缓存部分结果、不启动导入。文件在扫描后改变会要求重新扫描。仅适配 Zotero 6+ 的标准数据库表结构，未来的结构变化可能需要适配；不能读取时会明确失败。
 
 Reader 按文件内容去重，Zotero 附件身份和文档 ID 共同记录迁移状态。已完成迁移的同一附件再次导入会跳过，不覆盖后续编辑或重新添加已删除的批注。相同 PDF 已由其他渠道导入时，保留既有标题和非空元数据，补齐空字段，合并标签、分类和未迁移笔记；已有手动空值也保留。回收站中的相同文件要求先恢复；已在图书库中的文件保留原库位置。迁入的元数据按手动值保护，自动查找不覆盖。
@@ -29,7 +31,7 @@ Reader 按文件内容去重，Zotero 附件身份和文档 ID 共同记录迁�
 
 ## 验证
 
-自动测试使用构造的 SQLite 资料库与 PDF，不依赖私人 Zotero 数据，覆盖只读扫描、WAL 可见性、DELETE/WAL 模式下的持续独占锁与释放后重试、父子条目和删除过滤、链接附件、目录越界、扫描后文件变化、按哈希去重、事务回滚、元数据与已编辑笔记保护、重试、批注坐标与降级、预览有效期、HTTP 契约及界面部分失败/停止/报告流程。
+自动测试使用构造的 SQLite 资料库、Zotero 配置与 PDF，不依赖私人 Zotero 数据，覆盖只读扫描、WAL 可见性、DELETE/WAL 模式下的持续独占锁与释放后重试、父子条目和删除过滤、链接附件基目录自动匹配与冲突、手动覆盖、中文及反斜杠路径、配置与数据库不变、目录越界、扫描后文件变化、按哈希去重、事务回滚、元数据与已编辑笔记保护、重试、批注坐标与降级、预览有效期、HTTP 契约及界面部分失败/停止/报告流程。
 
 手动验收：
 
@@ -39,4 +41,4 @@ Reader 按文件内容去重，Zotero 附件身份和文档 ID 共同记录迁�
 4. 开始导入多个附件后点击停止，确认当前附件结束后停止，其余条目标为未导入；重新扫描能够继续。
 5. 在浅色、深色、小窗口中检查对话框、长标题截断、滚动和键盘操作。桌面版额外检查两个目录选择按钮。
 
-参考：[Zotero SQLite 只读访问](https://www.zotero.org/support/dev/client_coding/direct_sqlite_database_access)、[资料目录](https://www.zotero.org/support/zotero_data)、[批注存储](https://www.zotero.org/support/kb/annotations_in_database)。表结构与类型映射依据 Zotero 公布的格式独立实现。
+参考：[Zotero SQLite 只读访问](https://www.zotero.org/support/dev/client_coding/direct_sqlite_database_access)、[资料目录](https://www.zotero.org/support/zotero_data)、[配置目录](https://www.zotero.org/support/kb/profile_directory)、[链接附件基目录](https://www.zotero.org/support/preferences/advanced#linked_attachment_base_directory)、[批注存储](https://www.zotero.org/support/kb/annotations_in_database)。表结构与类型映射依据 Zotero 公布的格式独立实现。
