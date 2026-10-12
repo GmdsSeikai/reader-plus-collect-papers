@@ -22,24 +22,19 @@ type Result struct {
 // Run makes one unauthenticated HEAD request, without following redirects or
 // reading a response body. Any origin HTTP response proves network reachability,
 // including 401/403/405; it does not prove login or model availability.
-func Run(ctx context.Context, target string) Result {
+func Run(ctx context.Context) Result {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
-	return probe(ctx, target, transport)
+	return probe(ctx, "https://chatgpt.com/robots.txt", transport)
 }
 
 func probe(ctx context.Context, target string, transport *http.Transport) (result Result) {
 	started := time.Now()
 	result.Route = "direct"
 	defer func() { result.ElapsedMS = time.Since(started).Milliseconds() }()
-	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		result.Message = "请输入不含账号、查询参数或片段的 HTTP / HTTPS 检测地址。"
-		return
-	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
 	if err != nil {
 		result.Message = "检测地址无效。"
 		return

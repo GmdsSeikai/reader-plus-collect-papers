@@ -384,13 +384,10 @@ app
       proxySender(event);
       return proxySettings.save(value);
     });
-    ipcMain.handle(
-      "reader:check-proxy",
-      (event, value: unknown, target: unknown) => {
-        proxySender(event);
-        return proxySettings.check(value, target, serverBinary());
-      },
-    );
+    ipcMain.handle("reader:check-proxy", (event, value: unknown) => {
+      proxySender(event);
+      return proxySettings.check(value, serverBinary());
+    });
     ipcMain.handle("reader:restart", (event) => {
       proxySender(event);
       if (closing || restartRequested) return;

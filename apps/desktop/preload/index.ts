@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld("readerDesktop", {
   proxySettings: () => proxyRequest("reader:proxy-settings"),
   saveProxySettings: (settings: ProxySettings) =>
     proxyRequest("reader:save-proxy-settings", settings),
-  checkProxy: (settings: ProxySettings, target: string) =>
-    proxyRequest("reader:check-proxy", settings, target),
+  checkProxy: (settings: ProxySettings) =>
+    proxyRequest("reader:check-proxy", settings),
   restart: () => proxyRequest("reader:restart"),
   writeClipboardText: (text: string) =>
     ipcRenderer.invoke("reader:clipboard-write", text),

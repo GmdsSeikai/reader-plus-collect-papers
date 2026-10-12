@@ -25,7 +25,6 @@ vi.mock("./proxy", async (original) => ({
 import {
   ProxySettingsService,
   validateProxySettings,
-  validateProbeURL,
   resolveProxyEnvironment,
   electronProxyConfiguration,
 } from "./proxy-settings";
@@ -136,18 +135,13 @@ it("requires a restart when detection observes a changed system proxy", async ()
   resolveSystem.mockResolvedValue({
     env: { ...original, HTTPS_PROXY: "http://127.0.0.1:7897" },
   });
-  const detected = await service.check(
-    { mode: "system" },
-    "https://chatgpt.com",
-    "/probe",
-  );
+  const detected = await service.check({ mode: "system" }, "/probe");
   expect(detected.restartRequired).toBe(true);
   expect((await service.state()).restartRequired).toBe(true);
   expect(service.activeEnvironment).toEqual(original);
   resolveSystem.mockResolvedValue({ env: { ...original, PATH: "/new" } });
   expect(
-    (await service.check({ mode: "system" }, "https://chatgpt.com", "/probe"))
-      .restartRequired,
+    (await service.check({ mode: "system" }, "/probe")).restartRequired,
   ).toBe(false);
 });
 
@@ -179,7 +173,6 @@ it.each(["win32", "darwin"] as const)(
     });
     const result = await service.check(
       { mode: "manual", host: "127.0.0.1", port: 7890 },
-      "https://chatgpt.com",
       "/bin/reader-server",
     );
     expect(result).toMatchObject({
@@ -189,7 +182,7 @@ it.each(["win32", "darwin"] as const)(
     });
     expect(execute).toHaveBeenCalledWith(
       "/bin/reader-server",
-      ["--probe-url", "https://chatgpt.com/"],
+      ["--probe-network"],
       expect.objectContaining({
         cwd: directory,
         windowsHide: true,
@@ -216,17 +209,9 @@ it("bounds concurrent checks, aborts on quit, and sanitizes native failures", as
         ),
       ),
   );
-  const check = service.check(
-    { mode: "direct" },
-    "https://chatgpt.com",
-    "/bin/reader-server",
-  );
+  const check = service.check({ mode: "direct" }, "/bin/reader-server");
   await expect(
-    service.check(
-      { mode: "direct" },
-      "https://chatgpt.com",
-      "/bin/reader-server",
-    ),
+    service.check({ mode: "direct" }, "/bin/reader-server"),
   ).rejects.toThrow("正在检测");
   // Let resolution reach the subprocess before aborting it.
   await vi.waitFor(() => expect(execute).toHaveBeenCalled());
@@ -239,13 +224,7 @@ it("bounds concurrent checks, aborts on quit, and sanitizes native failures", as
     stdout: '{"connected":true,"route":"proxy","elapsedMs":0}',
   });
   expect(
-    (
-      await service.check(
-        { mode: "direct" },
-        "https://chatgpt.com",
-        "/bin/reader-server",
-      )
-    ).connected,
+    (await service.check({ mode: "direct" }, "/bin/reader-server")).connected,
   ).toBe(false);
 });
 
@@ -298,12 +277,4 @@ it.each([0, 65536, 1.5, NaN, "7890"])(
       validateProxySettings({ mode: "manual", host: "localhost", port }),
     ).toThrow();
   },
-);
-it.each([
-  "file:///tmp/test",
-  "https://user:secret@chatgpt.com",
-  "https://chatgpt.com?key=secret",
-  "https://chatgpt.com#secret",
-])("rejects unsafe target %s", (target) =>
-  expect(() => validateProbeURL(target)).toThrow(),
 );

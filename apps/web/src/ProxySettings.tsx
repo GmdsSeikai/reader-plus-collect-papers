@@ -23,42 +23,40 @@ export function ProxySettings({ open }: { open: boolean }) {
   const [mode, setMode] = useState<Configuration["mode"]>("system");
   const [host, setHost] = useState("127.0.0.1");
   const [port, setPort] = useState("7890");
-  const [target, setTarget] = useState("https://chatgpt.com/robots.txt");
   const [result, setResult] = useState<ProxyCheckResult>();
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState<"load" | "save" | "check" | "restart">(
-    "load",
-  );
-  const [pending, setPending] = useState(false);
+  const [operation, setOperation] = useState<
+    "load" | "save" | "check" | "restart" | null
+  >(null);
+  const pending = operation !== null;
   const revision = useRef(0);
+  const applyState = (next: ProxySettingsState) => {
+    setState(next);
+    setMode(next.settings.mode);
+    if (next.settings.mode === "manual") {
+      setHost(next.settings.host);
+      setPort(String(next.settings.port));
+    }
+  };
   useEffect(() => {
     if (!open || !desktop?.proxySettings) return;
-    let active = true;
-    revision.current++;
-    setPending(true);
-    setBusy("load");
+    const current = ++revision.current;
+    setOperation("load");
     setState(undefined);
     setError("");
     setResult(undefined);
     void desktop
       .proxySettings()
       .then((next) => {
-        if (!active) return;
-        setState(next);
-        setMode(next.settings.mode);
-        if (next.settings.mode === "manual") {
-          setHost(next.settings.host);
-          setPort(String(next.settings.port));
-        }
+        if (current === revision.current) applyState(next);
       })
       .catch((cause: Error) => {
-        if (active) setError(cause.message);
+        if (current === revision.current) setError(cause.message);
       })
       .finally(() => {
-        if (active) setPending(false);
+        if (current === revision.current) setOperation(null);
       });
     return () => {
-      active = false;
       revision.current++;
     };
   }, [open, desktop]);
@@ -79,27 +77,21 @@ export function ProxySettings({ open }: { open: boolean }) {
     setResult(undefined);
     setError("");
   };
-  const perform = async (operation: "save" | "check" | "restart") => {
+  const perform = async (action: "save" | "check" | "restart") => {
     const current = revision.current;
-    setBusy(operation);
-    setPending(true);
+    setOperation(action);
     setError("");
     try {
       if (mode === "manual" && !/^\d+$/.test(port.trim()))
         throw new Error("代理端口应为 1–65535 的整数。");
-      if (operation === "save") {
+      if (action === "save") {
         const next = await desktop.saveProxySettings!(draft);
         if (current === revision.current) {
-          setState(next);
-          setMode(next.settings.mode);
-          if (next.settings.mode === "manual") {
-            setHost(next.settings.host);
-            setPort(String(next.settings.port));
-          }
+          applyState(next);
         }
-      } else if (operation === "check") {
+      } else if (action === "check") {
         setResult(undefined);
-        const next = await desktop.checkProxy!(draft, target);
+        const next = await desktop.checkProxy!(draft);
         if (current === revision.current) {
           setResult(next);
           setState(
@@ -111,7 +103,7 @@ export function ProxySettings({ open }: { open: boolean }) {
     } catch (cause) {
       if (current === revision.current) setError((cause as Error).message);
     } finally {
-      if (current === revision.current) setPending(false);
+      if (current === revision.current) setOperation(null);
     }
   };
   return (
@@ -192,9 +184,7 @@ export function ProxySettings({ open }: { open: boolean }) {
             disabled={pending || !changed}
             onClick={() => void perform("save")}
           >
-            {pending && busy === "save" && (
-              <LoaderCircle className="animate-spin" />
-            )}
+            {operation === "save" && <LoaderCircle className="animate-spin" />}
             保存代理设置
           </Button>
           {state?.restartRequired && (
@@ -210,7 +200,7 @@ export function ProxySettings({ open }: { open: boolean }) {
         <p className="mt-2 text-xs text-muted-foreground">
           {state?.restartRequired
             ? "代理配置已变化，重启 Reader 后生效。"
-            : "修改后需保存并重启 Reader。"}
+            : "修改后需保存并重启；系统代理变化也需重启。"}
         </p>
         {state?.warning && (
           <p className="mt-2 text-xs text-muted-foreground">{state.warning}</p>
@@ -218,30 +208,14 @@ export function ProxySettings({ open }: { open: boolean }) {
       </div>
       <div>
         <h3 className="mb-3 text-sm font-medium">连接检测</h3>
-        <label className="text-xs text-muted-foreground">
-          目标网站
-          <Input
-            aria-label="检测地址"
-            className="mt-1"
-            value={target}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={pending}
-            onChange={(event) => {
-              edited();
-              setTarget(event.target.value);
-            }}
-          />
-        </label>
+        <p className="text-xs text-muted-foreground">chatgpt.com/robots.txt</p>
         <Button
           className="mt-3"
           variant="outline"
-          disabled={pending || !state || !target.trim()}
+          disabled={pending || !state}
           onClick={() => void perform("check")}
         >
-          {pending && busy === "check" && (
-            <LoaderCircle className="animate-spin" />
-          )}
+          {operation === "check" && <LoaderCircle className="animate-spin" />}
           检测连接
         </Button>
         <p className="mt-2 text-xs text-muted-foreground">

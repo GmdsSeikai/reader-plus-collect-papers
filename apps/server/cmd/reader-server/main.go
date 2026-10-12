@@ -24,10 +24,10 @@ func main() {
 	port := flag.String("port", "17840", "loopback port, 0 for automatic")
 	web := flag.String("web", "", "built web directory")
 	connector := flag.Bool("connector", true, "enable Reader Connector listener")
-	probeURL := flag.String("probe-url", "", "check network reachability and exit without opening a library")
+	probeNetwork := flag.Bool("probe-network", false, "check ChatGPT reachability and exit without opening a library")
 	flag.Parse()
-	if *probeURL != "" {
-		_ = json.NewEncoder(os.Stdout).Encode(networkprobe.Run(context.Background(), *probeURL))
+	if *probeNetwork {
+		_ = json.NewEncoder(os.Stdout).Encode(networkprobe.Run(context.Background()))
 		return
 	}
 	root, err := filepath.Abs(*data)

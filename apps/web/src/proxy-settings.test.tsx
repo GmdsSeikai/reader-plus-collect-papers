@@ -104,25 +104,23 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it.each(["win32", "darwin"])(
-  "checks ChatGPT with the unsaved draft on %s without calling save",
-  async (platform) => {
-    window.readerDesktop!.platform = platform;
-    await render();
-    expect(input("检测地址").value).toBe("https://chatgpt.com/robots.txt");
-    await type("代理端口", "7897");
-    await click("检测连接");
-    expect(check).toHaveBeenCalledWith(
-      { mode: "manual", host: "127.0.0.1", port: 7897 },
-      "https://chatgpt.com/robots.txt",
-    );
-    expect(save).not.toHaveBeenCalled();
-    expect(host.textContent).toContain("HTTP 403 · 18 ms · 经代理");
-    expect(host.textContent).toContain("不代表 ChatGPT");
-    await type("检测地址", "https://example.com");
-    expect(host.querySelector('[role="status"]')).toBeNull();
-  },
-);
+it("checks ChatGPT with the unsaved draft without calling save", async () => {
+  await render();
+  expect(host.textContent).toContain("chatgpt.com/robots.txt");
+  expect(input("检测地址")).toBeNull();
+  await type("代理端口", "7897");
+  await click("检测连接");
+  expect(check).toHaveBeenCalledWith({
+    mode: "manual",
+    host: "127.0.0.1",
+    port: 7897,
+  });
+  expect(save).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("HTTP 403 · 18 ms · 经代理");
+  expect(host.textContent).toContain("不代表 ChatGPT");
+  await type("代理端口", "7898");
+  expect(host.querySelector('[role="status"]')).toBeNull();
+});
 
 it("shows restart only after successful persistence and never restarts automatically", async () => {
   await render();

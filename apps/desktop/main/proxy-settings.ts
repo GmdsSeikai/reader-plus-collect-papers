@@ -47,24 +47,6 @@ export function validateProxySettings(value: unknown): ProxySettings {
   return { mode: "manual", host, port: config.port };
 }
 
-export function validateProbeURL(value: unknown): string {
-  try {
-    if (typeof value !== "string" || value.length > 2048) throw new Error();
-    const url = new URL(value.trim());
-    if (
-      !/^https?:$/.test(url.protocol) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
-    )
-      throw new Error();
-    return url.href;
-  } catch {
-    throw new Error("请输入不含账号、查询参数或片段的 HTTP / HTTPS 检测地址。");
-  }
-}
-
 export async function resolveProxyEnvironment(
   settings: ProxySettings,
   inherited: NodeJS.ProcessEnv,
@@ -196,13 +178,8 @@ export class ProxySettingsService {
     return operation;
   }
 
-  async check(
-    value: unknown,
-    target: unknown,
-    binary: string,
-  ): Promise<ProxyCheckResult> {
+  async check(value: unknown, binary: string): Promise<ProxyCheckResult> {
     const settings = validateProxySettings(value);
-    const url = validateProbeURL(target);
     if (this.checking) throw new Error("正在检测连接，请稍候。");
     this.checking = true;
     const controller = new AbortController();
@@ -221,7 +198,7 @@ export class ProxySettingsService {
           proxySignature(this.activeEnvironment);
       // A fresh Go process uses the draft env without changing ongoing API/CLI
       // requests or opening a database. Hide Windows console and bound its life.
-      const { stdout } = await execute(binary, ["--probe-url", url], {
+      const { stdout } = await execute(binary, ["--probe-network"], {
         env: resolved.env,
         cwd: this.directory,
         timeout: 15000,

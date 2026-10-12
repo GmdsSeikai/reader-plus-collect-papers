@@ -103,14 +103,6 @@ func TestProxyAuthenticationAndTimeout(t *testing.T) {
 	}
 }
 
-func TestRejectsUnsafeURLs(t *testing.T) {
-	for _, target := range []string{"file:///tmp/test", "https://user:secret@example.com", "https://example.com?key=secret", "https://example.com#secret", "not a URL"} {
-		if result := Run(context.Background(), target); result.Connected || result.Message == "" {
-			t.Fatalf("accepted %s: %+v", target, result)
-		}
-	}
-}
-
 // Fresh processes exercise Go's cached environment proxy resolver just as the
 // desktop's probe subprocess does, without leaking one test's env into another.
 func TestEnvironmentAndLoopback(t *testing.T) {
@@ -152,6 +144,6 @@ func TestProbeChild(t *testing.T) {
 	if target == "" {
 		return
 	}
-	_ = json.NewEncoder(os.Stdout).Encode(Run(context.Background(), target))
+	_ = json.NewEncoder(os.Stdout).Encode(probe(context.Background(), target, http.DefaultTransport.(*http.Transport).Clone()))
 	os.Exit(0)
 }

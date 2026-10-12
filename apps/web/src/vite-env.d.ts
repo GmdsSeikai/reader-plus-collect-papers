@@ -10,7 +10,6 @@ interface Window {
     ) => Promise<import("@reader/core").ProxySettingsState>;
     checkProxy?: (
       settings: import("@reader/core").ProxySettings,
-      target: string,
     ) => Promise<import("@reader/core").ProxyCheckResult>;
     restart?: () => Promise<void>;
     writeClipboardText: (text: string) => Promise<void>;
