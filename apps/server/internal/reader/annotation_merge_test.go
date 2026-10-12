@@ -53,6 +53,145 @@ func TestUnderlineMergeAPI(t *testing.T) {
 	}
 }
 
+func TestHighlightMergeAPI(t *testing.T) {
+	s := testServer(t)
+	uploaded := upload(t, s, "reading-notes.pdf", sample(t, "reading-notes.pdf"))
+	var doc Document
+	if err := json.Unmarshal(uploaded.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/documents/" + doc.ID + "/annotations"
+	save := func(x, width float64, quote string) Annotation {
+		body, _ := json.Marshal(map[string]any{"kind": "highlight", "quote": quote, "color": "#e6b94c", "location": map[string]any{"type": "pdf", "page": 1, "rects": []annotationRect{{X: x, Y: 0.2, Width: width, Height: 0.02}}}})
+		w := request(t, s, "POST", path, bytes.NewReader(body))
+		if w.Code != 201 {
+			t.Fatalf("save: %d %s", w.Code, w.Body.String())
+		}
+		var a Annotation
+		if err := json.Unmarshal(w.Body.Bytes(), &a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	first := save(0.1, 0.3, "one two")
+	duplicate := save(0.1, 0.3, "one two")
+	if duplicate.ID != first.ID {
+		t.Fatalf("duplicate highlight created a record: %s != %s", first.ID, duplicate.ID)
+	}
+	merged := save(0.3, 0.3, "two three")
+	w := request(t, s, "GET", path, nil)
+	var items []Annotation
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || merged.ID != first.ID || items[0].Quote != "one two three" {
+		t.Fatalf("highlights not merged: %+v", items)
+	}
+}
+
+func TestSourceLinkedHighlightMerge(t *testing.T) {
+	a := pdfUnderline("a", []annotationRect{{0.1, 0.2, 0.3, 0.02}}, "one two")
+	a.Kind = "highlight"
+	b := pdfUnderline("b", []annotationRect{{0.3, 0.2, 0.3, 0.02}}, "two three")
+	b.Kind = "highlight"
+	link := func(a Annotation, part string) Annotation {
+		var location map[string]json.RawMessage
+		json.Unmarshal(a.Location, &location)
+		location["sentenceLink"], _ = json.Marshal(map[string]any{"origin": "source", "parts": []map[string]string{{"blockId": part, "sourceHash": "hash", "source": part, "target": part}}})
+		a.Location, _ = json.Marshal(location)
+		return a
+	}
+	a, b = link(a, "one"), link(b, "two")
+	merged, ok := mergeAnnotationMark(a, b)
+	if !ok || merged.Quote != "one two three" {
+		t.Fatalf("source highlights not merged: %+v %v", merged, ok)
+	}
+	var location struct {
+		SentenceLink struct {
+			Origin string            `json:"origin"`
+			Parts  []json.RawMessage `json:"parts"`
+		} `json:"sentenceLink"`
+	}
+	if err := json.Unmarshal(merged.Location, &location); err != nil || location.SentenceLink.Origin != "source" || len(location.SentenceLink.Parts) != 2 {
+		t.Fatalf("source links lost: %+v %v", location, err)
+	}
+	duplicate, ok := mergeAnnotationMark(merged, link(b, "two"))
+	if !ok {
+		t.Fatal("repeated source highlight was not deduplicated")
+	}
+	json.Unmarshal(duplicate.Location, &location)
+	if len(location.SentenceLink.Parts) != 2 {
+		t.Fatalf("duplicate source link: %+v", location.SentenceLink)
+	}
+	s := testServer(t)
+	var doc Document
+	json.Unmarshal(upload(t, s, "reading-notes.pdf", sample(t, "reading-notes.pdf")).Body.Bytes(), &doc)
+	a.DocumentID, b.DocumentID = doc.ID, doc.ID
+	if _, err := s.Store.saveAnnotation(a); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.Store.saveAnnotation(b)
+	if err != nil || saved.ID != a.ID {
+		t.Fatalf("linked highlights saved separately: %+v %v", saved, err)
+	}
+	json.Unmarshal(saved.Location, &location)
+	if len(location.SentenceLink.Parts) != 2 {
+		t.Fatalf("saved source links lost: %+v", location.SentenceLink)
+	}
+	plain := pdfUnderline("plain", []annotationRect{{0.3, 0.2, 0.3, 0.02}}, "two three")
+	plain.Kind = "highlight"
+	if _, ok := mergeAnnotationMark(a, plain); ok {
+		t.Fatal("merged linked and unlinked highlights")
+	}
+}
+
+func TestEPUBHighlightMerge(t *testing.T) {
+	a := epubUnderline("a", 0, 7, "one two")
+	b := epubUnderline("b", 4, 13, "two three")
+	a.Kind, b.Kind = "highlight", "highlight"
+	merged, ok := mergeAnnotationMark(a, b)
+	if !ok || merged.Quote != "one two three" {
+		t.Fatalf("EPUB highlights not merged: %+v %v", merged, ok)
+	}
+	var location annotationEPUBLocation
+	json.Unmarshal(merged.Location, &location)
+	var locator annotationLocator
+	json.Unmarshal([]byte(location.Locator), &locator)
+	if locator.Locations.TextRange.Start != 0 || locator.Locations.TextRange.End != 13 {
+		t.Fatalf("wrong EPUB highlight range: %+v", locator)
+	}
+	duplicate, ok := mergeAnnotationMark(merged, merged)
+	if !ok || duplicate.Quote != merged.Quote {
+		t.Fatal("repeated EPUB highlight was not deduplicated")
+	}
+}
+
+func TestHighlightRestartRepair(t *testing.T) {
+	s := testServer(t)
+	var doc Document
+	json.Unmarshal(upload(t, s, "reading-notes.pdf", sample(t, "reading-notes.pdf")).Body.Bytes(), &doc)
+	for _, id := range []string{"first", "duplicate"} {
+		a := pdfUnderline(id, []annotationRect{{0.1, 0.2, 0.3, 0.02}}, "same sentence")
+		a.Kind, a.DocumentID = "highlight", doc.ID
+		body, _ := json.Marshal(a)
+		if _, err := s.Store.DB.Exec("INSERT INTO annotations VALUES(?,?,?)", id, doc.ID, string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := s.Store.Root
+	s.Store.DB.Close()
+	store, err := OpenStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB.Close()
+	var count int
+	store.DB.QueryRow("SELECT COUNT(*) FROM annotations WHERE document_id=?", doc.ID).Scan(&count)
+	if count != 1 {
+		t.Fatalf("historical highlight duplicates remain: %d", count)
+	}
+}
+
 func pdfUnderline(id string, rects []annotationRect, quote string) Annotation {
 	location, _ := json.Marshal(annotationPDFLocation{Type: "pdf", Page: 1, Rects: rects})
 	return Annotation{ID: id, DocumentID: "doc", Kind: "underline", Location: location, Quote: quote, Color: "#e6b94c", CreatedAt: now()}
@@ -62,7 +201,7 @@ func TestUnderlineMergeBoundaries(t *testing.T) {
 	for _, kind := range []string{"note", "highlight", "bookmark"} {
 		b := a
 		b.Kind = kind
-		if _, ok := mergeUnderline(a, b); ok {
+		if _, ok := mergeAnnotationMark(a, b); ok {
 			t.Fatalf("merged %s into underline", kind)
 		}
 	}
@@ -77,12 +216,12 @@ func TestUnderlineMergeBoundaries(t *testing.T) {
 	otherDoc.DocumentID = "other"
 	separate = append(separate, otherPage, otherDoc)
 	for _, b := range separate {
-		if _, ok := mergeUnderline(a, b); ok {
+		if _, ok := mergeAnnotationMark(a, b); ok {
 			t.Fatalf("merged separate ranges: %+v", b)
 		}
 	}
 	b := pdfUnderline("b", []annotationRect{{0.3, 0.2001, 0.3, 0.02}}, "原文内容")
-	merged, ok := mergeUnderline(a, b)
+	merged, ok := mergeAnnotationMark(a, b)
 	if !ok || merged.Quote != "阅读原文内容" {
 		t.Fatalf("unicode overlap: %+v %v", merged, ok)
 	}
@@ -90,7 +229,7 @@ func TestUnderlineMergeBoundaries(t *testing.T) {
 func TestUnderlineMergeAcrossLines(t *testing.T) {
 	a := pdfUnderline("a", []annotationRect{{0.1, 0.2, 0.6, 0.02}, {0.1, 0.3, 0.2, 0.02}}, "Before reading\nUse the outline")
 	b := pdfUnderline("b", []annotationRect{{0.2, 0.3, 0.5, 0.02}, {0.1, 0.4, 0.4, 0.02}}, "outline to inspect\nSelect a sentence")
-	merged, ok := mergeUnderline(a, b)
+	merged, ok := mergeAnnotationMark(a, b)
 	if !ok {
 		t.Fatal("cross-line overlap not merged")
 	}
@@ -107,7 +246,7 @@ func TestUnderlineMergeAcrossLines(t *testing.T) {
 func TestUnderlineMergeRepeatedPhrase(t *testing.T) {
 	a := pdfUnderline("a", []annotationRect{{0.1, 0.2, 0.2, 0.02}}, "word word")
 	b := pdfUnderline("b", []annotationRect{{0.2, 0.2, 0.2, 0.02}}, "word word")
-	merged, ok := mergeUnderline(a, b)
+	merged, ok := mergeAnnotationMark(a, b)
 	if !ok || merged.Quote != "word word word" {
 		t.Fatalf("repeated words lost: %q", merged.Quote)
 	}
@@ -170,7 +309,7 @@ func TestUnderlineBridgeAndRestartRepair(t *testing.T) {
 	if len(records) != 2 || records[0].ID != "left" || records[1].Note != "Do not remove" {
 		t.Fatalf("legacy repair damaged records: %+v", records)
 	}
-	if err := store.compactUnderlines(); err != nil {
+	if err := store.compactMarks(); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -217,7 +356,7 @@ func epubUnderline(id string, start, end int, quote string) Annotation {
 func TestEPUBUnderlineUnion(t *testing.T) {
 	a := epubUnderline("a", 0, 7, "one two")
 	b := epubUnderline("b", 4, 13, "two three")
-	merged, ok := mergeUnderline(a, b)
+	merged, ok := mergeAnnotationMark(a, b)
 	if !ok || merged.Quote != "one two three" {
 		t.Fatalf("EPUB merge: %+v %v", merged, ok)
 	}
@@ -229,12 +368,12 @@ func TestEPUBUnderlineUnion(t *testing.T) {
 		t.Fatalf("wrong EPUB range: %+v", locator)
 	}
 	contained := epubUnderline("c", 4, 7, "two")
-	merged, ok = mergeUnderline(a, contained)
+	merged, ok = mergeAnnotationMark(a, contained)
 	if !ok || merged.Quote != a.Quote {
 		t.Fatal("contained EPUB underline changed quote")
 	}
 	separate := epubUnderline("d", 7, 13, "three")
-	if _, ok = mergeUnderline(a, separate); ok {
+	if _, ok = mergeAnnotationMark(a, separate); ok {
 		t.Fatal("merged touching EPUB ranges")
 	}
 	// Legacy exact DOM ranges can still merge without the newer text offsets.
@@ -244,7 +383,7 @@ func TestEPUBUnderlineUnion(t *testing.T) {
 	encoded, _ := json.Marshal(raw)
 	location.Locator = string(encoded)
 	merged.Location, _ = json.Marshal(location)
-	if _, ok = mergeUnderline(merged, b); !ok {
+	if _, ok = mergeAnnotationMark(merged, b); !ok {
 		t.Fatal("legacy DOM range did not merge")
 	}
 }
@@ -259,10 +398,10 @@ func TestLinkedAndTranslatedUnderlinesKeepTheirAnchors(t *testing.T) {
 		}
 		location[field] = json.RawMessage(`{"blockId":"p1-b1"}`)
 		b.Location, _ = json.Marshal(location)
-		if _, ok := mergeUnderline(a, b); ok {
+		if _, ok := mergeAnnotationMark(a, b); ok {
 			t.Fatalf("merged and lost %s anchor", field)
 		}
-		if _, ok := mergeUnderline(b, a); ok {
+		if _, ok := mergeAnnotationMark(b, a); ok {
 			t.Fatalf("merged incompatible %s anchors", field)
 		}
 	}

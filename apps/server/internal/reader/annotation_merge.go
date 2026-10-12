@@ -83,24 +83,68 @@ func joinAnnotationQuotes(first, second string) string {
 	// their overlap cannot be reconstructed safely; never discard quoted text.
 	return strings.TrimSpace(first + "\n" + second)
 }
-func mergeUnderline(a, b Annotation) (Annotation, bool) {
-	// Translated ranges, sentence links and EPUB source locators live in their
-	// own coordinate spaces. The geometric union below would discard them.
+func mergeSourceSentenceLinks(a, b json.RawMessage) (json.RawMessage, bool) {
+	var left, right struct {
+		Origin string            `json:"origin"`
+		Parts  []json.RawMessage `json:"parts"`
+	}
+	if len(a) == 0 || string(a) == "null" {
+		return nil, len(b) == 0 || string(b) == "null"
+	}
+	if len(b) == 0 || string(b) == "null" || json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil || left.Origin != "source" || right.Origin != "source" || len(left.Parts) == 0 || len(right.Parts) == 0 {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	parts := []json.RawMessage{}
+	for _, part := range append(left.Parts, right.Parts...) {
+		var normalized any
+		if json.Unmarshal(part, &normalized) != nil {
+			return nil, false
+		}
+		key, _ := json.Marshal(normalized)
+		if !seen[string(key)] {
+			parts = append(parts, part)
+			seen[string(key)] = true
+		}
+	}
+	merged, _ := json.Marshal(struct {
+		Origin string            `json:"origin"`
+		Parts  []json.RawMessage `json:"parts"`
+	}{"source", parts})
+	return merged, true
+}
+func mergeAnnotationMark(a, b Annotation) (Annotation, bool) {
+	// Translated ranges live in another coordinate space. Their source geometry
+	// cannot be united without also updating the translated ranges.
+	var leftFields, rightFields map[string]json.RawMessage
 	for _, location := range []json.RawMessage{a.Location, b.Location} {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(location, &fields) != nil {
 			continue
 		}
-		for _, key := range []string{"translation", "sentenceLink"} {
-			if value := fields[key]; len(value) > 0 && string(value) != "null" {
-				return a, false
-			}
+		if value := fields["translation"]; len(value) > 0 && string(value) != "null" {
+			return a, false
+		}
+		if leftFields == nil {
+			leftFields = fields
+		} else {
+			rightFields = fields
 		}
 	}
-	if a.Kind != "underline" || b.Kind != "underline" || a.DocumentID != b.DocumentID {
+	if (a.Kind != "underline" && a.Kind != "highlight") || a.Kind != b.Kind || a.DocumentID != b.DocumentID {
 		return a, false
 	}
-	if merged, ok := mergeEPUBUnderline(a, b); ok {
+	link, linked := mergeSourceSentenceLinks(leftFields["sentenceLink"], rightFields["sentenceLink"])
+	if !linked {
+		return a, false
+	}
+	if merged, ok := mergeEPUBMark(a, b); ok {
+		if len(link) > 0 {
+			var location map[string]json.RawMessage
+			json.Unmarshal(merged.Location, &location)
+			location["sentenceLink"] = link
+			merged.Location, _ = json.Marshal(location)
+		}
 		return merged, true
 	}
 	var left, right annotationPDFLocation
@@ -137,6 +181,9 @@ func mergeUnderline(a, b Annotation) (Annotation, bool) {
 	}
 	location["rects"], _ = json.Marshal(unionAnnotationRects(append(left.Rects, right.Rects...)))
 	location["quote"], _ = json.Marshal(quote)
+	if len(link) > 0 {
+		location["sentenceLink"] = link
+	}
 	a.Location, _ = json.Marshal(location)
 	a.Quote = quote
 	if b.Note != "" && b.Note != a.Note {
@@ -201,7 +248,7 @@ func compareAnnotationPoints(a, b annotationDOMPoint) (int, bool) {
 	}
 	return a.CharOffset - b.CharOffset, true
 }
-func mergeEPUBUnderline(a, b Annotation) (Annotation, bool) {
+func mergeEPUBMark(a, b Annotation) (Annotation, bool) {
 	var left, right annotationEPUBLocation
 	if json.Unmarshal(a.Location, &left) != nil || json.Unmarshal(b.Location, &right) != nil || left.Type != "epub" || right.Type != "epub" || strings.Split(left.Href, "#")[0] != strings.Split(right.Href, "#")[0] {
 		return a, false
@@ -306,8 +353,8 @@ func mergeEPUBUnderline(a, b Annotation) (Annotation, bool) {
 }
 
 // The same transaction handles deduplication and persistence so concurrent saves
-// cannot leave duplicates or temporarily remove a user's underline.
-func compactDocumentUnderlines(tx *sql.Tx, documentID string) ([]Annotation, map[string]string, error) {
+// cannot leave duplicates or temporarily remove a user's mark.
+func compactDocumentMarks(tx *sql.Tx, documentID string) ([]Annotation, map[string]string, error) {
 	rows, err := tx.Query("SELECT body FROM annotations WHERE document_id=? ORDER BY rowid", documentID)
 	if err != nil {
 		return nil, nil, err
@@ -338,7 +385,7 @@ func compactDocumentUnderlines(tx *sql.Tx, documentID string) ([]Annotation, map
 		changed = false
 		for i := 0; i < len(items); i++ {
 			for j := i + 1; j < len(items); j++ {
-				merged, ok := mergeUnderline(items[i], items[j])
+				merged, ok := mergeAnnotationMark(items[i], items[j])
 				if !ok {
 					continue
 				}
@@ -389,7 +436,7 @@ func (s *Store) saveAnnotation(a Annotation) (annotationSaveResult, error) {
 	if _, err = tx.Exec("INSERT INTO annotations VALUES(?,?,?)", a.ID, a.DocumentID, string(body)); err != nil {
 		return result, err
 	}
-	items, aliases, err := compactDocumentUnderlines(tx, a.DocumentID)
+	items, aliases, err := compactDocumentMarks(tx, a.DocumentID)
 	if err != nil {
 		return result, err
 	}
@@ -412,8 +459,8 @@ func (s *Store) saveAnnotation(a Annotation) (annotationSaveResult, error) {
 	return result, tx.Commit()
 }
 
-// Idempotent startup repair also handles underlines saved before deduplication.
-func (s *Store) compactUnderlines() error {
+// Idempotent startup repair also handles marks saved before deduplication.
+func (s *Store) compactMarks() error {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
@@ -438,7 +485,7 @@ func (s *Store) compactUnderlines() error {
 		return err
 	}
 	for _, id := range ids {
-		if _, _, err = compactDocumentUnderlines(tx, id); err != nil {
+		if _, _, err = compactDocumentMarks(tx, id); err != nil {
 			return err
 		}
 	}
