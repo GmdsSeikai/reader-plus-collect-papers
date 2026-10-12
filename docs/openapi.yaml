@@ -4,6 +4,104 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/diagnostics/events":
+        {
+          "post":
+            {
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": ["level", "event"],
+                              "properties":
+                                {
+                                  "level":
+                                    {
+                                      "type": "string",
+                                      "enum": ["info", "warn", "error"],
+                                    },
+                                  "event":
+                                    {
+                                      "type": "string",
+                                      "maxLength": 80,
+                                      "pattern": "^[a-z][a-z0-9_.-]{0,79}$",
+                                    },
+                                  "detail":
+                                    { "type": "string", "maxLength": 512 },
+                                  "stack":
+                                    { "type": "string", "maxLength": 8000 },
+                                  "requestId":
+                                    { "type": "string", "maxLength": 512 },
+                                  "route":
+                                    { "type": "string", "maxLength": 512 },
+                                  "method":
+                                    { "type": "string", "maxLength": 512 },
+                                  "status": { "type": "number", "minimum": 0 },
+                                  "durationMs":
+                                    { "type": "number", "minimum": 0 },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "204": { "description": "Local diagnostic event recorded" },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/diagnostics/export":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "ZIP containing all retained local logs with redaction and a manifest",
+                      "content":
+                        {
+                          "application/zip":
+                            {
+                              "schema":
+                                { "type": "string", "format": "binary" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/journal-ranks/config":
         {
           "get":

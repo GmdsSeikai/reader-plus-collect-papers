@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("readerDesktop", {
   platform: process.platform,
+  exportDiagnostics: () => ipcRenderer.invoke("reader:export-diagnostics"),
+  recordDiagnostic: (event: unknown) =>
+    ipcRenderer.send("reader:diagnostic-event", event),
+  diagnosticSettings: (settings: unknown) =>
+    ipcRenderer.send("reader:diagnostic-settings", settings),
   checkForUpdates: () => ipcRenderer.invoke("reader:check-updates"),
   writeClipboardText: (text: string) =>
     ipcRenderer.invoke("reader:clipboard-write", text),

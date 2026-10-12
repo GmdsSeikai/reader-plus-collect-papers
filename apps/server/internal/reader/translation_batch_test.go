@@ -406,6 +406,10 @@ func TestTranslationFailureNamesTheCauseAndKeepsTheOutput(t *testing.T) {
 		t.Fatalf("diagnostic not written: %v %v", entries, err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	cut := strings.Index(string(data), "--- raw output ---")
+	if cut < 0 || !strings.Contains(string(data)[:cut], "=== attempt 2:") {
+		t.Fatal("trusted retry statistics must precede all model output")
+	}
 	for _, part := range []string{"batch: p1-b1…p1-b2 (2 paragraphs)", "failed p1-b2: " + want, "=== attempt 2: 1 paragraphs requested, 0 saved, 1 output lines, 1 unparsable", "not json at all"} {
 		if !strings.Contains(string(data), part) {
 			t.Fatalf("diagnostic misses %q:\n%s", part, data)

@@ -8,26 +8,45 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reader.local/server/internal/diagnostics"
 	"reader.local/server/internal/reader"
+	"runtime"
 	"syscall"
 	"time"
 )
+
+var readerVersion = "dev"
+var buildCommit = "unknown"
 
 func main() {
 	data := flag.String("data", ".reader", "local library directory")
 	port := flag.String("port", "17840", "loopback port, 0 for automatic")
 	web := flag.String("web", "", "built web directory")
 	connector := flag.Bool("connector", true, "enable Reader Connector listener")
+	logs := flag.String("logs", "", "diagnostic log directory")
+	session := flag.String("session", "", "diagnostic session ID")
 	flag.Parse()
 	root, err := filepath.Abs(*data)
 	if err != nil {
 		log.Fatal(err)
 	}
+	if *logs == "" {
+		*logs = filepath.Join(root, "logs")
+	}
+	recorder, logErr := diagnostics.New(*logs, *session, os.Getenv("READER_TOKEN"))
+	if logErr == nil {
+		slog.SetDefault(recorder.Logger())
+	} else {
+		log.Printf("local logging unavailable: %v", logErr)
+	}
+	recorder.Environment = map[string]any{"mode": "server", "appVersion": readerVersion, "buildCommit": buildCommit, "os": runtime.GOOS, "architecture": runtime.GOARCH, "goVersion": runtime.Version()}
+	slog.Info("server.start", "appVersion", readerVersion, "buildCommit", buildCommit, "goVersion", runtime.Version())
 	unlock, err := reader.LockLibrary(root)
 	if err != nil {
 		log.Fatal(err)
@@ -50,7 +69,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	recorder.Secrets = append(recorder.Secrets, token)
 	server := reader.NewServer(store, token, *web)
+	server.SetDiagnostics(recorder)
 	defer server.Close()
 	if !*connector {
 		server.SetConnectorUnavailable("disabled")
@@ -77,6 +98,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stop
+		slog.Info("server.stopping")
 		cancelRun()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
