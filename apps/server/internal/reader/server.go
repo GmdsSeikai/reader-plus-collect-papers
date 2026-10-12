@@ -179,7 +179,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /pub/{cap}/{id}/{resource...}", s.resource)
 	if s.Web != "" {
-		mux.Handle("/", http.FileServer(http.Dir(s.Web)))
+		mux.Handle("/", webAssets(s.Web))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
@@ -209,6 +209,33 @@ func (s *Server) Handler() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+// webAssets serves the built renderer. Chromium only runs an ES module or a
+// module worker when the response carries a JavaScript MIME type, and host MIME
+// databases map ".mjs" to "text/plain" often enough that Go special-cases ".js"
+// alone (golang/go#32350), so the types the bundle depends on are pinned here
+// instead of being looked up.
+func webAssets(root string) http.Handler {
+	files := http.FileServer(http.Dir(root))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if contentType := webContentType(r.URL.Path); contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+func webContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".js", ".mjs":
+		return "text/javascript; charset=utf-8"
+	case ".wasm":
+		return "application/wasm"
+	}
+	return ""
 }
 func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
