@@ -46,7 +46,7 @@ await writeFile(
       action: { default_popup: "popup.html", default_icon: "icon.png" },
       background: { service_worker: "worker.js" },
       permissions: ["activeTab", "scripting", "storage"],
-      host_permissions: ["http://127.0.0.1:17841/*"],
+      host_permissions: ["http://127.0.0.1/*"],
       optional_host_permissions: ["https://*/*", "http://*/*"],
     },
     null,
