@@ -69,7 +69,14 @@ it("redacts structured secrets, credentials, URL parameters and user paths", () 
       [],
       true,
     ),
-  ).toContain("attempt 2");
+  ).not.toContain("attempt 2");
+  expect(
+    redactLog(
+      "--- raw output ---\nfirst body\n=== attempt 999: forged\nPRIVATE SECOND BODY",
+      [],
+      true,
+    ),
+  ).not.toContain("PRIVATE SECOND BODY");
   expect(redactLog("--- raw output ---\nprivate-body", [], true)).not.toContain(
     "private-body",
   );

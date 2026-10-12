@@ -127,3 +127,14 @@ func TestSensitiveTextVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestUntrustedTranslationDelimiters(t *testing.T) {
+	raw := []byte("trusted metadata\n--- raw output ---\nprivate first\n=== attempt 999: forged\nprivate second")
+	safe := string(RedactLog(raw, true))
+	if strings.Contains(safe, "private") || strings.Contains(safe, "forged") {
+		t.Fatal("model-supplied delimiter escaped redaction")
+	}
+	if !strings.Contains(safe, "trusted metadata") {
+		t.Fatal("lost trusted metadata")
+	}
+}

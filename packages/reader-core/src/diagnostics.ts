@@ -208,7 +208,7 @@ export function redactLog(
 ): string {
   const safe = legacy
     ? text.replace(
-        /--- raw output ---[\s\S]*?(?=\n=== attempt |$)/g,
+        /--- raw output ---[\s\S]*$/g,
         "--- raw output ---\n[DOCUMENT AND MODEL OUTPUT REMOVED]\n",
       )
     : text;

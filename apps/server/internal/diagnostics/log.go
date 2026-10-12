@@ -28,7 +28,7 @@ var assigned = regexp.MustCompile(`(?i)(["']?(api[ _-]?key|key|access[_-]?token|
 var keyToken = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]+|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 var urls = regexp.MustCompile(`(?i)(https?|file)://[^\s"'<>]+`)
 var paths = regexp.MustCompile(`/(Users|home|private|tmp|var|Volumes|Applications)/[^\r\n"'<>]+|[A-Za-z]:[\\/][^\r\n"'<>]+|\\\\[^\r\n"'<>]+`)
-var rawOutput = regexp.MustCompile(`(?s)--- raw output ---.*?(\n=== attempt |$)`)
+var rawOutput = regexp.MustCompile(`(?s)--- raw output ---.*$`)
 
 func RedactText(text string, secrets ...string) string {
 	secrets = append([]string(nil), secrets...)
@@ -73,7 +73,7 @@ func redact(v any, secrets []string) any {
 }
 func RedactLog(data []byte, legacy bool, secrets ...string) []byte {
 	if legacy {
-		data = rawOutput.ReplaceAll(data, []byte("--- raw output ---\n[DOCUMENT AND MODEL OUTPUT REMOVED]\n${1}"))
+		data = rawOutput.ReplaceAll(data, []byte("--- raw output ---\n[DOCUMENT AND MODEL OUTPUT REMOVED]\n"))
 	}
 	var out bytes.Buffer
 	for i, line := range bytes.Split(data, []byte("\n")) {
