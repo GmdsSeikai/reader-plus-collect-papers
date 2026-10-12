@@ -69,10 +69,22 @@ it("redacts structured secrets, credentials, URL parameters and user paths", () 
   expect(redactLog("--- raw output ---\nprivate-body", [], true)).not.toContain(
     "private-body",
   );
+  const located = new Error("PRIVATE DOCUMENT");
+  located.stack =
+    "Error: PRIVATE DOCUMENT\n    at render (http://127.0.0.1/assets/main.js:123:45)";
+  expect(diagnosticError(located).stack).toContain("123:45");
+  expect(diagnosticError(located).stack).not.toContain("http://");
   expect(diagnosticError(new Error("PRIVATE DOCUMENT"))).not.toHaveProperty(
     "detail",
     "PRIVATE DOCUMENT",
   );
+  expect(
+    validateDiagnosticEvent({
+      level: "info",
+      event: "api.finish",
+      requestId: undefined,
+    }),
+  ).toEqual({ level: "info", event: "api.finish" });
   expect(
     validateDiagnosticEvent({
       level: "error",
@@ -85,6 +97,13 @@ it("redacts structured secrets, credentials, URL parameters and user paths", () 
       "/pub/secret/document/chapters/user-name.html?token=private",
     ),
   ).not.toContain("secret");
+  expect(redactText("panic: PRIVATE CONTENT\nstack frames")).not.toContain(
+    "PRIVATE CONTENT",
+  );
+  expect(redactText("Cookie: first=one; second=two")).not.toContain("two");
+  expect(redactText("/Users/alice/My Private Paper.pdf")).not.toContain(
+    "Private Paper",
+  );
   expect(redactText("Authorization: Bearer opaque")).not.toContain("opaque");
 });
 

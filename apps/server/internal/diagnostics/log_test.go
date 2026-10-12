@@ -116,3 +116,14 @@ func TestRotationRetentionAndLoggingFailure(t *testing.T) {
 		t.Fatal("logging failure changed application behavior")
 	}
 }
+
+func TestSensitiveTextVariants(t *testing.T) {
+	for _, input := range []string{"Cookie: first=private-cookie; second=private-cookie", "file /Users/alice/My Private Paper.pdf", "panic: private-panic\nstack frames", "http: panic serving localhost: private-panic\nstack frames"} {
+		safe := RedactText(input)
+		for _, private := range []string{"private-cookie", "alice", "Private Paper", "private-panic"} {
+			if strings.Contains(safe, private) {
+				t.Fatalf("leaked sensitive text: %s", safe)
+			}
+		}
+	}
+}

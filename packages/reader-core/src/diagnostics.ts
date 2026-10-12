@@ -21,6 +21,10 @@ export function redactText(text: string, secrets: string[] = []): string {
     result = result.split(secret).join("[REDACTED]");
   return result
     .replace(
+      /^(?:panic:|http: panic serving)[^\n]*/gm,
+      "panic: [MESSAGE REMOVED]",
+    )
+    .replace(
       /(?:authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*/gi,
       "[AUTH HEADER]",
     )
@@ -70,13 +74,19 @@ export function diagnosticError(
       )
         ? error.name
         : "Error",
-    stack: redactText(
-      (error.stack || "")
-        .split("\n")
-        .filter((line) => /^\s*at\s/.test(line))
-        .slice(0, 30)
-        .join("\n"),
-    ).slice(0, 8000),
+    stack: (error.stack || "")
+      .split("\n")
+      .filter((line) => /^\s*at\s/.test(line))
+      .slice(0, 30)
+      .map((line) => {
+        const position = line.match(/:(\d+):(\d+)\)?$/);
+        return (
+          redactText(line) +
+          (position ? ` [${position[1]}:${position[2]}]` : "")
+        );
+      })
+      .join("\n")
+      .slice(0, 8000),
   };
 }
 
@@ -87,7 +97,8 @@ export function validateDiagnosticEvent(
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
   if (
-    !["info", "warn", "error"].includes(String(v.level)) ||
+    typeof v.level !== "string" ||
+    !["info", "warn", "error"].includes(v.level) ||
     typeof v.event !== "string" ||
     !/^[a-z][a-z0-9_.-]{0,79}$/.test(v.event)
   )
@@ -108,7 +119,18 @@ export function validateDiagnosticEvent(
       return null;
     result[key] = v[key];
   }
-  if (Object.keys(v).some((key) => !(key in result))) return null;
+  const allowed = new Set([
+    "level",
+    "event",
+    "detail",
+    "stack",
+    "requestId",
+    "route",
+    "method",
+    "status",
+    "durationMs",
+  ]);
+  if (Object.keys(v).some((key) => !allowed.has(key))) return null;
   return result as DiagnosticEvent;
 }
 
