@@ -17,6 +17,7 @@ import (
 type CollectionManager struct {
 	server   *Server
 	gate     *scholar.SourceGate
+	s2Gate   *scholar.SourceGate
 	mu       sync.Mutex
 	running  map[string]context.CancelFunc // runID → cancel
 	inflight sync.WaitGroup
@@ -29,6 +30,7 @@ func NewCollectionManager(s *Server) *CollectionManager {
 	return &CollectionManager{
 		server:  s,
 		gate:    scholar.NewSourceGate("arxiv", 3*time.Second),
+		s2Gate:  scholar.NewSourceGate("s2", time.Second),
 		running: map[string]context.CancelFunc{},
 	}
 }

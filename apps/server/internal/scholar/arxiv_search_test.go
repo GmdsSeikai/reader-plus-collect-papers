@@ -174,6 +174,7 @@ func TestSourceGateSharedAcrossGatesOnSameFile(t *testing.T) {
 }
 
 func TestDownloadArxivVersionStrict(t *testing.T) {
+	c := New(0)
 	if err := c.strictDownloadURL(mustURL(t, "https://arxiv.org/pdf/2301.12345v2")); err != nil {
 		t.Fatalf("arxiv https rejected: %v", err)
 	}
