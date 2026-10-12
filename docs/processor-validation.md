@@ -4,11 +4,11 @@ The processor is now connected to the desktop two-stage import UI, with separate
 
 ## Distribution decision
 
-The planned default installer includes PDF.js, the native Canvas runtime, ONNX Runtime and the processor code. The PP-DocLayoutV3 weights are downloaded automatically on first use and cached once per local library. Users do not install Python or PaddlePaddle. An installer containing the weights could support offline first use; that packaging variant is not implemented.
+The default installer includes PDF.js, the native Canvas runtime, ONNX Runtime, the processor code and the pinned PP-DocLayoutV3 FP16 weights. The processor build downloads and verifies the weights once into an ignored build cache, then copies the current model into application resources alongside its Apache-2.0 license and provenance notice. Runtime inference verifies and reads that bundled copy, including on first use without network access or a library model cache. Users do not install Python or PaddlePaddle. See [releasing.md](releasing.md) for build caching and offline build inputs.
 
-The desktop import flow now starts the worker automatically for PDFs. The UI exposes model download status, per-page learning progress, translation progress, connection waits and retries. Per-asset image consolidation has since been removed; the consolidation results below are a historical record. Desktop installer distribution is not implemented yet.
+The desktop import flow now starts the worker automatically for PDFs. The UI exposes per-page learning progress, translation progress, connection waits and retries; model downloads occur only during builds. Per-asset image consolidation has since been removed; the consolidation results below are a historical record. Desktop installers are built with electron-builder.
 
-Weights: `bu44er/PP-DocLayoutV3-FP16-ONNX`, revision `58dfa00ba1135e027817cbd5802f1f0df62aa5c0`, file `PP-DocLayoutV3-fp16.onnx`, 67,372,587 bytes (about 67 MB / 64.3 MiB). SHA256: `8bb693ed3b5dcc1cf926b15d89dfe6abf62bc11cdd0afd33c8ffe039db6f8209`. It is a byte-identical mirror of [`stefanj0/PP-DocLayoutV3-FP16-ONNX`](https://huggingface.co/stefanj0/PP-DocLayoutV3-FP16-ONNX) at `ca5155572513b7832d297255a1f5cab0ff4b0202`, an FP16 export of [`PaddlePaddle/PP-DocLayoutV3_safetensors`](https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_safetensors) without the mask head; box decoding and reading-order postprocessing stay in FP32. The mirror keeps the file available if the source repository disappears. Weights and generated user documents are not committed. The download is checked before inference; partial downloads never become the cached model. After the current model is verified, the superseded FP32 cache file is deleted.
+Weights: `bu44er/PP-DocLayoutV3-FP16-ONNX`, revision `58dfa00ba1135e027817cbd5802f1f0df62aa5c0`, file `PP-DocLayoutV3-fp16.onnx`, 67,372,587 bytes (about 67 MB / 64.3 MiB). SHA256: `8bb693ed3b5dcc1cf926b15d89dfe6abf62bc11cdd0afd33c8ffe039db6f8209`. It is a byte-identical mirror of [`stefanj0/PP-DocLayoutV3-FP16-ONNX`](https://huggingface.co/stefanj0/PP-DocLayoutV3-FP16-ONNX) at `ca5155572513b7832d297255a1f5cab0ff4b0202`, an FP16 export of [`PaddlePaddle/PP-DocLayoutV3_safetensors`](https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_safetensors) without the mask head; box decoding and reading-order postprocessing stay in FP32. The mirror keeps the file available if the source repository disappears. Weights and generated user documents are not committed. Build downloads are checked before publication; partial downloads never become usable models. Runtime verifies the bundled file and fails locally if it is missing or corrupt, without downloading a replacement. Old per-library caches are left untouched.
 
 I/O differs from the official paddle2onnx export: the output is `det` (`[300,7]`), boxes are in the 800×800 input space, and `scale_factor` is passed as `[1,1]`. `detectRegions` owns this contract. Set `READER_TEST_LAYOUT_MODEL` to a downloaded copy to run the real-model coordinate test.
 
@@ -23,7 +23,6 @@ pnpm --filter @reader/processor build
 node apps/processor/dist/main.mjs \
   --input 'docs/66_VLDB25- Oze_ Decentralized Graph-based Concurrency Control for Long-running Update Transactions.pdf' \
   --output .reader/layout-check/oze \
-  --model-cache .reader/models \
   --debug
 ```
 
@@ -37,6 +36,16 @@ READER_TEST_CODEX=1 go test ./internal/reader -run '^TestLiveCodex$' -v -count=1
 ```
 
 The default automated test suite skips this call. To additionally test a paper image, set `READER_TEST_IMAGE` to its absolute PNG path and optionally `READER_TEST_OUTPUT` to a Markdown destination. The test runs in a fresh temporary working directory, disables shell tools and avoids user/project instruction configuration. It uses the CLI's authentication; Reader does not inspect credentials.
+
+## Bundled-model validation on 2026-10-12
+
+On the development Apple Silicon Mac, `pnpm build` fetched the pinned weights into a fresh build cache and verified their exact size and SHA256. `pnpm package` reused that cache, produced the macOS ARM64 DMG and update ZIP, and passed the packaged-runtime checks after relocating the whole application outside the checkout.
+
+The packaged worker processed the two-page original `reading-notes.pdf` sample in a fresh temporary directory, with Node `fetch` and TCP connections disabled and without a model-path override or a library model cache. It produced 18 layout blocks, per-page detections, extracted text, `paper.md` and a completed `manifest.json`. The check also verified the bundled license/provenance files, application signature, Go sidecar, SQLite initialization, loopback binding, API authentication and web resources. This establishes offline first use for the tested sample and macOS runtime, not general document accuracy or installed GUI behavior.
+
+Type checking and the full build passed. The initial parallel test run had four failures in existing timing-sensitive tests (three test timeouts and one asynchronous rendering wait); the complete serial rerun with `pnpm test --maxWorkers=1` passed Go tests and 566 Vitest tests, with three skips. `READER_TEST_LAYOUT_MODEL` pointed at the newly bundled model, so the real-model coordinate test ran in both full-suite runs. Test timeouts and application behavior outside model distribution were not changed.
+
+The local v0.5.1 validation artifacts measured 203,893,014 bytes (194.45 MiB) for the DMG and 248,945,874 bytes (237.41 MiB) for the update ZIP. These are total artifact sizes, not a measured increase over an equivalent unbundled build. Windows packaging and installation/GUI acceptance remain unverified for this change; the shared packaging smoke will run on the Windows release runner.
 
 ## Observations on 2026-10-04
 

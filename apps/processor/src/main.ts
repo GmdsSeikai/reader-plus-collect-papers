@@ -22,7 +22,6 @@ const { values } = parseArgs({
   options: {
     input: { type: "string" },
     output: { type: "string" },
-    "model-cache": { type: "string" },
     model: { type: "string" },
     // Books parse one chapter at a time; omitted bounds cover the document.
     "from-page": { type: "string" },
@@ -32,7 +31,7 @@ const { values } = parseArgs({
 });
 if (!values.input || !values.output)
   throw new Error(
-    "Usage: --input PDF --output DIRECTORY [--from-page N] [--to-page N] [--model FILE] [--model-cache DIRECTORY] [--debug]",
+    "Usage: --input PDF --output DIRECTORY [--from-page N] [--to-page N] [--model FILE] [--debug]",
   );
 const pageBound = (value: string | undefined) => {
   if (value === undefined) return undefined;
@@ -48,10 +47,7 @@ await mkdir(output, { recursive: true, mode: 0o700 });
 if ((await readdir(output)).length)
   throw new Error("输出目录必须为空，避免覆盖已有解析稿或用户修订");
 await mkdir(join(output, "assets"), { recursive: true, mode: 0o700 });
-const modelPath = await resolveModel(
-  resolve(values["model-cache"] ?? join(output, "..", "models")),
-  values.model,
-);
+const modelPath = await resolveModel(values.model && resolve(values.model));
 const session = await ort.InferenceSession.create(modelPath, {
   intraOpNumThreads: 2,
   interOpNumThreads: 1,
