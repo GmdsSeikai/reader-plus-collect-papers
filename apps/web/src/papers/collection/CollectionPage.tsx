@@ -179,7 +179,10 @@ export function CollectionPage({
   const loadCandidates = useCallback(
     (cursor?: string) => {
       const seq = ++requestSeq.current;
-      const params: Record<string, string> = { sort };
+      const params: Record<string, string> = {
+        sort,
+        channel: tab === "hot" ? "hot" : tab === "latest" ? "latest" : "",
+      };
       if (query.trim()) params.q = query.trim();
       if (cursor) params.cursor = cursor;
       collectionApi
@@ -192,7 +195,7 @@ export function CollectionPage({
         })
         .catch((e) => toast.error((e as Error).message));
     },
-    [query, sort],
+    [query, sort, tab],
   );
 
   useEffect(() => {
