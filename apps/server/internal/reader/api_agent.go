@@ -16,7 +16,7 @@ import (
 // user-supplied key. Its models come from /models plus IDs the user adds, and
 // each model is checked separately for text and vision. Requests use only
 // models that passed: text requests the task's model, image requests the
-// vision model. Effort is sent only when the model advertises it.
+// vision model. Models without effort metadata use low/medium/high.
 type apiAgentAdapter struct {
 	conn         APIConnection
 	text, vision apiModelChoice
@@ -83,7 +83,7 @@ func (s *Server) apiAgentAdapter(c AIConfig, task modelTask) apiAgentAdapter {
 }
 
 // resolve fixes the model and native effort for one request. A chosen model
-// still works when the catalog is unavailable; only effort is then omitted.
+// still works when the catalog is unavailable, using standard effort tiers.
 func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRequest, error) {
 	if e := validateAgentAPI(a.conn); e != nil {
 		return completionRequest{}, generationError(ErrorConfiguration, e.Error())
@@ -95,7 +95,7 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 	if vision {
 		choice, task = a.vision, taskVision
 	}
-	req := completionRequest{Model: choice.model}
+	req := completionRequest{Model: choice.model, Effort: apiEffort(choice.level, nil)}
 	models, err := a.catalog(ctx)
 	if err != nil {
 		if req.Model == "" {
@@ -115,11 +115,47 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 		return req, generationError(ErrorCapability, "没有通过文本推理检测的 API 模型")
 	}
 	for _, m := range models {
-		if m.ID == req.Model && len(m.SupportedEfforts) > 0 && choice.level != "" {
-			req.Effort = nativeEffort("api", choice.level, m.ID, models)
+		if m.ID == req.Model {
+			req.Effort = apiEffort(choice.level, m.SupportedEfforts)
 		}
 	}
 	return req, nil
+}
+
+// API catalogs do not have to publish reasoning capabilities. Use the standard
+// tiers in that case, including for manually added IDs and catalog failures.
+// Equal-distance choices prefer the stronger tier.
+func apiEffort(level string, supported []string) string {
+	// Capability probes intentionally have no effort; configured task choices
+	// already supply medium when the user has not selected a level.
+	if level == "" {
+		return ""
+	}
+	tiers := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+	target := slices.Index(tiers, level)
+	if target < 0 {
+		target = slices.Index(tiers, "medium")
+	}
+	if len(supported) == 0 {
+		supported = []string{"low", "medium", "high"}
+	}
+	best, distance := "", len(tiers)+1
+	for i, tier := range tiers {
+		if !slices.Contains(supported, tier) {
+			continue
+		}
+		delta := i - target
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta <= distance {
+			best, distance = tier, delta
+		}
+	}
+	if best == "" {
+		return apiEffort(level, nil)
+	}
+	return best
 }
 
 func (a apiAgentAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {

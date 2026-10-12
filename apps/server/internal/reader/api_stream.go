@@ -35,7 +35,7 @@ type completionMessage struct {
 }
 
 // History holds earlier completed turns of the same conversation; the new user
-// turn is appended after it. Effort is omitted unless the model advertises it.
+// turn is appended after it. Effort is resolved by the calling adapter.
 type completionRequest struct {
 	Model, Effort string
 	History       []completionMessage
