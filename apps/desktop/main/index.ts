@@ -137,6 +137,67 @@ async function startServer() {
     });
   });
 }
+/**
+ * Drain the Go side before exit: close write admission, stop background work
+ * and wait for in-flight writes. Returns false when the user cancels the exit
+ * to return to the app; the service then keeps running.
+ */
+async function drainServer(): Promise<boolean> {
+  if (!serverURL || !serverToken) return true;
+  const headers = {
+    Authorization: `Bearer ${serverToken}`,
+    "Content-Type": "application/json",
+  };
+  const call = (path: string, init?: RequestInit) =>
+    fetch(new URL(path, serverURL), {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
+  let id: string;
+  try {
+    const res = await call("/api/lifecycle/drain", {
+      method: "POST",
+      body: "{}",
+    });
+    if (!res.ok) return true;
+    id = (await res.json()).id as string;
+  } catch {
+    // The service is already unreachable; there is nothing left to drain.
+    return true;
+  }
+  let deadline = Date.now() + 30000;
+  for (;;) {
+    try {
+      const res = await call(`/api/lifecycle/drain/${id}`);
+      const state = (await res.json()) as { status?: string };
+      if (state.status === "drained") return true;
+    } catch {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (Date.now() > deadline) {
+      const result = await dialog.showMessageBox(window!, {
+        type: "warning",
+        message: "后台仍有写入未完成",
+        detail: "退出前需要等待写入结束，以免丢失资料。",
+        buttons: ["返回阅读", "继续等待"],
+        defaultId: 1,
+        cancelId: 0,
+      });
+      if (result.response === 0) {
+        try {
+          await call(`/api/lifecycle/drain/${id}/cancel`, { method: "POST" });
+        } catch {
+          // The service keeps running; cancellation is best-effort here.
+        }
+        return false;
+      }
+      deadline = Date.now() + 30000;
+    }
+  }
+}
+
 /** Window background before the renderer paints, matching the theme. */
 function windowBackground(appearance: unknown) {
   if (appearance === "sepia") return "#eeede7";
@@ -318,6 +379,12 @@ app
             closing = false;
             return;
           }
+        }
+        // Reading data is saved; wait for background writes to drain before
+        // the service may exit. The flush dialog never overrides this.
+        if (!(await drainServer())) {
+          closing = false;
+          return;
         }
         flushed = true;
         window?.close();

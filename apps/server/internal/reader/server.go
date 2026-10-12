@@ -178,6 +178,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("POST /api/lifecycle/drain", s.drainStartHandler)
+	mux.HandleFunc("GET /api/lifecycle/drain/{id}", s.drainStatusHandler)
+	mux.HandleFunc("POST /api/lifecycle/drain/{id}/cancel", s.drainCancelHandler)
 	mux.HandleFunc("GET /pub/{cap}/{id}/{resource...}", s.resource)
 	if s.Web != "" {
 		mux.Handle("/", http.FileServer(http.Dir(s.Web)))

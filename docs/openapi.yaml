@@ -2759,6 +2759,137 @@
                 },
             },
         },
+      "/api/lifecycle/drain":
+        {
+          "post":
+            {
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Drain started or already active",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "id": { "type": "string" },
+                                      "status":
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "quiescing",
+                                            "drained",
+                                            "cancelled",
+                                          ],
+                                        },
+                                    },
+                                  "required": ["id", "status"],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/lifecycle/drain/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Drain progress",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "id": { "type": "string" },
+                                      "status":
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "quiescing",
+                                            "drained",
+                                            "cancelled",
+                                          ],
+                                        },
+                                    },
+                                  "required": ["id", "status"],
+                                },
+                            },
+                        },
+                    },
+                  "404": { "description": "Unknown drain id" },
+                },
+            },
+        },
+      "/api/lifecycle/drain/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Exit intent revoked",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "id": { "type": "string" },
+                                      "status":
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "quiescing",
+                                            "drained",
+                                            "cancelled",
+                                          ],
+                                        },
+                                    },
+                                  "required": ["id", "status"],
+                                },
+                            },
+                        },
+                    },
+                  "409": { "description": "Drain already finished" },
+                },
+            },
+        },
       "/api/trash":
         {
           "get":
