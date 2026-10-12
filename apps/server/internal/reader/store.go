@@ -3,6 +3,7 @@ package reader
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
@@ -104,6 +105,12 @@ func OpenStore(root string) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{DB: db, Root: root}
+	// A collection schema from a newer application disables only the module;
+	// reading must keep working on the existing library.
+	if err = store.migrateCollection(); err != nil && !errors.Is(err, errCollectionSchemaTooNew) {
+		db.Close()
+		return nil, err
+	}
 	if err = store.migrateOrganization(); err != nil {
 		db.Close()
 		return nil, err
