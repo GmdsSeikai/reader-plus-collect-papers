@@ -20,11 +20,11 @@ const MaxFileBytes = 5 << 20
 const MaxTotalBytes = 100 << 20
 const Retention = 7 * 24 * time.Hour
 
-var privateKey = regexp.MustCompile(`(?i)^(authorization|cookie|set-cookie|.*(token|password|secret|api.?key|credential).*|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$`)
+var privateKey = regexp.MustCompile(`(?i)^(authorization|cookie|set-cookie|key|.*(token|password|secret|api.?key|credential).*|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$`)
 var panicText = regexp.MustCompile(`(?m)^(panic:|http: panic serving)[^\n]*`)
 var authHeader = regexp.MustCompile(`(?i)(authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*`)
 var auth = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[^\s"',;]+`)
-var assigned = regexp.MustCompile(`(?i)(["']?(api[ _-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|cookie)["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;}]+)`)
+var assigned = regexp.MustCompile(`(?i)(["']?(api[ _-]?key|key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|cookie)["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;}]+)`)
 var keyToken = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]+|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 var urls = regexp.MustCompile(`(?i)(https?|file)://[^\s"'<>]+`)
 var paths = regexp.MustCompile(`/(Users|home|private|tmp|var|Volumes|Applications)/[^\r\n"'<>]+|[A-Za-z]:[\\/][^\r\n"'<>]+|\\\\[^\r\n"'<>]+`)

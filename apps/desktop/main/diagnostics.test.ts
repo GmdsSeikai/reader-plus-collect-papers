@@ -39,6 +39,8 @@ it("redacts structured secrets, credentials, URL parameters and user paths", () 
     redact(
       {
         apiKey: "bare-key",
+        key: "generic-key",
+        api: { key: "nested-key" },
         nested: { prompt: "private-question" },
         detail:
           "Bearer auth token=opaque sk-key https://user:pass@host/path?q=private /Users/alice/doc.pdf C:\\Users\\bob\\doc.pdf exact-credential",
@@ -49,6 +51,8 @@ it("redacts structured secrets, credentials, URL parameters and user paths", () 
   );
   for (const secret of [
     "bare-key",
+    "generic-key",
+    "nested-key",
     "private-question",
     "opaque",
     "sk-key",

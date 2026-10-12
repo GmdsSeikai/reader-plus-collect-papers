@@ -12,7 +12,7 @@ export type DiagnosticEvent = {
 };
 
 const privateKey =
-  /^(?:authorization|cookie|set-cookie|.*(?:token|password|secret|api.?key|credential).*|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$/i;
+  /^(?:authorization|cookie|set-cookie|key|.*(?:token|password|secret|api.?key|credential).*|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$/i;
 export function redactText(text: string, secrets: string[] = []): string {
   let result = text;
   for (const secret of secrets
@@ -30,7 +30,7 @@ export function redactText(text: string, secrets: string[] = []): string {
     )
     .replace(/\b(?:Bearer|Basic)\s+[^\s"',;]+/gi, "[AUTH]")
     .replace(
-      /(["']?(?:api[ _-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|cookie)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi,
+      /(["']?(?:api[ _-]?key|key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|cookie)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi,
       "$1[REDACTED]",
     )
     .replace(/\bsk-[A-Za-z0-9_-]+/g, "[KEY]")

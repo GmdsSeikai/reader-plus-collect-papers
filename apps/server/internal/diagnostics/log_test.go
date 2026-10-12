@@ -16,7 +16,7 @@ import (
 func TestRedactionAndFullExport(t *testing.T) {
 	dir := t.TempDir()
 	logs, _ := New(filepath.Join(dir, "logs"), "session", "opaque-session-credential")
-	logs.Logger().Info("normal operation", "apiKey", "bare-key", "url", "https://user:password@host/path?token=other", "file", "/Users/alice/private.pdf", "nested", map[string]any{"prompt": "PRIVATE QUESTION"})
+	logs.Logger().Info("normal operation", "key", "generic-key", "apiKey", "bare-key", "url", "https://user:password@host/path?token=other", "file", "/Users/alice/private.pdf", "nested", map[string]any{"prompt": "PRIVATE QUESTION"})
 	logs.Logger().Error("failure", "detail", "Bearer secret-value token=another sk-secret-value")
 	if err := os.WriteFile(filepath.Join(logs.Dir, "server-old.jsonl"), []byte(`{"level":"INFO","msg":"old session","source":"server"}`), 0600); err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ func TestRedactionAndFullExport(t *testing.T) {
 	if !foundOld || !foundNormal || !foundFailure || !foundLegacy {
 		t.Fatal("export omitted a retained session, level or legacy file")
 	}
-	for _, secret := range []string{"bare-key", "password@", "alice", "secret-value", "another", "PRIVATE QUESTION", "PRIVATE DOCUMENT", "PRIVATE TRANSLATION", "OUTSIDE SECRET", "PRIVATE DATABASE", "private-setting"} {
+	for _, secret := range []string{"generic-key", "bare-key", "password@", "alice", "secret-value", "another", "PRIVATE QUESTION", "PRIVATE DOCUMENT", "PRIVATE TRANSLATION", "OUTSIDE SECRET", "PRIVATE DATABASE", "private-setting"} {
 		if strings.Contains(all.String(), secret) {
 			t.Fatalf("leaked %q", secret)
 		}
