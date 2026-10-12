@@ -45,7 +45,7 @@ In an empty library, click “先体验示例文档” (try sample documents) to
 
 PDF processing appears as a quiet overlay on each library cover, showing **Learning** then **Translating**; completion fades upward, and the overlay disappears when finished. Learning extracts page text and layout locally; translating translates body text and captions and converts formula images to LaTeX. Hovering a detected figure or formula highlights the whole region without blocking text selection. Processing resumes after restart and reuses saved translations.
 
-The first PDF analysis automatically downloads and verifies approximately 67 MB of layout-model weights, then caches them locally. Python and PaddlePaddle do not need to be installed. Select a primary agent in Settings and run the actual text/image capability test to enable translation and formula conversion. Without a verified connection, reading and detected-region hover remain available while translation waits. Scanned pages currently require OCR that is not implemented; incomplete text is explicitly labeled.
+The app includes approximately 67 MB of layout-model weights, so the first PDF analysis can extract layout and locate image regions offline. Weights are fetched and verified during the build, not committed to Git. Python and PaddlePaddle do not need to be installed. Select a primary agent in Settings and run the actual text/image capability test to enable translation and formula conversion. Without a verified connection, reading and detected-region hover remain available while translation waits. Scanned pages currently require OCR that is not implemented; incomplete text is explicitly labeled.
 
 **Formula conversion sends cropped PDF formula images to the selected agent.** Figures and tables are not sent for interpretation. Capability testing uses a synthetic image. Current chat still uses selected text or the current page/chapter; whole-document retrieval and image-click conversations are not implemented yet.
 
@@ -96,7 +96,7 @@ Open Reader settings, choose a primary Agent, and check the text and image capab
 
 macOS 和 Windows 桌面版启动时读取手动系统代理，并通过环境变量传给 Go 服务和 Agent CLI；没有配置代理或代理关闭时正常直连，本机服务始终保留直连例外。Windows 读取当前用户、当前连接的配置，支持统一 HTTP 代理或按 HTTP/HTTPS 分别配置；同时开启自动发现时使用已配置的手动代理，不执行 WPAD。系统代理变化后需要重启 Reader，并在设置中点击“重新检测 Agent”更新旧检测结果。PAC、仅自动发现、Windows SOCKS 和无法转换的例外规则（如 `<local>`）暂不支持；读取或转换失败会提示并保留原有环境。其他平台保持继承原有环境。
 
-The first PDF analysis downloads and verifies a roughly 67 MB layout model. The cached model locates image regions locally; Python and PaddlePaddle are not required. Without a verified connection, reading and region hover remain available while translation waits for configuration. Processing resumes after restart and reuses saved translations. Scanned pages are explicitly marked incomplete because OCR is not available.
+The bundled layout model is verified locally before inference and supports offline first use; Python and PaddlePaddle are not required. Without a verified connection, reading and region hover remain available while translation waits for configuration. Processing resumes after restart and reuses saved translations. Scanned pages are explicitly marked incomplete because OCR is not available.
 
 **Using AI sends relevant content off your machine.** Capability tests use a synthetic image. With a verified primary Agent configured, imported PDF body text and captions are sent for translation and formula images for LaTeX conversion. When you request a translation, explanation, summary, or send a question, Reader passes the selected excerpts or current chapter / page context, along with recent conversation history, to the CLI. The CLI then contacts its AI service. Chapter and context lengths are limited; a summary of the current page is not a summary of the entire paper.
 
@@ -136,6 +136,8 @@ pnpm dev
 The terminal prints a URL in the form `http://127.0.0.1:5173/#token=…`. Open the complete URL. Vite proxies requests to the Go service at `127.0.0.1:17840`. This token authenticates access to the local service; it is not an AI account credential. Do not share URLs containing the token.
 
 Development runs leave the connector port disabled unless `READER_DEV_CONNECTOR=1` is set. Unpackaged desktop runs register `reader://` only with `READER_DEV_PROTOCOL=1`.
+
+`pnpm dev`, `pnpm desktop` and `pnpm build` prepare the pinned layout model before running. The first build downloads approximately 67 MB; later builds verify and reuse the ignored `apps/processor/models/` cache. For an offline build, set `READER_BUILD_LAYOUT_MODEL` to the absolute path of an existing copy of the pinned weights; size and SHA256 verification still apply. Installation, type checking and ordinary unit tests do not download the model.
 
 ```sh
 pnpm typecheck     # TypeScript type checking
