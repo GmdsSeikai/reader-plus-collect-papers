@@ -4,13 +4,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CollectionPage } from "./CollectionPage";
 
-const candidates = vi.fn(async (_params: Record<string, string>) => ({
-  items: [],
-  nextCursor: "",
+// vi.mock factories are hoisted above imports; the mocks they reference must
+// be created with vi.hoisted to exist before the factory runs.
+const { candidates, tasks, activeImports, createTask } = vi.hoisted(() => ({
+  candidates: vi.fn(async (_params: Record<string, string>) => ({
+    items: [],
+    nextCursor: "",
+  })),
+  tasks: vi.fn(async () => []),
+  activeImports: vi.fn(async () => []),
+  createTask: vi.fn(async () => ({})),
 }));
-const tasks = vi.fn(async () => []);
-const activeImports = vi.fn(async () => []);
-const createTask = vi.fn(async () => ({}));
 
 vi.mock("@reader/api", () => ({
   collectionApi: {

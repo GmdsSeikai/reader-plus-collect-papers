@@ -157,8 +157,9 @@ type CandidatePage struct {
 var taskIDPattern = regexp.MustCompile("^[0-9a-f]{32}$")
 
 // cursorPayload binds a cursor to the complete filter identity (sort,
-// channel, task, revision, search, citation filter, ignored) plus the real
-// sort-key values, so it cannot be replayed under other filters.
+// channel, task, revision, search, citation filter, ignored) plus the
+// resolved since snapshot and real sort-key values, so it cannot be replayed
+// under other filters and auto-windows stay stable while paging.
 type cursorPayload struct {
 	Sort     string `json:"s"`
 	Channel  string `json:"c"`
@@ -166,6 +167,7 @@ type cursorPayload struct {
 	Search   string `json:"q"`
 	Citation string `json:"k"`
 	Ignored  string `json:"i"`
+	Since    string `json:"w"`
 	Key      int    `json:"n"`
 	TaskRev  int    `json:"r"`
 	Date     string `json:"d"`
@@ -182,22 +184,25 @@ func encodeCursor(f CandidateFilter, key int, date, id string) string {
 	}
 	raw, _ := json.Marshal(cursorPayload{
 		Sort: f.Sort, Channel: f.Channel, Task: f.TaskID, Search: f.Search,
-		Citation: f.Citation, Ignored: ignored, Key: key, TaskRev: f.TaskRev,
-		Date: date, ID: id,
+		Citation: f.Citation, Ignored: ignored, Since: f.Since, Key: key,
+		TaskRev: f.TaskRev, Date: date, ID: id,
 	})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 // DecodeCursor validates a cursor against the active filter identity and
-// returns its keyset values.
-func DecodeCursor(cursor string, f CandidateFilter) (key int, date, id string, err error) {
+// returns its keyset values plus the since snapshot the page must keep using.
+// f.Since is the request's explicit since filter (empty when none): an
+// explicit filter change invalidates the cursor, while the cursor's snapshot
+// keeps paging stable as the clock moves.
+func DecodeCursor(cursor string, f CandidateFilter) (key int, date, id, since string, err error) {
 	raw, decErr := base64.RawURLEncoding.DecodeString(cursor)
 	if decErr != nil {
-		return 0, "", "", errors.New("无效的游标")
+		return 0, "", "", "", errors.New("无效的游标")
 	}
 	var p cursorPayload
 	if json.Unmarshal(raw, &p) != nil {
-		return 0, "", "", errors.New("无效的游标")
+		return 0, "", "", "", errors.New("无效的游标")
 	}
 	ignored := ""
 	if f.Ignored != nil {
@@ -209,9 +214,12 @@ func DecodeCursor(cursor string, f CandidateFilter) (key int, date, id string, e
 	if p.Sort != f.Sort || p.Channel != f.Channel || p.Task != f.TaskID ||
 		p.Search != f.Search || p.Citation != f.Citation || p.Ignored != ignored ||
 		p.TaskRev != f.TaskRev {
-		return 0, "", "", errors.New("无效的游标")
+		return 0, "", "", "", errors.New("无效的游标")
 	}
-	return p.Key, p.Date, p.ID, nil
+	if f.Since != "" && f.Since != p.Since {
+		return 0, "", "", "", errors.New("无效的游标")
+	}
+	return p.Key, p.Date, p.ID, p.Since, nil
 }
 
 // CollectionCandidates returns one keyset page of candidates. The task filter

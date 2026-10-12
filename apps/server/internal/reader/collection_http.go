@@ -165,13 +165,11 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 			f.Sort = "date"
 		}
 	}
-	// The window lower bound is the selected task's own window, or the widest
-	// enabled-task window, or the design defaults only when no task is
-	// enabled. An explicit since narrows it further.
-	f.Since = q.Get("since")
-	if f.Since == "" && f.Channel != "" {
-		f.Since = s.windowStart(f.Channel, f.TaskID)
-	}
+	// The explicit since filter is part of the cursor identity; pages under a
+	// cursor keep the cursor's since snapshot so the auto-window cannot drift
+	// with the clock between pages.
+	explicitSince := q.Get("since")
+	f.Since = explicitSince
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			f.Limit = n
@@ -191,12 +189,18 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if cursor := q.Get("cursor"); cursor != "" {
-		key, date, id, err := DecodeCursor(cursor, f)
+		key, date, id, since, err := DecodeCursor(cursor, f)
 		if err != nil {
 			collectionFail(w, 400, "query-invalid", "无效的游标")
 			return
 		}
 		f.CursorNum, f.CursorDate, f.CursorID = key, date, id
+		f.Since = since
+	} else if explicitSince == "" && f.Channel != "" {
+		// The window lower bound is the selected task's own window, or the
+		// widest enabled-task window, or the design defaults only when no
+		// task is enabled.
+		f.Since = s.windowStart(f.Channel, f.TaskID)
 	}
 	page, err := s.Store.CollectionCandidates(f)
 	if err != nil {

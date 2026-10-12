@@ -384,8 +384,11 @@ const sliceBudget = 5000
 // request is sent and re-checked inside the commit transaction, so a
 // cancellation between response and commit rejects the page. Slices whose
 // total exceeds the threshold subdivide into finer buckets; a parent only
-// completes when every child covered. A changed source total reopens the
-// slice; a minute-bucket still over the threshold is marked source_limit.
+// completes when every expected child is covered. Coverage is proven by this
+// scan's own fetched-entry progress, never by accumulated commit counts. A
+// changed source total reopens the slice; a minute-bucket still over the
+// threshold is marked source_limit; an empty or premature page against a
+// positive total is an anomaly, not coverage.
 func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, task CollectionTask, plan SlicePlan) error {
 	from := plan.From.UTC().Format(time.RFC3339)
 	to := plan.To.UTC().Format(time.RFC3339)
@@ -398,6 +401,7 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			FromUTC:      from,
 			ToUTC:        to,
 			Query:        plan.Branch.QueryFor(plan.From, plan.To),
+			ParentID:     plan.ParentID,
 			TotalResults: -1,
 			Status:       sliceRunning,
 		}
@@ -408,32 +412,36 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 		// A proven source limit is terminal for coverage; never claim success.
 		return errors.New("来源上限，未覆盖")
 	}
+	if sl.FailureClass == "split" {
+		// A split parent is proven only through its expected children. A
+		// forced rescan pushes into the children even when covered.
+		if !plan.ForceRescan {
+			done, err := m.childrenCovered(task, sl)
+			if err != nil {
+				return err
+			}
+			if done {
+				return nil
+			}
+		}
+		return m.subdivideSlice(ctx, run, task, plan, sl)
+		}
 	if sl.Status == sliceCompleted && !plan.ForceRescan {
-		if done, err := m.childrenCovered(task, sl); err == nil && done {
-			return nil
-		}
-		if sl.Processed > 0 && sl.TotalResults >= 0 && sl.Processed >= sl.TotalResults {
-			return nil
-		}
+		return nil
 	}
 	if plan.ForceRescan && sl.Status == sliceCompleted {
 		sl.Status = sliceRunning
-		sl.PageOffset = 0
 	}
-	// A split parent is scanned through its children instead.
-	if sl.FailureClass == "split" {
-		return m.subdivideSlice(ctx, run, task, plan, sl)
-	}
-	sl.Status = sliceRunning
 	client := m.server.scholarClient()
 	var sendToken int64
+	scanFetched := 0 // entries fetched in THIS scan; the coverage proof
 	for page := 0; ; page++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if sl.Processed >= sliceBudget {
-			// Defensive budget: keep the slice recoverable, never claim
-			// coverage and never truncate candidates.
+		if scanFetched >= sliceBudget {
+			// Defensive per-round budget: keep the slice recoverable, never
+			// claim coverage and never truncate candidates.
 			return errors.New("切片执行预算耗尽，保留待办")
 		}
 		var err error
@@ -445,7 +453,6 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 		if err != nil {
 			return err
 		}
-		probe := page == 0
 		result, err := client.ArxivSearch(ctx, sl.Query, page*discoveryPageSize, discoveryPageSize)
 		release()
 		if err != nil {
@@ -455,20 +462,21 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			// The source explicitly reports nothing in this window.
 			return m.finishSlice(sl, run, task, sendToken)
 		}
-		if result.TotalResults < 0 && len(result.Entries) == 0 {
-			// An empty page without a declared total is an anomaly, not
-			// completion: coverage is not proven.
+		if len(result.Entries) == 0 {
+			// A page with no entries against any non-zero total is a source
+			// anomaly (or a filtered error entry): coverage is not proven.
 			return errors.New("来源返回异常空页")
 		}
-		// Total drift reopens the slice: committed rows stay, paging restarts
-		// and stable IDs deduplicate.
-		if !probe && sl.TotalResults >= 0 && result.TotalResults != sl.TotalResults {
+		// Total drift reopens the slice: committed rows stay, this scan's
+		// progress resets and paging restarts; stable IDs deduplicate.
+		if page > 0 && sl.TotalResults >= 0 && result.TotalResults != sl.TotalResults {
 			sl.PageOffset = 0
 			sl.TotalResults = result.TotalResults
+			scanFetched = 0
 			page = -1
 			continue
 		}
-		if probe && result.TotalResults > splitThreshold {
+		if page == 0 && result.TotalResults > splitThreshold {
 			if children := splitSliceRange(plan.From, plan.To); len(children) > 0 {
 				sl.TotalResults = result.TotalResults
 				return m.subdivideSlice(ctx, run, task, plan, sl)
@@ -480,6 +488,7 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			sl.FailureClass = "source_limit"
 			return m.finishSlice(sl, run, task, sendToken)
 		}
+		scanFetched += len(result.Entries)
 		nowStr := now()
 		candidates, matches := discoveryPage(task, plan.Branch, result, nowStr)
 		tx, err := m.server.Store.DB.Begin()
@@ -496,15 +505,24 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 		}
 		sl.PageOffset++
 		sl.Processed += len(candidates)
-		if len(result.Entries) < discoveryPageSize || (sl.Processed >= sl.TotalResults && sl.TotalResults >= 0) {
+		if len(result.Entries) < discoveryPageSize {
+			// A premature short page contradicting the declared remainder is
+			// an anomaly, not the end of the result set.
+			if sl.TotalResults >= 0 && scanFetched < sl.TotalResults {
+				return errors.New("来源返回与总量矛盾的短页")
+			}
+			break
+		}
+		if sl.TotalResults >= 0 && scanFetched >= sl.TotalResults {
 			break
 		}
 	}
 	return m.finishSlice(sl, run, task, sendToken)
 }
 
-// subdivideSlice turns an oversized slice into finer time buckets and scans
-// each child. The parent stays incomplete until every child covered.
+// subdivideSlice records the split parent and scans every expected child. The
+// parent stays incomplete until all expected children prove coverage; a
+// crash resumes by re-deriving the same expected children and continuing.
 func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRun, task CollectionTask, plan SlicePlan, parent CollectionSlice) error {
 	children := splitSliceRange(plan.From, plan.To)
 	if len(children) == 0 {
@@ -514,17 +532,30 @@ func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRu
 	if err != nil {
 		return err
 	}
+	// The parent keeps the split marker and is NOT completed here.
 	parent.FailureClass = "split"
-	parent.Status = sliceCompleted
-	if err := m.finishSlice(parent, run, task, token); err != nil {
+	parent.Status = sliceRunning
+	if err := m.persistSlice(parent, run, task, token); err != nil {
 		return err
+	}
+	// Re-read the persisted row so children carry a real parent identity.
+	if stored, err := m.server.Store.FindSlice(parent.TaskID, task.QueryRevision, parent.Channel, parent.BranchHash, parent.FromUTC, parent.ToUTC); err == nil {
+		parent = stored
+		parent.FailureClass = "split"
+		parent.Status = sliceRunning
 	}
 	failed := 0
 	for _, child := range children {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		childPlan := SlicePlan{Branch: plan.Branch, From: child.From, To: child.To}
+		childPlan := SlicePlan{
+			Branch:      plan.Branch,
+			From:        child.From,
+			To:          child.To,
+			ParentID:    parent.ID,
+			ForceRescan: plan.ForceRescan,
+		}
 		if err := m.scanSlice(ctx, run, task, childPlan); err != nil {
 			failed++
 		}
@@ -536,31 +567,78 @@ func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRu
 	if !done || failed > 0 {
 		return errors.New("子切片未完全覆盖")
 	}
-	return nil
+	// Every expected child covered: the parent may now claim completion.
+	parent.Status = sliceCompleted
+	parent.CheckedAt = now()
+	token, err = m.server.Store.CollectionRunToken(run.ID)
+	if err != nil {
+		return err
+	}
+	return m.persistSlice(parent, run, task, token)
 }
 
-// childrenCovered reports whether every child slice of a split parent is
-// completed with real coverage (source limits and failures do not count).
+// childrenCovered proves coverage of a split parent through its expected
+// children: every bucket derived from the parent range must exist as a row
+// and be recursively covered. Completed split children need their own
+// children covered; source limits and failures never count as coverage.
 func (m *CollectionManager) childrenCovered(task CollectionTask, parent CollectionSlice) (bool, error) {
-	rows, err := m.server.Store.DB.Query("SELECT status,failure_class,source_limit FROM collection_slices WHERE task_id=? AND query_revision=? AND channel=? AND branch_hash=? AND from_utc>=? AND to_utc<=? AND NOT (from_utc=? AND to_utc=?) ",
-		parent.TaskID, task.QueryRevision, parent.Channel, parent.BranchHash, parent.FromUTC, parent.ToUTC, parent.FromUTC, parent.ToUTC)
+	from, err := time.Parse(time.RFC3339, parent.FromUTC)
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
-	n := 0
-	for rows.Next() {
-		var status, failure string
-		var limit int
-		if err := rows.Scan(&status, &failure, &limit); err != nil {
-			return false, err
+	to, err := time.Parse(time.RFC3339, parent.ToUTC)
+	if err != nil {
+		return false, err
+	}
+	expected := splitSliceRange(from, to)
+	if len(expected) == 0 {
+		return false, nil
+	}
+	for _, child := range expected {
+		childFrom := child.From.UTC().Format(time.RFC3339)
+		childTo := child.To.UTC().Format(time.RFC3339)
+		sl, err := m.server.Store.FindSlice(parent.TaskID, task.QueryRevision, parent.Channel, parent.BranchHash, childFrom, childTo)
+		if err != nil {
+			// A missing expected child is uncovered, not an error.
+			return false, nil
 		}
-		n++
-		if limit != 0 || status != sliceCompleted || failure != "" {
-			return false, rows.Err()
+		switch {
+		case sl.SourceLimit:
+			return false, nil
+		case sl.FailureClass == "split":
+			done, err := m.childrenCovered(task, sl)
+			if err != nil || !done {
+				return false, err
+			}
+		case sl.Status == sliceCompleted && sl.FailureClass == "":
+			// covered leaf
+		default:
+			return false, nil
 		}
 	}
-	return n > 0, rows.Err()
+	return true, nil
+}
+
+// persistSlice writes a slice row under the same run-identity gate as page
+// commits, without changing the claimed completion state.
+func (m *CollectionManager) persistSlice(sl CollectionSlice, run CollectionRun, task CollectionTask, sendToken int64) error {
+	tx, err := m.server.Store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var token int64
+	var status string
+	if err := tx.QueryRow("SELECT exec_token,status FROM collection_runs WHERE run_id=?", run.ID).Scan(&token, &status); err != nil {
+		return err
+	}
+	if token != sendToken || (status != runRunning && status != runQueued) {
+		return errors.New("运行已被取消或替换，响应不再有效")
+	}
+	if err := m.server.Store.UpsertSlice(tx, sl, run.ID, task.QueryRevision); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // finishSlice records the coverage watermark under the same identity gate as

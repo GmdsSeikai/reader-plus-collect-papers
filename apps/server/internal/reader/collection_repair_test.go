@@ -139,10 +139,10 @@ func TestCandidateCitationKeysetPagingNoLoss(t *testing.T) {
 		t.Fatal("no cursor for remaining row")
 	}
 	// The cursor must be accepted only under the same sort identity.
-	if _, _, _, err := DecodeCursor(page.NextCursor, CandidateFilter{Sort: "date"}); err == nil {
+	if _, _, _, _, err := DecodeCursor(page.NextCursor, CandidateFilter{Sort: "date"}); err == nil {
 		t.Fatal("cursor reused across sort modes")
 	}
-	key, date, id, err := DecodeCursor(page.NextCursor, CandidateFilter{Sort: "citations"})
+	key, date, id, _, err := DecodeCursor(page.NextCursor, CandidateFilter{Sort: "citations"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,31 +178,44 @@ func scholarCitationCount(id string, n *int) scholar.CitationCount {
 }
 
 func TestSplitSliceRangeBuckets(t *testing.T) {
-	from := time.Date(2026, 3, 1, 12, 30, 0, 0, time.UTC)
-	to := time.Date(2026, 3, 4, 6, 0, 0, 0, time.UTC)
-	days := splitSliceRange(from, to)
-	if len(days) != 3 {
-		t.Fatalf("day buckets = %d (%v)", len(days), days)
-	}
-	for i := 1; i < len(days); i++ {
-		if !days[i].From.Equal(days[i-1].To) {
-			t.Fatalf("gap between buckets %d: %v %v", i, days[i-1], days[i])
+	assertExactCoverage := func(name string, from, to time.Time, wantBuckets int) {
+		t.Helper()
+		got := splitSliceRange(from, to)
+		if wantBuckets > 0 && len(got) != wantBuckets {
+			t.Fatalf("%s: buckets = %d (%v), want %d", name, len(got), got, wantBuckets)
+		}
+		if len(got) == 0 {
+			t.Fatalf("%s: no buckets", name)
+		}
+		if !got[0].From.Equal(from) {
+			t.Fatalf("%s: first bucket starts at %v, want %v", name, got[0].From, from)
+		}
+		if !got[len(got)-1].To.Equal(to) {
+			t.Fatalf("%s: last bucket ends at %v, want %v", name, got[len(got)-1].To, to)
+		}
+		for i := 1; i < len(got); i++ {
+			if !got[i].From.Equal(got[i-1].To) {
+				t.Fatalf("%s: gap/overlap at %d: %v %v", name, i, got[i-1], got[i])
+			}
 		}
 	}
-	// A single day splits into hours.
-	hours := splitSliceRange(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC))
-	if len(hours) != 24 {
-		t.Fatalf("hour buckets = %d", len(hours))
-	}
-	// An hour splits into minutes.
-	minutes := splitSliceRange(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 1, 1, 0, 0, 0, time.UTC))
-	if len(minutes) != 60 {
-		t.Fatalf("minute buckets = %d", len(minutes))
-	}
+	// Non-aligned multi-day range keeps the partial head and tail (T03).
+	assertExactCoverage("days", time.Date(2026, 3, 1, 12, 30, 20, 0, time.UTC), time.Date(2026, 3, 4, 6, 0, 0, 0, time.UTC), 4)
+	// Aligned multi-day range.
+	assertExactCoverage("aligned-days", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC), 3)
+	// A single non-aligned day splits into hours with a partial head.
+	assertExactCoverage("hours", time.Date(2026, 3, 1, 0, 30, 0, 0, time.UTC), time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), 24)
+	// An aligned day splits into exactly 24 hours.
+	assertExactCoverage("aligned-hours", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), 24)
+	// A non-aligned hour splits into minutes with a partial head and tail.
+	assertExactCoverage("minutes", time.Date(2026, 3, 1, 0, 0, 20, 0, time.UTC), time.Date(2026, 3, 1, 0, 50, 0, 0, time.UTC), 50)
 	// Minute granularity cannot subdivide further: that is the source limit.
 	if got := splitSliceRange(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 1, 0, 0, 30, 0, time.UTC)); got != nil {
 		t.Fatalf("minute range subdivided: %v", got)
 	}
+	// Cross-month and short-edge ranges keep exact bounds.
+	assertExactCoverage("cross-month", time.Date(2026, 1, 31, 23, 0, 0, 0, time.UTC), time.Date(2026, 2, 2, 1, 0, 0, 0, time.UTC), 0)
+	assertExactCoverage("short-edge", time.Date(2026, 3, 1, 23, 59, 30, 0, time.UTC), time.Date(2026, 3, 2, 0, 2, 0, 0, time.UTC), 0)
 }
 
 func TestOversizedSliceSubdividesAndCovers(t *testing.T) {

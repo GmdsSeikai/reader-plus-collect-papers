@@ -108,68 +108,49 @@ type SlicePlan struct {
 	Branch      CollectionBranch
 	From        time.Time
 	To          time.Time
+	ParentID    string
 	ForceRescan bool
 }
 
-// splitSliceRange divides a range into the next finer aligned bucket level:
-// multi-day → day → hour → minute. A range already at minute granularity
-// returns nil, which callers treat as a proven source limit.
+// splitSliceRange divides [from, to) into the next finer aligned bucket level:
+// multi-day → day → hour → minute. The first and last buckets keep their
+// partial edges so the children exactly cover the parent range — no gap at
+// the start and no overshoot at the end. A range already at minute
+// granularity returns nil, which callers treat as a proven source limit.
 func splitSliceRange(from, to time.Time) []DateWindow {
 	from, to = from.UTC(), to.UTC()
-	span := to.Sub(from)
-	switch {
+	if !to.After(from) {
+		return nil
+	}
+	var step time.Duration
+	var align func(time.Time) time.Time
+	switch span := to.Sub(from); {
 	case span > 25*time.Hour:
-		// Whole UTC days.
-		out := []DateWindow{}
-		start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
-		if start.Before(from) {
-			start = start.AddDate(0, 0, 1)
+		step = 24 * time.Hour
+		align = func(t time.Time) time.Time {
+			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 		}
-		for start.Before(to) {
-			end := start.AddDate(0, 0, 1)
-			seg := DateWindow{From: start, To: end}
-			if seg.To.After(to) {
-				seg.To = to
-			}
-			out = append(out, seg)
-			start = end
-		}
-		return out
 	case span > 90*time.Minute:
-		out := []DateWindow{}
-		start := from.Truncate(time.Hour)
-		if start.Before(from) {
-			start = start.Add(time.Hour)
-		}
-		for start.Before(to) {
-			end := start.Add(time.Hour)
-			seg := DateWindow{From: start, To: end}
-			if seg.To.After(to) {
-				seg.To = to
-			}
-			out = append(out, seg)
-			start = end
-		}
-		return out
+		step = time.Hour
+		align = func(t time.Time) time.Time { return t.Truncate(time.Hour) }
 	case span > 90*time.Second:
-		out := []DateWindow{}
-		start := from.Truncate(time.Minute)
-		if start.Before(from) {
-			start = start.Add(time.Minute)
-		}
-		for start.Before(to) {
-			end := start.Add(time.Minute)
-			seg := DateWindow{From: start, To: end}
-			if seg.To.After(to) {
-				seg.To = to
-			}
-			out = append(out, seg)
-			start = end
-		}
-		return out
+		step = time.Minute
+		align = func(t time.Time) time.Time { return t.Truncate(time.Minute) }
 	default:
 		return nil
 	}
+	out := []DateWindow{}
+	// The first bucket ends at the first aligned boundary after from, so the
+	// partial head [from, boundary) is kept instead of dropped.
+	boundary := align(from).Add(step)
+	for boundary.Before(to) {
+		out = append(out, DateWindow{From: from, To: boundary})
+		from = boundary
+		boundary = boundary.Add(step)
+	}
+	// Trailing remainder (also the only bucket for sub-step spans).
+	out = append(out, DateWindow{From: from, To: to})
+	return out
 }
 
 // BuildSlices expands branches into scan slices.

@@ -59,36 +59,31 @@ func readyOrWait(ch <-chan struct{}) bool {
 }
 
 // BeginDrain closes write admission, stops background work and waits for
-// in-flight writes. It is idempotent while a session is active.
+// in-flight writes. It is idempotent while a session is active. The stop
+// conditions are installed while the intent is being built, still under the
+// drain lock, so a concurrent cancel can never observe a published intent
+// whose conditions are missing and treat them as already complete.
 func (s *Server) BeginDrain() drainSession {
 	s.drain.mu.Lock()
+	defer s.drain.mu.Unlock()
 	if s.drain.current != nil && s.drain.current.Status != drainCancelled {
-		session := *s.drain.current
-		s.drain.mu.Unlock()
-		return session
+		return *s.drain.current
 	}
 	if s.drain.finished == nil {
 		s.drain.finished = map[string]string{}
 	}
-	session := &drainSession{ID: id(), Status: drainQuiescing}
-	s.drain.current = session
 	stop := s.drain.stopBackground
-	s.drain.mu.Unlock()
-
+	// Install both stop conditions before publishing the intent.
 	idleWrites := s.importGate.CloseForDrain()
 	var idleBackground <-chan struct{}
 	if stop != nil {
 		idleBackground = stop()
 	}
-	session.writesDone = idleWrites
-	session.backgroundDone = idleBackground
+	session := &drainSession{ID: id(), Status: drainQuiescing, writesDone: idleWrites, backgroundDone: idleBackground}
+	s.drain.current = session
 	if readyOrWait(idleWrites) && readyOrWait(idleBackground) {
-		s.drain.mu.Lock()
-		defer s.drain.mu.Unlock()
-		if session.Status == drainQuiescing {
-			session.Status = drainDrained
-			s.drain.finished[session.ID] = drainDrained
-		}
+		session.Status = drainDrained
+		s.drain.finished[session.ID] = drainDrained
 		return *session
 	}
 	go func() {
@@ -106,8 +101,6 @@ func (s *Server) BeginDrain() drainSession {
 			s.drain.finished[session.ID] = drainDrained
 		}
 	}()
-	s.drain.mu.Lock()
-	defer s.drain.mu.Unlock()
 	return *session
 }
 
@@ -149,7 +142,6 @@ func (s *Server) CancelDrain(drainID string) (drainSession, bool) {
 		s.drain.finished = map[string]string{}
 	}
 	s.drain.finished[session.ID] = drainCancelled
-	start := s.drain.startBackground
 	writesDone := session.writesDone
 	backgroundDone := session.backgroundDone
 	s.drain.mu.Unlock()
@@ -163,16 +155,16 @@ func (s *Server) CancelDrain(drainID string) (drainSession, bool) {
 		if backgroundDone != nil {
 			<-backgroundDone
 		}
+		// The ownership check and the actual reopen/start run under the same
+		// lock so a newer drain intent cannot be interleaved between them.
 		s.drain.mu.Lock()
-		// A stale resume must never touch a newer intent's admission.
+		defer s.drain.mu.Unlock()
 		if s.drain.closing || s.drain.current != session {
-			s.drain.mu.Unlock()
 			return
 		}
-		s.drain.mu.Unlock()
 		s.importGate.Reopen()
-		if start != nil {
-			start()
+		if s.drain.startBackground != nil {
+			s.drain.startBackground()
 		}
 	}
 	// With nothing in flight and background already stopped this completes
