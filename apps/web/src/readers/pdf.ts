@@ -82,6 +82,10 @@ export class PDFReaderAdapter implements ReaderAdapter {
     );
     const viewer = document.createElement("div");
     viewer.className = "pdfViewer";
+    // PDF.js measures generic fonts on a canvas without the app's zh-CN language.
+    // Match that fallback for PDFs without a declared language; PDF.js replaces
+    // this value when the document provides one.
+    viewer.lang = "en";
     // Let even the last page's column end reach the viewport midpoint.
     viewer.style.paddingBottom = `${container.clientHeight / 2}px`;
     container.append(viewer);
