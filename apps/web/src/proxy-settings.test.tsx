@@ -182,6 +182,48 @@ it("offers restart when the system proxy changed during this run", async () => {
   expect(restart).not.toHaveBeenCalled();
 });
 
+it("reloads system restart status while an earlier network check is still pending", async () => {
+  state = { settings: { mode: "system" }, restartRequired: false };
+  let resolveConfig!: () => void;
+  let finishCheck!: (value: ProxyCheckResult) => void;
+  let resolving: Promise<void> | undefined;
+  check.mockImplementationOnce(() => {
+    resolving = new Promise((resolve) => {
+      resolveConfig = () => {
+        state = { ...state, restartRequired: true };
+        resolve();
+      };
+    });
+    return new Promise((resolve) => {
+      finishCheck = resolve;
+    });
+  });
+  get.mockImplementation(async () => {
+    await resolving;
+    return state;
+  });
+  await render();
+  await click("检测连接");
+  await render(false);
+  await render();
+  expect(button("检测连接").disabled).toBe(true);
+  await act(async () => resolveConfig());
+  expect(button("重启 Reader").disabled).toBe(false);
+  await chooseMode("手动 HTTP 代理");
+  await type("代理端口", "7897");
+  await act(async () =>
+    finishCheck({
+      connected: true,
+      route: "proxy",
+      status: 200,
+      elapsedMs: 2,
+      restartRequired: true,
+    }),
+  );
+  expect(input("代理端口").value).toBe("7897");
+  expect(host.querySelector('[role="status"]')).toBeNull();
+});
+
 it.each([
   ["proxy", "经代理", 12001, "连接超时"],
   ["proxy", "经代理", 4, "连接失败"],

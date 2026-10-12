@@ -145,6 +145,39 @@ it("requires a restart when detection observes a changed system proxy", async ()
   ).toBe(false);
 });
 
+it("waits for system resolution when reopening, without waiting for the network probe", async () => {
+  const service = await ProxySettingsService.open(directory, {}, "darwin");
+  let resolveConfig!: (value: { env: NodeJS.ProcessEnv }) => void;
+  let finishProbe!: (value: { stdout: string }) => void;
+  resolveSystem.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveConfig = resolve;
+      }),
+  );
+  execute.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishProbe = resolve;
+      }),
+  );
+  const checking = service.check({ mode: "system" }, "/probe");
+  const reading = service.state();
+  let completed = false;
+  void reading.then(() => {
+    completed = true;
+  });
+  await Promise.resolve();
+  expect(completed).toBe(false);
+  resolveConfig({ env: { HTTPS_PROXY: "http://127.0.0.1:7897" } });
+  expect((await reading).restartRequired).toBe(true);
+  expect(execute).toHaveBeenCalledOnce();
+  finishProbe({
+    stdout: '{"connected":true,"route":"proxy","status":200,"elapsedMs":1}',
+  });
+  await checking;
+});
+
 it("falls back from corrupt config and reports system-reading failure inside settings", async () => {
   await writeFile(join(directory, "proxy-settings.json"), "{broken");
   let service = await ProxySettingsService.open(directory, {}, "win32");

@@ -89,6 +89,7 @@ export function electronProxyConfiguration(settings: ProxySettings) {
 export class ProxySettingsService {
   private saved: ProxySettings;
   private saving: Promise<unknown> = Promise.resolve();
+  private resolving: Promise<unknown> = Promise.resolve();
   private checking = false;
   private systemRestartRequired = false;
   private probeController?: AbortController;
@@ -149,6 +150,7 @@ export class ProxySettingsService {
     // Reopening settings must observe a pending save, even when the old
     // renderer has unmounted and discarded its save response.
     await this.saving.catch(() => {});
+    await this.resolving.catch(() => {});
     return this.snapshot();
   }
 
@@ -187,16 +189,20 @@ export class ProxySettingsService {
     this.probeController = controller;
     let warning: string | undefined;
     try {
-      const resolved = await resolveProxyEnvironment(
+      const resolving = resolveProxyEnvironment(
         settings,
         this.inherited,
         this.platform,
-      );
+      ).then((resolved) => {
+        if (settings.mode === "system" && this.activeSettings.mode === "system")
+          this.systemRestartRequired =
+            proxySignature(resolved.env) !==
+            proxySignature(this.activeEnvironment);
+        return resolved;
+      });
+      this.resolving = resolving;
+      const resolved = await resolving;
       warning = resolved.warning;
-      if (settings.mode === "system" && this.activeSettings.mode === "system")
-        this.systemRestartRequired =
-          proxySignature(resolved.env) !==
-          proxySignature(this.activeEnvironment);
       // A fresh Go process uses the draft env without changing ongoing API/CLI
       // requests or opening a database. Hide Windows console and bound its life.
       const { stdout } = await execute(binary, ["--probe-network"], {
