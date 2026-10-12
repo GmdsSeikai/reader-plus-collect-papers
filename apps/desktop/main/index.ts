@@ -41,6 +41,7 @@ let window: BrowserWindow | undefined;
 let quitting = false;
 let closing = false;
 let flushed = false;
+let childExited = false;
 const root = resolve(__dirname, "../..");
 async function startServer() {
   let childEnv = { ...process.env };
@@ -113,6 +114,7 @@ async function startServer() {
     });
     child!.once("exit", (code) => {
       clearTimeout(timer);
+      childExited = true;
       reject(new Error(`本地服务已退出 (${code})`));
       if (window && !quitting) {
         dialog.showErrorBox(
@@ -139,10 +141,13 @@ async function startServer() {
 }
 /**
  * Drain the Go side before exit: close write admission, stop background work
- * and wait for in-flight writes. Returns false when the user cancels the exit
- * to return to the app; the service then keeps running.
+ * and wait for in-flight writes. Only a protocol "drained" state or an
+ * observed child exit proves the writes finished — network errors never do.
+ * Returns false when the user cancels the exit to return to the app, which
+ * requires the service to confirm the cancel took effect.
  */
 async function drainServer(): Promise<boolean> {
+  if (childExited) return true;
   if (!serverURL || !serverToken) return true;
   const headers = {
     Authorization: `Bearer ${serverToken}`,
@@ -160,20 +165,26 @@ async function drainServer(): Promise<boolean> {
       method: "POST",
       body: "{}",
     });
-    if (!res.ok) return true;
+    if (!res.ok) return await drainRetryDialog("无法开始退出排空");
     id = (await res.json()).id as string;
   } catch {
-    // The service is already unreachable; there is nothing left to drain.
-    return true;
+    if (childExited) return true;
+    return await drainRetryDialog("无法连接本地服务，无法确认写入已结束");
   }
   let deadline = Date.now() + 30000;
   for (;;) {
+    if (childExited) return true;
     try {
       const res = await call(`/api/lifecycle/drain/${id}`);
       const state = (await res.json()) as { status?: string };
       if (state.status === "drained") return true;
+      if (state.status === "cancelled") {
+        // A previous cancel landed; nothing is draining anymore.
+        return false;
+      }
     } catch {
-      return true;
+      // A transient error is not proof of a safe exit; keep waiting.
+      if (childExited) return true;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
     if (Date.now() > deadline) {
@@ -186,16 +197,42 @@ async function drainServer(): Promise<boolean> {
         cancelId: 0,
       });
       if (result.response === 0) {
-        try {
-          await call(`/api/lifecycle/drain/${id}/cancel`, { method: "POST" });
-        } catch {
-          // The service keeps running; cancellation is best-effort here.
-        }
-        return false;
+        if (await confirmDrainCancel(call, id)) return false;
+        // Cancel did not take effect: the service still refuses writes, so
+        // returning to the app would be a lie. Keep draining instead.
       }
       deadline = Date.now() + 30000;
     }
   }
+}
+
+/** The service must confirm the cancel before the user may keep using it. */
+async function confirmDrainCancel(
+  call: (path: string, init?: RequestInit) => Promise<Response>,
+  id: string,
+): Promise<boolean> {
+  try {
+    await call(`/api/lifecycle/drain/${id}/cancel`, { method: "POST" });
+    const res = await call(`/api/lifecycle/drain/${id}`);
+    const state = (await res.json()) as { status?: string };
+    return state.status === "cancelled";
+  } catch {
+    return false;
+  }
+}
+
+/** Drain errors keep exit pending; the user may retry or return to the app. */
+async function drainRetryDialog(detail: string): Promise<boolean> {
+  const result = await dialog.showMessageBox(window!, {
+    type: "warning",
+    message: "无法确认写入已结束",
+    detail,
+    buttons: ["返回阅读", "重试"],
+    defaultId: 1,
+    cancelId: 0,
+  });
+  if (result.response === 0) return false;
+  return drainServer();
 }
 
 /** Window background before the renderer paints, matching the theme. */
