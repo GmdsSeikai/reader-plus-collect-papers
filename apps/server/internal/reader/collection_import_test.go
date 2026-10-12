@@ -2,7 +2,9 @@ package reader
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -73,14 +75,8 @@ func TestDuplicateCollectionImportPreservesExistingFile(t *testing.T) {
 		t.Fatalf("import create = %s", w.Body.String())
 	}
 	reqID := created.Items[0].RequestID
-	status := waitImport(t, s, reqID, importDownloaded, importAwaitingConfirmation, importImported)
-	if status != importImported {
-		// Normal PDFs commit directly; drive confirm only if asked to wait.
-		w = request(t, s, "POST", "/api/collection/imports/"+reqID+"/confirm", nil)
-		if w.Code == 202 {
-			status = waitImport(t, s, reqID, importImported)
-		}
-	}
+	// Normal PDFs commit straight through: no second request, no confirm.
+	status := waitImport(t, s, reqID, importImported)
 	if status != importImported {
 		t.Fatalf("import ended %s", status)
 	}
@@ -106,9 +102,10 @@ func TestDuplicateCollectionImportPreservesExistingFile(t *testing.T) {
 	}
 }
 
-// TestInstallFailureKeepsReusedDest (R01) forces the document insert to fail
-// after the file was reused: the existing destination file must survive and
-// the single connection must be released afterwards.
+// TestInstallFailureKeepsReusedDest (R01/Q07) forces the document insert to
+// fail after the file was reused: the failure path must actually execute the
+// commit callback, keep the existing destination file, and release the
+// single store connection.
 func TestInstallFailureKeepsReusedDest(t *testing.T) {
 	s := testServer(t)
 	data := pdfBytes(t)
@@ -118,19 +115,27 @@ func TestInstallFailureKeepsReusedDest(t *testing.T) {
 	}
 	var seeded Document
 	json.Unmarshal(up.Body.Bytes(), &seeded)
+	sum := sha256.Sum256(data)
+	full := hex.EncodeToString(sum[:])
 	// Block the document insert with a trigger so the collection commit fails.
 	if _, err := s.Store.DB.Exec(`CREATE TRIGGER reject_doc BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'test failure'); END`); err != nil {
 		t.Fatal(err)
 	}
 	defer s.Store.DB.Exec(`DROP TRIGGER reject_doc`)
-	spec := importInstall{Owner: "collection", OwnerRef: "req", Temp: "", Filename: "2301.12345v2.pdf", Library: "papers", DocID: seeded.ID, FullSHA: "", Size: seeded.Size}
-	// Reuse path: destination already holds the verified file.
+	spec := importInstall{Owner: "collection", OwnerRef: "req", Temp: "", Filename: "2301.12345v2.pdf", Library: "papers", DocID: seeded.ID, FullSHA: full, Size: seeded.Size}
+	// Reuse path: destination already holds the verified file; the callback
+	// must be reached before the trigger rejects the insert.
+	callbackRan := false
 	_, err := s.installImportFile(context.Background(), spec, func(tx *sql.Tx) (Document, error) {
+		callbackRan = true
 		_, e := tx.Exec("INSERT INTO documents(id,type,title,author,size,created_at,last_opened_at) VALUES('x','pdf','t','a',1,'','')")
 		return Document{}, e
 	})
 	if err == nil {
 		t.Fatal("expected commit failure")
+	}
+	if !callbackRan {
+		t.Fatal("commit callback never ran: preflight rejected before the target failure")
 	}
 	// The reused destination must survive the failure cleanup.
 	if _, statErr := os.Stat(s.Store.File(seeded)); statErr != nil {
@@ -149,6 +154,71 @@ func TestInstallFailureKeepsReusedDest(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("store connection stuck after failed install")
+	}
+}
+
+// TestCancelCannotClaimCommittingImport (Q02) proves a formal commit keeps
+// its request: cancel reports the committing state instead of flipping it.
+func TestCancelCannotClaimCommittingImport(t *testing.T) {
+	s := testServer(t)
+	collectionFixture(t, s, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(collectionSearchAtom))
+	})
+	collectionFixturePDF(t, s, nil)
+	task := createCollectionTask(t, s, `{"name":"视觉","config":{"v":1,"keyword_groups":[["object detection"]],"group_operator_or":true,"authors":[],"categories":[],"latest_window_days":30,"hot_window_months":12,"frequency_hours":24}}`)
+	w := request(t, s, "POST", "/api/collection/tasks/"+task.ID+"/runs", strings.NewReader("{}"))
+	var run CollectionRun
+	json.Unmarshal(w.Body.Bytes(), &run)
+	waitRunStatus(t, s, run.ID, runSucceeded)
+	w = request(t, s, "POST", "/api/collection/imports", strings.NewReader(`{"items":[{"arxivId":"2301.12345","version":2,"expectedContentHash":""}]}`))
+	var created struct {
+		Items []struct {
+			RequestID string `json:"requestId"`
+		} `json:"items"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &created)
+	reqID := created.Items[0].RequestID
+	waitImport(t, s, reqID, importImported)
+	// A committing request is settled; late cancel cannot rewrite history.
+	if ok, _ := s.Store.claimImport(reqID, importActive, map[string]any{"status": importCancelled}); ok {
+		t.Fatal("cancel claimed a settled request")
+	}
+	var st string
+	s.Store.DB.QueryRow("SELECT status FROM collection_imports WHERE request_id=?", reqID).Scan(&st)
+	if st != importImported {
+		t.Fatalf("status rewritten by cancel attempt: %s", st)
+	}
+}
+
+// TestStaleSnapshotCannotCommit (Q02) proves an old downloaded snapshot is
+// refused once the request left the claimable states.
+func TestStaleSnapshotCannotCommit(t *testing.T) {
+	s := testServer(t)
+	// Register a request, cancel it, then hand the stale snapshot to commit.
+	req := CollectionImportRequest{
+		RequestID: id(), ArXivID: "2301.00001", DownloadVersion: 1,
+		Status: importQueued, CreatedAt: now(), UpdatedAt: now(),
+	}
+	if err := s.Store.InsertCollectionImport(req); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.Store.claimImport(req.RequestID, importActive, map[string]any{"status": importCancelled}); !ok {
+		t.Fatal("cancel claim failed")
+	}
+	stale := req
+	stale.Status = importDownloaded
+	stale.CacheRelPath = "cache/paper-collection/x/y.pdf"
+	// The stale snapshot must be refused before any library write.
+	s.commitCollectionImport(stale)
+	var st string
+	s.Store.DB.QueryRow("SELECT status FROM collection_imports WHERE request_id=?", req.RequestID).Scan(&st)
+	if st != importCancelled {
+		t.Fatalf("stale snapshot changed terminal state: %s", st)
+	}
+	var docs int
+	s.Store.DB.QueryRow("SELECT count(*) FROM documents").Scan(&docs)
+	if docs != 0 {
+		t.Fatalf("stale snapshot wrote %d documents", docs)
 	}
 }
 
@@ -209,7 +279,9 @@ func TestDoubleConfirmClaimsOnce(t *testing.T) {
 	collectionFixture(t, s, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(collectionSearchAtom))
 	})
-	collectionFixturePDF(t, s, nil)
+		collectionFixturePDF(t, s, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(testPDF(largePaperPages + 10))
+	})
 	task := createCollectionTask(t, s, `{"name":"视觉","config":{"v":1,"keyword_groups":[["object detection"]],"group_operator_or":true,"authors":[],"categories":[],"latest_window_days":30,"hot_window_months":12,"frequency_hours":24}}`)
 	w := request(t, s, "POST", "/api/collection/tasks/"+task.ID+"/runs", strings.NewReader("{}"))
 	var run CollectionRun
@@ -223,9 +295,10 @@ func TestDoubleConfirmClaimsOnce(t *testing.T) {
 	}
 	json.Unmarshal(w.Body.Bytes(), &created)
 	reqID := created.Items[0].RequestID
-	status := waitImport(t, s, reqID, importDownloaded, importAwaitingConfirmation, importImported)
-	if status == importImported {
-		t.Skip("fixture committed directly; claim path exercised by confirm flows")
+	// Long papers stop for the user; the confirm claim must be single-shot.
+	status := waitImport(t, s, reqID, importAwaitingConfirmation)
+	if status != importAwaitingConfirmation {
+		t.Fatalf("long paper did not wait for confirmation: %s", status)
 	}
 	w1 := request(t, s, "POST", "/api/collection/imports/"+reqID+"/confirm", nil)
 	w2 := request(t, s, "POST", "/api/collection/imports/"+reqID+"/confirm", nil)

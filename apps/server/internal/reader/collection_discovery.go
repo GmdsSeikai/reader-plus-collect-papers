@@ -23,18 +23,29 @@ type CollectionBranch struct {
 	BranchHash string
 	Channel    string
 	Name       string
+	// Body is the branch query without the date window, so subdivided
+	// slices rebind their own narrower range.
+	Body string
+}
+
+// QueryFor binds the branch to a concrete date range.
+func (b CollectionBranch) QueryFor(from, to time.Time) string {
+	if b.Body == "" {
+		return b.Query
+	}
+	return scholar.DateRange{From: from, To: to}.String() + " AND " + b.Body
 }
 
 // BuildBranches expands a task config into topic/author branches for both
 // channels. Categories only constrain the topic branch.
 func BuildBranches(cfg CollectionTaskConfig, latest, hot DateWindow) []CollectionBranch {
 	out := []CollectionBranch{}
-	add := func(channel, name, query string, dates scholar.DateRange) {
-		if query == "" {
+	add := func(channel, name, body string, dates scholar.DateRange) {
+		if body == "" {
 			return
 		}
-		b := CollectionBranch{Channel: channel, Name: name, Query: query}
-		sum := sha256.Sum256([]byte(channel + "\x00" + name + "\x00" + query))
+		b := CollectionBranch{Channel: channel, Name: name, Body: body, Query: dates.String() + " AND " + body}
+		sum := sha256.Sum256([]byte(channel + "\x00" + name + "\x00" + body))
 		b.BranchHash = hex.EncodeToString(sum[:8])
 		out = append(out, b)
 	}
@@ -47,11 +58,11 @@ func BuildBranches(cfg CollectionTaskConfig, latest, hot DateWindow) []Collectio
 			Categories:      cfg.Categories,
 			GroupOperatorOR: cfg.GroupOperatorOR,
 		}
-		add(window.channel, "topic", builder.TopicQuery(window.dates), window.dates)
+		add(window.channel, "topic", builder.TopicBody(), window.dates)
 		for _, a := range cfg.Authors {
 			names := append([]string{a.Name}, a.Aliases...)
 			ab := scholar.ArxivQueryBuilder{Authors: names}
-			add(window.channel, "author:"+a.Name, ab.AuthorQuery(window.dates), window.dates)
+			add(window.channel, "author:"+a.Name, ab.AuthorBody(), window.dates)
 		}
 	}
 	return out
@@ -90,12 +101,75 @@ func subCalendarMonths(t time.Time, months int) time.Time {
 	return time.Date(year, month, day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
 }
 
-// SlicePlan is one coverage unit to scan. P1 uses one slice per branch and
-// channel covering the full window; P2 refines totals into time buckets.
+// SlicePlan is one coverage unit to scan. Oversized slices subdivide into
+// finer time buckets; ForceRescan reopens a completed slice for the delayed
+// indexing rescan of the recent window.
 type SlicePlan struct {
-	Branch CollectionBranch
-	From   time.Time
-	To     time.Time
+	Branch      CollectionBranch
+	From        time.Time
+	To          time.Time
+	ForceRescan bool
+}
+
+// splitSliceRange divides a range into the next finer aligned bucket level:
+// multi-day → day → hour → minute. A range already at minute granularity
+// returns nil, which callers treat as a proven source limit.
+func splitSliceRange(from, to time.Time) []DateWindow {
+	from, to = from.UTC(), to.UTC()
+	span := to.Sub(from)
+	switch {
+	case span > 25*time.Hour:
+		// Whole UTC days.
+		out := []DateWindow{}
+		start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
+		if start.Before(from) {
+			start = start.AddDate(0, 0, 1)
+		}
+		for start.Before(to) {
+			end := start.AddDate(0, 0, 1)
+			seg := DateWindow{From: start, To: end}
+			if seg.To.After(to) {
+				seg.To = to
+			}
+			out = append(out, seg)
+			start = end
+		}
+		return out
+	case span > 90*time.Minute:
+		out := []DateWindow{}
+		start := from.Truncate(time.Hour)
+		if start.Before(from) {
+			start = start.Add(time.Hour)
+		}
+		for start.Before(to) {
+			end := start.Add(time.Hour)
+			seg := DateWindow{From: start, To: end}
+			if seg.To.After(to) {
+				seg.To = to
+			}
+			out = append(out, seg)
+			start = end
+		}
+		return out
+	case span > 90*time.Second:
+		out := []DateWindow{}
+		start := from.Truncate(time.Minute)
+		if start.Before(from) {
+			start = start.Add(time.Minute)
+		}
+		for start.Before(to) {
+			end := start.Add(time.Minute)
+			seg := DateWindow{From: start, To: end}
+			if seg.To.After(to) {
+				seg.To = to
+			}
+			out = append(out, seg)
+			start = end
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // BuildSlices expands branches into scan slices.

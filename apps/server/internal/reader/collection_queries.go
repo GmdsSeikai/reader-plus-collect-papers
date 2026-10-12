@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -154,32 +154,64 @@ type CandidatePage struct {
 	NextCursor string
 }
 
-// encodeCursor binds the cursor to the sort mode, channel, task revision and
-// the real sort-key value so it cannot be replayed under other filters.
-func encodeCursor(sort, channel string, taskRev, key int, date, id string) string {
-	raw := fmt.Sprintf("%s|%s|%d|%d|%s|%s", sort, channel, taskRev, key, date, id)
-	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+var taskIDPattern = regexp.MustCompile("^[0-9a-f]{32}$")
+
+// cursorPayload binds a cursor to the complete filter identity (sort,
+// channel, task, revision, search, citation filter, ignored) plus the real
+// sort-key values, so it cannot be replayed under other filters.
+type cursorPayload struct {
+	Sort     string `json:"s"`
+	Channel  string `json:"c"`
+	Task     string `json:"t"`
+	Search   string `json:"q"`
+	Citation string `json:"k"`
+	Ignored  string `json:"i"`
+	Key      int    `json:"n"`
+	TaskRev  int    `json:"r"`
+	Date     string `json:"d"`
+	ID       string `json:"id"`
 }
 
-// DecodeCursor validates a cursor against the active filter identity.
-func DecodeCursor(cursor, sort, channel string, taskRev int) (key int, date, id string, err error) {
+func encodeCursor(f CandidateFilter, key int, date, id string) string {
+	ignored := ""
+	if f.Ignored != nil {
+		ignored = "0"
+		if *f.Ignored {
+			ignored = "1"
+		}
+	}
+	raw, _ := json.Marshal(cursorPayload{
+		Sort: f.Sort, Channel: f.Channel, Task: f.TaskID, Search: f.Search,
+		Citation: f.Citation, Ignored: ignored, Key: key, TaskRev: f.TaskRev,
+		Date: date, ID: id,
+	})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// DecodeCursor validates a cursor against the active filter identity and
+// returns its keyset values.
+func DecodeCursor(cursor string, f CandidateFilter) (key int, date, id string, err error) {
 	raw, decErr := base64.RawURLEncoding.DecodeString(cursor)
 	if decErr != nil {
 		return 0, "", "", errors.New("无效的游标")
 	}
-	parts := strings.SplitN(string(raw), "|", 6)
-	if len(parts) != 6 || parts[0] != sort || parts[1] != channel {
+	var p cursorPayload
+	if json.Unmarshal(raw, &p) != nil {
 		return 0, "", "", errors.New("无效的游标")
 	}
-	rev, err := strconv.Atoi(parts[2])
-	if err != nil || rev != taskRev {
+	ignored := ""
+	if f.Ignored != nil {
+		ignored = "0"
+		if *f.Ignored {
+			ignored = "1"
+		}
+	}
+	if p.Sort != f.Sort || p.Channel != f.Channel || p.Task != f.TaskID ||
+		p.Search != f.Search || p.Citation != f.Citation || p.Ignored != ignored ||
+		p.TaskRev != f.TaskRev {
 		return 0, "", "", errors.New("无效的游标")
 	}
-	key, err = strconv.Atoi(parts[3])
-	if err != nil {
-		return 0, "", "", errors.New("无效的游标")
-	}
-	return key, parts[4], parts[5], nil
+	return p.Key, p.Date, p.ID, nil
 }
 
 // CollectionCandidates returns one keyset page of candidates. The task filter
@@ -196,21 +228,29 @@ func (s *Store) CollectionCandidates(f CandidateFilter) (CandidatePage, error) {
 	}
 	args := []any{}
 	where := []string{"1=1"}
-	// Current-revision relationship: one row per candidate regardless of how
-	// many branches or channels found it.
-	rel := "SELECT 1 FROM collection_matches m WHERE m.arxiv_id=c.arxiv_id"
-	if f.TaskID != "" {
-		rel += " AND m.task_id=? AND m.query_revision=(SELECT query_revision FROM collection_tasks WHERE task_id=?)"
-		args = append(args, f.TaskID, f.TaskID)
-	} else {
-		rel += " AND m.query_revision=(SELECT t.query_revision FROM collection_tasks t WHERE t.task_id=m.task_id)"
+	// matchCond is the shared effective-relationship scope used both for the
+	// EXISTS filter and for relevance scoring: current revision only, and the
+	// selected task/channel when given. Old relationships never rank. The
+	// scope is built from validated identifiers as literals so repeated uses
+	// (select list, keyset, order) cannot desynchronize bind positions.
+	if f.Channel != "" && f.Channel != channelLatest && f.Channel != channelHot {
+		return page, errors.New("无效的通道")
 	}
-	if f.Channel != "" {
-		rel += " AND m.channel=?"
-		args = append(args, f.Channel)
+	if f.TaskID != "" && !taskIDPattern.MatchString(f.TaskID) {
+		return page, errors.New("无效的任务")
+	}
+	matchCond := func(alias string) string {
+		cond := alias + ".arxiv_id=c.arxiv_id AND " + alias + ".query_revision=(SELECT t.query_revision FROM collection_tasks t WHERE t.task_id=" + alias + ".task_id)"
+		if f.TaskID != "" {
+			cond += " AND " + alias + ".task_id='" + f.TaskID + "'"
+		}
+		if f.Channel != "" {
+			cond += " AND " + alias + ".channel='" + f.Channel + "'"
+		}
+		return cond
 	}
 	if f.TaskID != "" || f.Channel != "" {
-		where = append(where, "EXISTS("+rel+")")
+		where = append(where, "EXISTS(SELECT 1 FROM collection_matches m WHERE "+matchCond("m")+")")
 	}
 	if f.Since != "" {
 		where = append(where, "c.published_at>=?")
@@ -230,7 +270,9 @@ func (s *Store) CollectionCandidates(f CandidateFilter) (CandidatePage, error) {
 	} else if f.Citation == "unknown" {
 		where = append(where, "(SELECT citation_count FROM collection_citations x WHERE x.arxiv_id=c.arxiv_id) IS NULL")
 	}
-	scoreCol := "(SELECT MAX(COALESCE(m2.ai_score,m2.rule_score)) FROM collection_matches m2 WHERE m2.arxiv_id=c.arxiv_id)"
+	// Relevance scores share the effective-relationship scope, so closing a
+	// task or moving its revision removes its stale scores from ranking.
+	scoreCol := "(SELECT MAX(COALESCE(m2.ai_score,m2.rule_score)) FROM collection_matches m2 WHERE " + matchCond("m2") + ")"
 	citCol := "(SELECT citation_count FROM collection_citations x WHERE x.arxiv_id=c.arxiv_id)"
 	order := "c.published_at DESC, c.arxiv_id DESC"
 	keyExpr := "0"
@@ -284,7 +326,7 @@ func (s *Store) CollectionCandidates(f CandidateFilter) (CandidatePage, error) {
 	}
 	if len(page.Items) > f.Limit {
 		last := page.Items[f.Limit-1]
-		page.NextCursor = encodeCursor(f.Sort, f.Channel, f.TaskRev, page.SortKeys[f.Limit-1], last.PublishedAt, last.ArXivID)
+		page.NextCursor = encodeCursor(f, page.SortKeys[f.Limit-1], last.PublishedAt, last.ArXivID)
 		page.Items = page.Items[:f.Limit]
 		page.Scores = page.Scores[:f.Limit]
 		page.SortKeys = page.SortKeys[:f.Limit]
@@ -348,9 +390,9 @@ func (s *Store) InsertCollectionImport(req CollectionImportRequest) error {
 	if !validImportStatus(req.Status) {
 		return fmt.Errorf("未知导入状态 %q", req.Status)
 	}
-	_, err := s.DB.Exec(`INSERT INTO collection_imports(request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		req.RequestID, req.ArXivID, req.DownloadVersion, string(req.MetadataSnapshot), req.Status, req.ExpectedSHA256, req.ActualSHA256, req.CacheRelPath, req.DocumentID, req.Library, req.ConfirmPages, req.Error, req.CreatedAt, req.UpdatedAt)
+	_, err := s.DB.Exec(`INSERT INTO collection_imports(request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,"condition",created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		req.RequestID, req.ArXivID, req.DownloadVersion, string(req.MetadataSnapshot), req.Status, req.ExpectedSHA256, req.ActualSHA256, req.CacheRelPath, req.DocumentID, req.Library, req.ConfirmPages, req.Error, req.Condition, req.CreatedAt, req.UpdatedAt)
 	return err
 }
 
@@ -358,9 +400,9 @@ func (s *Store) InsertCollectionImport(req CollectionImportRequest) error {
 func (s *Store) ActiveCollectionImport(arxivID string) (CollectionImportRequest, error) {
 	var req CollectionImportRequest
 	var snapshot string
-	err := s.DB.QueryRow(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,created_at,updated_at
+	err := s.DB.QueryRow(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,"condition",created_at,updated_at
 		FROM collection_imports WHERE arxiv_id=? AND status NOT IN ('imported','failed','cancelled','interrupted')`, arxivID).
-		Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.CreatedAt, &req.UpdatedAt)
+		Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.Condition, &req.CreatedAt, &req.UpdatedAt)
 	req.MetadataSnapshot = json.RawMessage(snapshot)
 	return req, err
 }
@@ -369,9 +411,9 @@ func (s *Store) ActiveCollectionImport(arxivID string) (CollectionImportRequest,
 func (s *Store) CollectionImport(requestID string) (CollectionImportRequest, error) {
 	var req CollectionImportRequest
 	var snapshot string
-	err := s.DB.QueryRow(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,created_at,updated_at
+	err := s.DB.QueryRow(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,"condition",created_at,updated_at
 		FROM collection_imports WHERE request_id=?`, requestID).
-		Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.CreatedAt, &req.UpdatedAt)
+		Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.Condition, &req.CreatedAt, &req.UpdatedAt)
 	req.MetadataSnapshot = json.RawMessage(snapshot)
 	return req, err
 }
@@ -384,9 +426,9 @@ func (s *Store) UpdateCollectionImport(requestID string, fields map[string]any) 
 	}
 	sets := []string{}
 	args := []any{}
-	for _, key := range []string{"status", "error", "actual_sha256", "cache_rel_path", "document_id", "library", "confirm_pages", "expected_sha256"} {
+	for _, key := range []string{"status", "error", "condition", "actual_sha256", "cache_rel_path", "document_id", "library", "confirm_pages", "expected_sha256"} {
 		if v, ok := fields[key]; ok {
-			sets = append(sets, key+"=?")
+			sets = append(sets, "\""+key+"\"=?")
 			args = append(args, v)
 		}
 	}
@@ -400,7 +442,9 @@ func (s *Store) UpdateCollectionImport(requestID string, fields map[string]any) 
 }
 
 // importActive lists the non-terminal import states an owner may still change.
-var importActive = []string{importQueued, importDownloading, importDownloaded, importAwaitingConfirmation, importImporting}
+// importActive lists the cancellable import states. A formal commit owns its
+// request until the real write ends and is never hard-cancelled.
+var importActive = []string{importQueued, importDownloading, importDownloaded, importAwaitingConfirmation}
 
 // claimImport atomically moves a request from one of fromStatuses while
 // applying fields. Terminal states are never overwritten by a late publisher;
@@ -413,7 +457,7 @@ func (s *Store) claimImport(requestID string, fromStatuses []string, fields map[
 	args := []any{}
 	for _, key := range []string{"status", "error", "actual_sha256", "cache_rel_path", "document_id", "library", "confirm_pages", "expected_sha256"} {
 		if v, ok := fields[key]; ok {
-			sets = append(sets, key+"=?")
+			sets = append(sets, "\""+key+"\"=?")
 			args = append(args, v)
 		}
 	}
@@ -444,7 +488,7 @@ func (s *Store) MustImport(requestID string) CollectionImportRequest {
 // ActiveCollectionImports lists every non-terminal request so the UI can
 // restore batch state after switching pages.
 func (s *Store) ActiveCollectionImports() ([]CollectionImportRequest, error) {
-	rows, err := s.DB.Query(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,created_at,updated_at
+	rows, err := s.DB.Query(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,"condition",created_at,updated_at
 		FROM collection_imports WHERE status IN ('queued','downloading','downloaded','awaiting_confirmation','importing') ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -454,7 +498,7 @@ func (s *Store) ActiveCollectionImports() ([]CollectionImportRequest, error) {
 	for rows.Next() {
 		var req CollectionImportRequest
 		var snapshot string
-		if err := rows.Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.CreatedAt, &req.UpdatedAt); err != nil {
+		if err := rows.Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.Condition, &req.CreatedAt, &req.UpdatedAt); err != nil {
 			return nil, err
 		}
 		req.MetadataSnapshot = json.RawMessage(snapshot)

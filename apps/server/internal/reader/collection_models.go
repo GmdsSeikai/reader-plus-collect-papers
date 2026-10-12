@@ -280,6 +280,7 @@ type CollectionImportRequest struct {
 	Library          string          `json:"library,omitempty"`
 	ConfirmPages     int             `json:"confirmPages,omitempty"`
 	Error            string          `json:"error,omitempty"`
+	Condition        string          `json:"condition,omitempty"`
 	CreatedAt        string          `json:"createdAt"`
 	UpdatedAt        string          `json:"updatedAt"`
 }

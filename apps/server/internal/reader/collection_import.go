@@ -169,17 +169,31 @@ func (s *Server) runCollectionImport(ctx context.Context, req CollectionImportRe
 		"actual_sha256":  full,
 		"cache_rel_path": filepath.ToSlash(filepath.Join("cache", "paper-collection", req.RequestID, filepath.Base(pdfPath))),
 		"confirm_pages":  pages,
+		"condition":      "",
 	}
-	// Normal papers proceed to the commit; long papers wait for the user.
+	// Long papers need the user's explicit page-count confirmation.
 	if pageErr == nil && pages > largePaperPages {
 		fields["status"] = importAwaitingConfirmation
-		if ok, _ := s.Store.claimImport(req.RequestID, []string{importQueued, importDownloading}, fields); !ok {
-			return
-		}
+		fields["condition"] = "pages"
+		_, _ = s.Store.claimImport(req.RequestID, []string{importQueued, importDownloading}, fields)
 		return
 	}
+	// A duplicate whose existing document is in the trash needs the user's
+	// explicit restore decision before anything is written.
+	docID := full[:32]
+	if existing, e := s.Store.Document(docID); e == nil && existing.DeletedAt != "" {
+		fields["status"] = importAwaitingConfirmation
+		fields["condition"] = "trash-restore"
+		_, _ = s.Store.claimImport(req.RequestID, []string{importQueued, importDownloading}, fields)
+		return
+	}
+	// Normal papers share the exact claim path with manual confirmation: the
+	// request must own importing before any library write starts.
 	fields["status"] = importDownloaded
 	if ok, _ := s.Store.claimImport(req.RequestID, []string{importQueued, importDownloading}, fields); !ok {
+		return
+	}
+	if ok, _ := s.Store.claimImport(req.RequestID, []string{importDownloaded}, map[string]any{"status": importImporting}); !ok {
 		return
 	}
 	s.commitCollectionImport(s.Store.MustImport(req.RequestID))
@@ -224,10 +238,18 @@ func (s *Server) collectionImportConfirm(w http.ResponseWriter, r *http.Request)
 }
 
 // commitCollectionImport installs the verified file through the shared import
-// commit so documents, processing rows and the install log land together. An
-// existing identical document is reused with its file, notes and progress
-// intact — never deleted or replaced.
+// commit. The caller must already hold the importing claim; this function
+// re-reads the authoritative request so a cancelled or stale snapshot can
+// never write documents or files. An existing identical document is reused
+// with its file, notes and progress intact — never deleted or replaced.
 func (s *Server) commitCollectionImport(req CollectionImportRequest) {
+	fresh, err := s.Store.CollectionImport(req.RequestID)
+	if err != nil || fresh.Status != importImporting {
+		// Ownership was lost (cancelled, replaced or already settled): the
+		// stale snapshot must not perform any library write.
+		return
+	}
+	req = fresh
 	if req.CacheRelPath == "" {
 		_, _ = s.Store.claimImport(req.RequestID, []string{importImporting}, map[string]any{"status": importFailed, "error": "缺少已下载文件"})
 		return
@@ -255,15 +277,12 @@ func (s *Server) commitCollectionImport(req CollectionImportRequest) {
 	// Reuse an existing identical document instead of re-inserting: keep its
 	// library location, notes, annotations, chat and reading progress.
 	if existing, e := s.Store.Document(docID); e == nil {
-		if verr := s.Store.verifyExistingImport(docID, full); verr != nil {
-			_, _ = s.Store.claimImport(req.RequestID, []string{importImporting}, map[string]any{"status": importFailed, "error": verr.Error()})
+		if err := s.reuseExistingDocument(req, existing, full, cachePath); err != nil {
+			_, _ = s.Store.claimImport(req.RequestID, []string{importImporting}, map[string]any{"status": importFailed, "error": err.Error()})
 			return
 		}
-		if restored, rerr := s.restore(docID); rerr == nil {
-			_ = s.Store.enqueueDocument(restored)
-		}
 		_, _ = s.Store.claimImport(req.RequestID, []string{importImporting}, map[string]any{
-			"status": importImported, "document_id": docID, "library": existing.Library, "actual_sha256": full, "error": "",
+			"status": importImported, "document_id": docID, "library": existing.Library, "actual_sha256": full, "error": "", "condition": "",
 		})
 		return
 	}
@@ -289,31 +308,78 @@ func (s *Server) commitCollectionImport(req CollectionImportRequest) {
 		return
 	}
 	_, _ = s.Store.claimImport(req.RequestID, []string{importImporting}, map[string]any{
-		"status": importImported, "document_id": d.ID, "library": d.Library, "error": "",
+		"status": importImported, "document_id": d.ID, "library": d.Library, "error": "", "condition": "",
 	})
+}
+
+// reuseExistingDocument verifies the real library file against the full
+// digest before reporting success. A missing file is repaired from the
+// verified download cache while keeping the document's reading state; a
+// mismatching file refuses the reuse; a trashed document restores only on the
+// user's confirmed condition, and a restore failure is a failure.
+func (s *Server) reuseExistingDocument(req CollectionImportRequest, existing Document, full, cachePath string) error {
+	file := s.Store.File(existing)
+	if st, err := os.Stat(file); err == nil && st.Mode().IsRegular() {
+		_, actual, _, err := hashImportFile(file)
+		if err != nil {
+			return fmt.Errorf("无法验证已有文件")
+		}
+		if !strings.EqualFold(actual, full) {
+			return fmt.Errorf("已有文档的文件内容与本次文件不一致，已拒绝覆盖")
+		}
+		if err := s.Store.verifyExistingImport(existing.ID, full); err != nil {
+			return err
+		}
+	} else {
+		// The official file is missing: restore it only from the verified
+		// cache copy, keeping the document and its reading data.
+		if err := copyFile(cachePath, file); err != nil {
+			return fmt.Errorf("已有文档缺少原文件，且无法用已下载副本修复")
+		}
+		_, actual, _, err := hashImportFile(file)
+		if err != nil || !strings.EqualFold(actual, full) {
+			_ = os.Remove(file)
+			return fmt.Errorf("修复后的文件校验失败")
+		}
+	}
+	if existing.DeletedAt != "" {
+		// The user's confirm is the restore decision; a restore failure must
+		// not look like a successful import.
+		if req.Condition != "trash-restore" {
+			return fmt.Errorf("相同文件在回收站中，需要确认恢复后入库")
+		}
+		restored, err := s.restore(existing.ID)
+		if err != nil {
+			return fmt.Errorf("无法恢复回收站中的文档")
+		}
+		if err := s.Store.enqueueDocument(restored); err != nil {
+			return fmt.Errorf("无法创建解析任务")
+		}
+		return nil
+	}
+	return s.Store.verifyExistingImport(existing.ID, full)
 }
 
 func (s *Server) collectionImportCancel(w http.ResponseWriter, r *http.Request) {
 	reqID := r.PathValue("id")
-	// Cancelling closes the owned transport; the terminal state is claimed
-	// from the active states so a late download cannot revive the request.
+	// Preparing and downloading can be cancelled; a formal commit owns its
+	// request until the real write ends and reports so instead of cancelling.
 	cancelled, err := s.Store.claimImport(reqID, importActive, map[string]any{"status": importCancelled, "error": ""})
 	if err != nil {
 		collectionFail(w, 404, "query-invalid", "导入请求不存在")
 		return
 	}
+	if !cancelled {
+		req, err := s.Store.CollectionImport(reqID)
+		if err != nil {
+			collectionFail(w, 404, "query-invalid", "导入请求不存在")
+			return
+		}
+		respond(w, 200, map[string]string{"status": req.Status})
+		return
+	}
 	s.collection().cancelWork(reqID)
-	req, err := s.Store.CollectionImport(reqID)
-	if err != nil {
-		collectionFail(w, 404, "query-invalid", "导入请求不存在")
-		return
-	}
-	if !cancelled && req.Status == importImporting {
-		// The commit owns the request until the real write finishes.
-		respond(w, 200, map[string]string{"status": importImporting})
-		return
-	}
-	respond(w, 200, map[string]string{"status": req.Status})
+	respond(w, 200, map[string]string{"status": importCancelled})
 }
 
 func (s *Server) registerCollectionImportRoutes(mux *http.ServeMux) {

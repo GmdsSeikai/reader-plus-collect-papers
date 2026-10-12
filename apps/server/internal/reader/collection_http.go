@@ -165,11 +165,12 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 			f.Sort = "date"
 		}
 	}
-	// The window lower bound defaults to the widest enabled-task window for
-	// the channel; an explicit since narrows it.
+	// The window lower bound is the selected task's own window, or the widest
+	// enabled-task window, or the design defaults only when no task is
+	// enabled. An explicit since narrows it further.
 	f.Since = q.Get("since")
 	if f.Since == "" && f.Channel != "" {
-		f.Since = s.widestWindowStart(f.Channel)
+		f.Since = s.windowStart(f.Channel, f.TaskID)
 	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -190,7 +191,7 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if cursor := q.Get("cursor"); cursor != "" {
-		key, date, id, err := DecodeCursor(cursor, f.Sort, f.Channel, f.TaskRev)
+		key, date, id, err := DecodeCursor(cursor, f)
 		if err != nil {
 			collectionFail(w, 400, "query-invalid", "无效的游标")
 			return
@@ -213,13 +214,24 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 	respond(w, 200, map[string]any{"items": rows, "nextCursor": page.NextCursor})
 }
 
-// widestWindowStart returns the lower bound for the channel using the widest
-// enabled-task window (or the design defaults when no task is enabled).
-func (s *Server) widestWindowStart(channel string) string {
+// windowStart returns the lower bound for the channel: the selected task's
+// own window when given, otherwise the widest enabled-task window, otherwise
+// the design defaults. A narrowed task window must narrow the view.
+func (s *Server) windowStart(channel, taskID string) string {
 	days, months := 30, 12
-	if tasks, err := s.Store.CollectionTasks(); err == nil {
+	if taskID != "" {
+		if t, err := s.Store.CollectionTask(taskID); err == nil {
+			days, months = t.Config.LatestWindowDays, t.Config.HotWindowMonths
+		}
+	} else if tasks, err := s.Store.CollectionTasks(); err == nil {
+		found := false
 		for _, t := range tasks {
 			if !t.Enabled {
+				continue
+			}
+			if !found {
+				days, months = t.Config.LatestWindowDays, t.Config.HotWindowMonths
+				found = true
 				continue
 			}
 			if t.Config.LatestWindowDays > days {

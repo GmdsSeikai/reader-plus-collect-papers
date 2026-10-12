@@ -53,7 +53,7 @@ var collectionSchemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS collection_quota_days(utc_day TEXT PRIMARY KEY,sent INTEGER NOT NULL DEFAULT 0,reserved INTEGER NOT NULL DEFAULT 0,uncertain INTEGER NOT NULL DEFAULT 0)`,
 	`CREATE TABLE IF NOT EXISTS collection_attempts(attempt_id TEXT PRIMARY KEY,request_key TEXT NOT NULL,cache_key TEXT NOT NULL,reserved_day TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,sent_at TEXT,finished_at TEXT)`,
 	`CREATE TABLE IF NOT EXISTS collection_cursors(owner_key TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at TEXT NOT NULL)`,
-	`CREATE TABLE IF NOT EXISTS collection_imports(request_id TEXT PRIMARY KEY,arxiv_id TEXT NOT NULL,download_version INTEGER NOT NULL,metadata_snapshot TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL,expected_sha256 TEXT NOT NULL DEFAULT '',actual_sha256 TEXT NOT NULL DEFAULT '',cache_rel_path TEXT NOT NULL DEFAULT '',document_id TEXT NOT NULL DEFAULT '',library TEXT NOT NULL DEFAULT '',confirm_pages INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS collection_imports(request_id TEXT PRIMARY KEY,arxiv_id TEXT NOT NULL,download_version INTEGER NOT NULL,metadata_snapshot TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL,expected_sha256 TEXT NOT NULL DEFAULT '',actual_sha256 TEXT NOT NULL DEFAULT '',cache_rel_path TEXT NOT NULL DEFAULT '',document_id TEXT NOT NULL DEFAULT '',library TEXT NOT NULL DEFAULT '',confirm_pages INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',"condition" TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS collection_imports_active ON collection_imports(arxiv_id) WHERE status NOT IN ('imported','failed','cancelled','interrupted')`,
 	`CREATE TABLE IF NOT EXISTS import_commits(commit_id TEXT PRIMARY KEY,owner TEXT NOT NULL,owner_ref TEXT NOT NULL DEFAULT '',document_id TEXT NOT NULL DEFAULT '',library TEXT NOT NULL,filename TEXT NOT NULL,target_rel TEXT NOT NULL,full_sha256 TEXT NOT NULL,size INTEGER NOT NULL,stage TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS import_commits_open_target ON import_commits(target_rel) WHERE stage IN ('prepared','installed')`,
@@ -96,6 +96,16 @@ func (s *Store) migrateCollection() error {
 	for _, stmt := range collectionSchemaStatements[1:] {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("采集表创建失败: %w", err)
+		}
+	}
+	// Additive column repairs for module v1 databases created before the
+	// import condition field existed.
+	{
+		var n int
+		if err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('collection_imports') WHERE name='condition'`).Scan(&n); err == nil && n == 0 {
+			if _, err := tx.Exec(`ALTER TABLE collection_imports ADD COLUMN "condition" TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("采集表迁移失败: %w", err)
+			}
 		}
 	}
 	if version == 0 {

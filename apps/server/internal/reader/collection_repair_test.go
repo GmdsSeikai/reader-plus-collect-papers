@@ -1,6 +1,8 @@
 package reader
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -108,9 +110,8 @@ func TestCandidateTaskFilterDedupesAcrossChannels(t *testing.T) {
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("latest channel rows=%d err=%v", len(page.Items), err)
 	}
-	page, err = s.CollectionCandidates(CandidateFilter{TaskID: task.ID, Channel: "nope", Limit: 50})
-	if err != nil || len(page.Items) != 0 {
-		t.Fatalf("unknown channel rows=%d err=%v", len(page.Items), err)
+	if _, err = s.CollectionCandidates(CandidateFilter{TaskID: task.ID, Channel: "nope", Limit: 50}); err == nil {
+		t.Fatal("unknown channel must be rejected")
 	}
 }
 
@@ -138,10 +139,10 @@ func TestCandidateCitationKeysetPagingNoLoss(t *testing.T) {
 		t.Fatal("no cursor for remaining row")
 	}
 	// The cursor must be accepted only under the same sort identity.
-	if _, _, _, err := DecodeCursor(page.NextCursor, "date", "", 0); err == nil {
+	if _, _, _, err := DecodeCursor(page.NextCursor, CandidateFilter{Sort: "date"}); err == nil {
 		t.Fatal("cursor reused across sort modes")
 	}
-	key, date, id, err := DecodeCursor(page.NextCursor, "citations", "", 0)
+	key, date, id, err := DecodeCursor(page.NextCursor, CandidateFilter{Sort: "citations"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,4 +175,89 @@ func scholarCitationUnknown(id string) scholar.CitationCount {
 
 func scholarCitationCount(id string, n *int) scholar.CitationCount {
 	return scholar.CitationCount{ArXivID: id, Found: true, Count: n}
+}
+
+func TestSplitSliceRangeBuckets(t *testing.T) {
+	from := time.Date(2026, 3, 1, 12, 30, 0, 0, time.UTC)
+	to := time.Date(2026, 3, 4, 6, 0, 0, 0, time.UTC)
+	days := splitSliceRange(from, to)
+	if len(days) != 3 {
+		t.Fatalf("day buckets = %d (%v)", len(days), days)
+	}
+	for i := 1; i < len(days); i++ {
+		if !days[i].From.Equal(days[i-1].To) {
+			t.Fatalf("gap between buckets %d: %v %v", i, days[i-1], days[i])
+		}
+	}
+	// A single day splits into hours.
+	hours := splitSliceRange(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC))
+	if len(hours) != 24 {
+		t.Fatalf("hour buckets = %d", len(hours))
+	}
+	// An hour splits into minutes.
+	minutes := splitSliceRange(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 1, 1, 0, 0, 0, time.UTC))
+	if len(minutes) != 60 {
+		t.Fatalf("minute buckets = %d", len(minutes))
+	}
+	// Minute granularity cannot subdivide further: that is the source limit.
+	if got := splitSliceRange(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 1, 0, 0, 30, 0, time.UTC)); got != nil {
+		t.Fatalf("minute range subdivided: %v", got)
+	}
+}
+
+func TestOversizedSliceSubdividesAndCovers(t *testing.T) {
+	s := testServer(t)
+	// Two fixture papers spread over two days; the probe reports a huge total
+	// so the slice subdivides, then each child covers.
+	pages := map[string]string{}
+	pages["0"] = strings.Replace(collectionSearchAtom, "<opensearch:totalResults>1</opensearch:totalResults>", "<opensearch:totalResults>5000</opensearch:totalResults>", 1)
+	collectionFixture(t, s, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("search_query")
+		// Wide spans report the oversized total; subdivided buckets cover as
+		// empty so the parent completes only through its children.
+		if span, ok := querySpan(q); ok && span > 25*time.Hour {
+			w.Write([]byte(pages["0"]))
+			return
+		}
+		w.Write([]byte(`<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"><opensearch:totalResults>0</opensearch:totalResults></feed>`))
+	})
+	task := createCollectionTask(t, s, `{"name":"视觉","config":{"v":1,"keyword_groups":[["object detection"]],"group_operator_or":true,"authors":[],"categories":[],"latest_window_days":30,"hot_window_months":12,"frequency_hours":24}}`)
+	w := request(t, s, "POST", "/api/collection/tasks/"+task.ID+"/runs", strings.NewReader("{}"))
+	var run CollectionRun
+	json.Unmarshal(w.Body.Bytes(), &run)
+	waitRunStatus(t, s, run.ID, runSucceeded)
+	// Parent slices recorded as split must have child slices.
+	var parents int
+	s.Store.DB.QueryRow("SELECT count(*) FROM collection_slices WHERE failure_class='split'").Scan(&parents)
+	if parents == 0 {
+		t.Fatal("oversized slice did not subdivide")
+	}
+	var children int
+	s.Store.DB.QueryRow("SELECT count(*) FROM collection_slices WHERE failure_class='' AND status='completed'").Scan(&children)
+	if children == 0 {
+		t.Fatal("no child slice completed")
+	}
+}
+
+// querySpan extracts the submittedDate window width from a built query.
+func querySpan(q string) (time.Duration, bool) {
+	i := strings.Index(q, "submittedDate:[")
+	if i < 0 {
+		return 0, false
+	}
+	rest := q[i+len("submittedDate:["):]
+	j := strings.Index(rest, "]")
+	if j < 0 {
+		return 0, false
+	}
+	parts := strings.SplitN(rest[:j], " TO ", 2)
+	if len(parts) != 2 {
+		return 0, false
+	}
+	from, err1 := time.Parse("200601021504", parts[0])
+	to, err2 := time.Parse("200601021504", parts[1])
+	if err1 != nil || err2 != nil {
+		return 0, false
+	}
+	return to.Sub(from), true
 }

@@ -67,10 +67,8 @@ func (d DateRange) String() string {
 	return fmt.Sprintf("submittedDate:[%s TO %s]", d.From.UTC().Format("200601021504"), d.To.UTC().Format("200601021504"))
 }
 
-// TopicQuery builds the topic branch: each word searches title or abstract,
-// synonym words OR within a group, groups OR or AND per config, categories
-// constrain the branch. Empty topic material returns "".
-func (b ArxivQueryBuilder) TopicQuery(dates DateRange) string {
+// TopicBody is the topic branch without the date window.
+func (b ArxivQueryBuilder) TopicBody() string {
 	groups := make([]string, 0, len(b.KeywordGroups))
 	for _, g := range b.KeywordGroups {
 		terms := make([]string, 0, len(g))
@@ -105,12 +103,20 @@ func (b ArxivQueryBuilder) TopicQuery(dates DateRange) string {
 			body = "(" + body + ") AND (" + strings.Join(cats, " OR ") + ")"
 		}
 	}
+	return body
+}
+
+// TopicQuery is the topic branch constrained to a date window.
+func (b ArxivQueryBuilder) TopicQuery(dates DateRange) string {
+	body := b.TopicBody()
+	if body == "" {
+		return ""
+	}
 	return dates.String() + " AND " + body
 }
 
-// AuthorQuery builds one author branch: only au terms plus the date window,
-// never topic words or categories.
-func (b ArxivQueryBuilder) AuthorQuery(dates DateRange) string {
+// AuthorBody is one author branch without the date window.
+func (b ArxivQueryBuilder) AuthorBody() string {
 	if len(b.Authors) == 0 {
 		return ""
 	}
@@ -124,7 +130,16 @@ func (b ArxivQueryBuilder) AuthorQuery(dates DateRange) string {
 	if len(terms) == 0 {
 		return ""
 	}
-	return dates.String() + " AND (" + strings.Join(terms, " OR ") + ")"
+	return "(" + strings.Join(terms, " OR ") + ")"
+}
+
+// AuthorQuery is one author branch constrained to a date window.
+func (b ArxivQueryBuilder) AuthorQuery(dates DateRange) string {
+	body := b.AuthorBody()
+	if body == "" {
+		return ""
+	}
+	return dates.String() + " AND " + body
 }
 
 type atomFeed struct {

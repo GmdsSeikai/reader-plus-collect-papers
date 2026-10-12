@@ -22,15 +22,14 @@ type CollectionManager struct {
 	s2Gate  *scholar.SourceGate
 	mu      sync.Mutex
 	running map[string]context.CancelFunc // runID/import requestID → cancel
-	// workWG counts registered background units; Add happens before the
-	// goroutine starts and before results can publish, so Wait cannot race.
-	workWG   sync.WaitGroup
+	// gen is the wait group of the current StartCollection generation. Each
+	// start (including a resumed drain) gets a fresh group so one generation's
+	// stop never waits on the next generation's work.
+	gen      *collectionGeneration
 	paused   bool
 	stopped  bool
 	draining bool
 	queue    chan collectionJob
-	queueWG  sync.WaitGroup
-	tickerWG sync.WaitGroup
 	baseCtx  context.Context
 }
 
@@ -59,46 +58,60 @@ func (m *CollectionManager) Draining() bool {
 	return m.draining || m.stopped
 }
 
+// collectionGeneration owns one StartCollection lifetime. Each start —
+// including a resume after a cancelled drain — gets fresh wait groups so one
+// generation's stop never waits on the next generation's workers.
+type collectionGeneration struct {
+	work, queue, ticker sync.WaitGroup
+	cancel              context.CancelFunc
+}
+
 // StartCollection launches the manager under the service context. The
 // returned stop closes admission, cancels owned work and waits for every
-// registered unit before the store may close. It is safe to start again after
-// a cancelled drain, on a fresh context.
+// registered unit of this generation before the store may close. It is safe
+// to start again after a cancelled drain, on a fresh context.
 func (m *CollectionManager) StartCollection(ctx context.Context) func() {
+	gen := &collectionGeneration{}
+	genCtx, cancel := context.WithCancel(ctx)
+	gen.cancel = cancel
 	m.mu.Lock()
 	m.stopped, m.draining = false, false
-	m.baseCtx = ctx
+	m.baseCtx = genCtx
+	m.gen = gen
 	m.mu.Unlock()
-	m.queueWG.Add(1)
-	go m.importWorker(ctx)
-	m.tickerWG.Add(1)
-	go m.scheduleTick(ctx)
+	gen.queue.Add(1)
+	go m.importWorker(genCtx, gen)
+	gen.ticker.Add(1)
+	go m.scheduleTick(genCtx, gen)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		<-ctx.Done()
-		m.stopOwnedWork()
+		<-genCtx.Done()
+		m.stopOwnedWork(gen)
 	}()
 	return func() {
 		m.mu.Lock()
 		m.draining = true
 		m.mu.Unlock()
+		cancel()
 		<-done
-		m.queueWG.Wait()
-		m.tickerWG.Wait()
+		gen.queue.Wait()
+		gen.ticker.Wait()
 	}
 }
 
 // stopOwnedWork refuses new work, cancels registered handles and waits for
-// every unit to finish its cleanup.
-func (m *CollectionManager) stopOwnedWork() {
+// every unit of this generation to finish its cleanup. Handles stay in the
+// map so each releaseWork still pairs its Done; entries are removed only by
+// their owners.
+func (m *CollectionManager) stopOwnedWork(gen *collectionGeneration) {
 	m.mu.Lock()
 	m.stopped = true
-	for id, cancel := range m.running {
+	for _, cancel := range m.running {
 		cancel()
-		delete(m.running, id)
 	}
 	m.mu.Unlock()
-	m.workWG.Wait()
+	gen.work.Wait()
 }
 
 // registerWork publishes a cancellable handle before the work starts. ok=false
@@ -113,23 +126,28 @@ func (m *CollectionManager) registerWork(id string) (context.Context, bool) {
 		return nil, false
 	}
 	parent := m.baseCtx
-	if parent == nil {
-		parent = context.Background()
+	gen := m.gen
+	if parent == nil || gen == nil {
+		return nil, false
 	}
 	ctx, cancel := context.WithCancel(parent)
 	m.running[id] = cancel
-	m.workWG.Add(1)
+	gen.work.Add(1)
 	return ctx, true
 }
 
 func (m *CollectionManager) releaseWork(id string) {
 	m.mu.Lock()
-	if cancel, ok := m.running[id]; ok {
+	cancel, ok := m.running[id]
+	if ok {
 		cancel()
 		delete(m.running, id)
 	}
+	gen := m.gen
 	m.mu.Unlock()
-	m.workWG.Done()
+	if ok && gen != nil {
+		gen.work.Done()
+	}
 }
 
 // cancelWork closes the transport of one owned unit (an import request).
@@ -162,8 +180,8 @@ func (m *CollectionManager) queueCommit(s *Server, req CollectionImportRequest) 
 
 // importWorker runs one download or commit at a time. Jobs are owned: each
 // registers before publishing anything and releases after cleanup.
-func (m *CollectionManager) importWorker(ctx context.Context) {
-	defer m.queueWG.Done()
+func (m *CollectionManager) importWorker(ctx context.Context, gen *collectionGeneration) {
+	defer gen.queue.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -186,8 +204,8 @@ func (m *CollectionManager) importWorker(ctx context.Context) {
 
 // scheduleTick starts due automatic runs and refreshes due citations. The
 // scheduler is owned by the manager and stops with it.
-func (m *CollectionManager) scheduleTick(ctx context.Context) {
-	defer m.tickerWG.Done()
+func (m *CollectionManager) scheduleTick(ctx context.Context, gen *collectionGeneration) {
+	defer gen.ticker.Done()
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for {
@@ -319,6 +337,13 @@ func (m *CollectionManager) SetPaused(paused bool) error {
 func (m *CollectionManager) executeRun(ctx context.Context, run CollectionRun, task CollectionTask, latest, hot DateWindow) {
 	branches := BuildBranches(task.Config, latest, hot)
 	slices := BuildSlices(branches, latest, hot)
+	// The recent window rescans every run to absorb delayed arXiv indexing.
+	rescanFrom := time.Now().UTC().AddDate(0, 0, -7)
+	for i := range slices {
+		if slices[i].To.After(rescanFrom) {
+			slices[i].ForceRescan = true
+		}
+	}
 	failed := 0
 	for _, plan := range slices {
 		if ctx.Err() != nil {
@@ -347,9 +372,20 @@ func (m *CollectionManager) executeRun(ctx context.Context, run CollectionRun, t
 
 const discoveryPageSize = 100
 
+// splitThreshold is the per-slice source total above which a slice subdivides
+// into finer time buckets instead of paging a huge result set.
+const splitThreshold = 1000
+
+// sliceBudget caps one slice's processing per run as a defensive execution
+// budget; hitting it leaves the slice recoverable and never drops candidates.
+const sliceBudget = 5000
+
 // scanSlice pages one branch slice. The exec token is captured when the
 // request is sent and re-checked inside the commit transaction, so a
-// cancellation between response and commit rejects the page.
+// cancellation between response and commit rejects the page. Slices whose
+// total exceeds the threshold subdivide into finer buckets; a parent only
+// completes when every child covered. A changed source total reopens the
+// slice; a minute-bucket still over the threshold is marked source_limit.
 func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, task CollectionTask, plan SlicePlan) error {
 	from := plan.From.UTC().Format(time.RFC3339)
 	to := plan.To.UTC().Format(time.RFC3339)
@@ -361,15 +397,32 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			BranchHash:   plan.Branch.BranchHash,
 			FromUTC:      from,
 			ToUTC:        to,
-			Query:        plan.Branch.Query,
+			Query:        plan.Branch.QueryFor(plan.From, plan.To),
 			TotalResults: -1,
 			Status:       sliceRunning,
 		}
 	} else if err != nil {
 		return err
 	}
-	if sl.Status == sliceCompleted && sl.PageOffset > 0 && sl.TotalResults >= 0 && sl.Processed >= sl.TotalResults {
-		return nil
+	if sl.SourceLimit {
+		// A proven source limit is terminal for coverage; never claim success.
+		return errors.New("来源上限，未覆盖")
+	}
+	if sl.Status == sliceCompleted && !plan.ForceRescan {
+		if done, err := m.childrenCovered(task, sl); err == nil && done {
+			return nil
+		}
+		if sl.Processed > 0 && sl.TotalResults >= 0 && sl.Processed >= sl.TotalResults {
+			return nil
+		}
+	}
+	if plan.ForceRescan && sl.Status == sliceCompleted {
+		sl.Status = sliceRunning
+		sl.PageOffset = 0
+	}
+	// A split parent is scanned through its children instead.
+	if sl.FailureClass == "split" {
+		return m.subdivideSlice(ctx, run, task, plan, sl)
 	}
 	sl.Status = sliceRunning
 	client := m.server.scholarClient()
@@ -377,6 +430,11 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 	for page := 0; ; page++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if sl.Processed >= sliceBudget {
+			// Defensive budget: keep the slice recoverable, never claim
+			// coverage and never truncate candidates.
+			return errors.New("切片执行预算耗尽，保留待办")
 		}
 		var err error
 		sendToken, err = m.server.Store.CollectionRunToken(run.ID)
@@ -387,7 +445,8 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 		if err != nil {
 			return err
 		}
-		result, err := client.ArxivSearch(ctx, plan.Branch.Query, page*discoveryPageSize, discoveryPageSize)
+		probe := page == 0
+		result, err := client.ArxivSearch(ctx, sl.Query, page*discoveryPageSize, discoveryPageSize)
 		release()
 		if err != nil {
 			return err
@@ -400,6 +459,26 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			// An empty page without a declared total is an anomaly, not
 			// completion: coverage is not proven.
 			return errors.New("来源返回异常空页")
+		}
+		// Total drift reopens the slice: committed rows stay, paging restarts
+		// and stable IDs deduplicate.
+		if !probe && sl.TotalResults >= 0 && result.TotalResults != sl.TotalResults {
+			sl.PageOffset = 0
+			sl.TotalResults = result.TotalResults
+			page = -1
+			continue
+		}
+		if probe && result.TotalResults > splitThreshold {
+			if children := splitSliceRange(plan.From, plan.To); len(children) > 0 {
+				sl.TotalResults = result.TotalResults
+				return m.subdivideSlice(ctx, run, task, plan, sl)
+			}
+			// A minute bucket still over the limit proves a source limit.
+			sl.TotalResults = result.TotalResults
+			sl.SourceLimit = true
+			sl.Status = sliceCompleted
+			sl.FailureClass = "source_limit"
+			return m.finishSlice(sl, run, task, sendToken)
 		}
 		nowStr := now()
 		candidates, matches := discoveryPage(task, plan.Branch, result, nowStr)
@@ -417,11 +496,71 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 		}
 		sl.PageOffset++
 		sl.Processed += len(candidates)
-		if len(result.Entries) < discoveryPageSize || (sl.Processed >= result.TotalResults && result.TotalResults >= 0) {
+		if len(result.Entries) < discoveryPageSize || (sl.Processed >= sl.TotalResults && sl.TotalResults >= 0) {
 			break
 		}
 	}
 	return m.finishSlice(sl, run, task, sendToken)
+}
+
+// subdivideSlice turns an oversized slice into finer time buckets and scans
+// each child. The parent stays incomplete until every child covered.
+func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRun, task CollectionTask, plan SlicePlan, parent CollectionSlice) error {
+	children := splitSliceRange(plan.From, plan.To)
+	if len(children) == 0 {
+		return errors.New("来源总量超限且无法继续细分")
+	}
+	token, err := m.server.Store.CollectionRunToken(run.ID)
+	if err != nil {
+		return err
+	}
+	parent.FailureClass = "split"
+	parent.Status = sliceCompleted
+	if err := m.finishSlice(parent, run, task, token); err != nil {
+		return err
+	}
+	failed := 0
+	for _, child := range children {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		childPlan := SlicePlan{Branch: plan.Branch, From: child.From, To: child.To}
+		if err := m.scanSlice(ctx, run, task, childPlan); err != nil {
+			failed++
+		}
+	}
+	done, err := m.childrenCovered(task, parent)
+	if err != nil {
+		return err
+	}
+	if !done || failed > 0 {
+		return errors.New("子切片未完全覆盖")
+	}
+	return nil
+}
+
+// childrenCovered reports whether every child slice of a split parent is
+// completed with real coverage (source limits and failures do not count).
+func (m *CollectionManager) childrenCovered(task CollectionTask, parent CollectionSlice) (bool, error) {
+	rows, err := m.server.Store.DB.Query("SELECT status,failure_class,source_limit FROM collection_slices WHERE task_id=? AND query_revision=? AND channel=? AND branch_hash=? AND from_utc>=? AND to_utc<=? AND NOT (from_utc=? AND to_utc=?) ",
+		parent.TaskID, task.QueryRevision, parent.Channel, parent.BranchHash, parent.FromUTC, parent.ToUTC, parent.FromUTC, parent.ToUTC)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var status, failure string
+		var limit int
+		if err := rows.Scan(&status, &failure, &limit); err != nil {
+			return false, err
+		}
+		n++
+		if limit != 0 || status != sliceCompleted || failure != "" {
+			return false, rows.Err()
+		}
+	}
+	return n > 0, rows.Err()
 }
 
 // finishSlice records the coverage watermark under the same identity gate as

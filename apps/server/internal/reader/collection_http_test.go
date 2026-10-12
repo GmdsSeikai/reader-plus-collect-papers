@@ -186,20 +186,12 @@ func TestCollectionCandidateImportFlow(t *testing.T) {
 		t.Fatalf("import items = %+v", created.Items)
 	}
 	reqID := created.Items[0].RequestID
-	status := waitImportStatus(t, s, reqID, importDownloaded, importAwaitingConfirmation, importFailed)
-	if status == importFailed {
-		w = request(t, s, "GET", "/api/collection/imports/"+reqID, nil)
-		t.Fatalf("import failed: %s", w.Body.String())
-	}
-	// Confirm commits through the shared install path into the paper library.
-	w = request(t, s, "POST", "/api/collection/imports/"+reqID+"/confirm", nil)
-	if w.Code != 202 {
-		t.Fatalf("confirm = %d %s", w.Code, w.Body.String())
-	}
-	status = waitImportStatus(t, s, reqID, importImported, importFailed)
+	// Normal PDFs commit straight through the shared install path; the whole
+	// "下载并入库" flow needs no second request.
+	status := waitImportStatus(t, s, reqID, importImported, importFailed)
 	if status != importImported {
 		w = request(t, s, "GET", "/api/collection/imports/"+reqID, nil)
-		t.Fatalf("commit failed: %s", w.Body.String())
+		t.Fatalf("import failed: %s", w.Body.String())
 	}
 	w = request(t, s, "GET", "/api/collection/imports/"+reqID, nil)
 	var req CollectionImportRequest

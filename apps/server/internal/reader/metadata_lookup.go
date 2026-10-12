@@ -130,8 +130,12 @@ func (s *Server) lookupDocument(ctx context.Context, id string, byTitle bool) (D
 		}
 		return d, errNoIdentifier
 	}
-	found, err := s.scholarClient().Lookup(ctx, ids)
-	if err != nil {
+	var found scholar.Metadata
+	if err := s.withSourceGates(ctx, func() error {
+		var lerr error
+		found, lerr = s.scholarClient().Lookup(ctx, ids)
+		return lerr
+	}); err != nil {
 		return d, err
 	}
 	return s.applyFound(id, fromScholar(found), found.Title, "lookup", "done")
@@ -178,7 +182,12 @@ func (s *Server) resolveDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
-	result, err := s.scholarClient().Resolve(ctx, v.Ref)
+	var result scholar.Result
+	err := s.withSourceGates(ctx, func() error {
+		var rerr error
+		result, rerr = s.scholarClient().Resolve(ctx, v.Ref)
+		return rerr
+	})
 	if err != nil {
 		status := 502
 		if errors.Is(err, scholar.ErrNotFound) {
@@ -278,4 +287,21 @@ func (s *Server) metadataWorker(ctx context.Context) {
 			_, _ = s.applyFound(id, PaperMetadata{}, "", "lookup", state)
 		}
 	}
+}
+
+// withSourceGates serializes external paper-source access with the shared
+// arXiv and Semantic Scholar gates used by discovery and citations.
+func (s *Server) withSourceGates(ctx context.Context, fn func() error) error {
+	g := s.collection()
+	releaseArxiv, err := g.gate.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseArxiv()
+	releaseS2, err := g.s2Gate.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseS2()
+	return fn()
 }

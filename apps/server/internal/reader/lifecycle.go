@@ -17,6 +17,10 @@ const (
 type drainSession struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+	// writesDone and backgroundDone are the full stop conditions this intent
+	// owns; a resume waits for both before reopening admission.
+	writesDone     <-chan struct{}
+	backgroundDone <-chan struct{}
 }
 
 type drainState struct {
@@ -76,6 +80,8 @@ func (s *Server) BeginDrain() drainSession {
 	if stop != nil {
 		idleBackground = stop()
 	}
+	session.writesDone = idleWrites
+	session.backgroundDone = idleBackground
 	if readyOrWait(idleWrites) && readyOrWait(idleBackground) {
 		s.drain.mu.Lock()
 		defer s.drain.mu.Unlock()
@@ -119,8 +125,9 @@ func (s *Server) DrainStatus(drainID string) (drainSession, bool) {
 }
 
 // CancelDrain revokes an exit intent that has not finished the final exit.
-// Active commits keep running; admission reopens once in-flight writes finish,
-// and background scheduling restarts on a fresh context.
+// Active commits and the old background keep running; admission reopens only
+// after both this intent's stop conditions are met and only if no newer drain
+// or closing decision superseded this intent.
 func (s *Server) CancelDrain(drainID string) (drainSession, bool) {
 	s.drain.mu.Lock()
 	if s.drain.closing {
@@ -143,25 +150,38 @@ func (s *Server) CancelDrain(drainID string) (drainSession, bool) {
 	}
 	s.drain.finished[session.ID] = drainCancelled
 	start := s.drain.startBackground
+	writesDone := session.writesDone
+	backgroundDone := session.backgroundDone
 	s.drain.mu.Unlock()
 
-	// In-flight writes finish first; then admission reopens. With nothing in
-	// flight this completes before the response returns.
-	idle := s.importGate.CloseForDrain()
-	if readyOrWait(idle) {
+	resume := func() {
+		// Both stop conditions owned by this intent must complete first:
+		// in-flight writes AND the old background workers.
+		if writesDone != nil {
+			<-writesDone
+		}
+		if backgroundDone != nil {
+			<-backgroundDone
+		}
+		s.drain.mu.Lock()
+		// A stale resume must never touch a newer intent's admission.
+		if s.drain.closing || s.drain.current != session {
+			s.drain.mu.Unlock()
+			return
+		}
+		s.drain.mu.Unlock()
 		s.importGate.Reopen()
 		if start != nil {
 			start()
 		}
+	}
+	// With nothing in flight and background already stopped this completes
+	// before the response returns.
+	if readyOrWait(writesDone) && readyOrWait(backgroundDone) {
+		resume()
 		return *session, true
 	}
-	go func() {
-		<-idle
-		s.importGate.Reopen()
-		if start != nil {
-			start()
-		}
-	}()
+	go resume()
 	return *session, true
 }
 
