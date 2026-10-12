@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reader.local/server/internal/networkprobe"
 	"reader.local/server/internal/reader"
 	"syscall"
 	"time"
@@ -23,7 +24,12 @@ func main() {
 	port := flag.String("port", "17840", "loopback port, 0 for automatic")
 	web := flag.String("web", "", "built web directory")
 	connector := flag.Bool("connector", true, "enable Reader Connector listener")
+	probeURL := flag.String("probe-url", "", "check network reachability and exit without opening a library")
 	flag.Parse()
+	if *probeURL != "" {
+		_ = json.NewEncoder(os.Stdout).Encode(networkprobe.Run(context.Background(), *probeURL))
+		return
+	}
 	root, err := filepath.Abs(*data)
 	if err != nil {
 		log.Fatal(err)
