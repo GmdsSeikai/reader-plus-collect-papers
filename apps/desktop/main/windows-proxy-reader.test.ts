@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("node:child_process", async () => {
@@ -8,7 +8,10 @@ vi.mock("node:child_process", async () => {
 });
 import { childProxyEnvironment } from "./proxy";
 
-beforeEach(() => execute.mockReset());
+beforeEach(() => {
+  execute.mockReset();
+});
+afterEach(() => vi.restoreAllMocks());
 
 it("reads Windows settings with hidden, bounded PowerShell and passes them to the child", async () => {
   execute.mockResolvedValue({
@@ -41,3 +44,37 @@ it("does not launch a proxy reader on unsupported platforms", async () => {
   ).toEqual({ HTTP_PROXY: "http://existing:80" });
   expect(execute).not.toHaveBeenCalled();
 });
+
+it.each(["win32", "darwin"] as const)(
+  "keeps startup usable when %s proxy reading fails",
+  async (platform) => {
+    execute.mockRejectedValue(new Error("private native command output"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const parent = {
+      PATH: "/bin",
+      HTTPS_PROXY: "http://inherited:7890",
+      NO_PROXY: "localhost,127.0.0.1",
+    };
+    const result = await childProxyEnvironment(parent, platform);
+    expect(result).toEqual(parent);
+    expect(result).not.toBe(parent);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "无法应用系统代理，Reader 将沿用启动环境。",
+    );
+  },
+);
+
+it.each([
+  "not JSON",
+  '{"autoDetect":true}',
+  '{"autoConfigUrl":"https://example.org/proxy.pac"}',
+  '{"proxy":"localhost:7890","bypass":"foo*bar"}',
+])(
+  "falls back without throwing for unusable Windows output: %s",
+  async (stdout) => {
+    execute.mockResolvedValue({ stdout, stderr: "" });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const parent = { HTTPS_PROXY: "http://inherited:7890" };
+    expect(await childProxyEnvironment(parent, "win32")).toEqual(parent);
+  },
+);

@@ -74,16 +74,23 @@ export async function childProxyEnvironment(
   inherited: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
 ): Promise<NodeJS.ProcessEnv> {
-  if (platform === "win32")
-    return systemProxyEnvironment(
-      inherited,
-      await readWindowsProxySettings(inherited),
+  if (platform !== "win32" && platform !== "darwin") return { ...inherited };
+  try {
+    if (platform === "win32")
+      return systemProxyEnvironment(
+        inherited,
+        await readWindowsProxySettings(inherited),
+      );
+    const { stdout } = await execFileAsync(
+      "/usr/bin/osascript",
+      ["-l", "JavaScript", "-e", proxyScript],
+      { timeout: 5000, maxBuffer: 256 * 1024 },
     );
-  if (platform !== "darwin") return { ...inherited };
-  const { stdout } = await execFileAsync(
-    "/usr/bin/osascript",
-    ["-l", "JavaScript", "-e", proxyScript],
-    { timeout: 5000, maxBuffer: 256 * 1024 },
-  );
-  return systemProxyEnvironment(inherited, JSON.parse(stdout));
+    return systemProxyEnvironment(inherited, JSON.parse(stdout));
+  } catch {
+    // Proxy conversion is optional at startup. Native command failures may
+    // contain private configuration, so keep the diagnostic free of raw output.
+    console.warn("无法应用系统代理，Reader 将沿用启动环境。");
+    return { ...inherited };
+  }
 }
