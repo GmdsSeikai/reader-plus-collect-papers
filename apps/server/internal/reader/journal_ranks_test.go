@@ -106,7 +106,7 @@ func TestJournalRankRequestsRespectGlobalRateLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := s.fetchJournalRank(context.Background(), name, "test-key"); err != nil {
+			if _, err := s.fetchJournalRank(context.Background(), name, "test-key", 20*time.Second); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -116,6 +116,27 @@ func TestJournalRankRequestsRespectGlobalRateLimit(t *testing.T) {
 	defer mu.Unlock()
 	if len(starts) != 2 || starts[1].Sub(starts[0]) < 500*time.Millisecond {
 		t.Fatalf("request starts too close: %v", starts)
+	}
+}
+
+func TestJournalRankRequestTimeoutStartsAfterRateWait(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":200,"msg":"SUCCESS","data":{"officialRank":{"all":{"sci":"Q1"}}}}`))
+	}))
+	defer upstream.Close()
+	previous := journalRankURL
+	journalRankURL = upstream.URL
+	defer func() { journalRankURL = previous }()
+	store, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB.Close()
+	s := NewServer(store, "test-secret", "")
+	s.journalRankLast = time.Now().Add(200 * time.Millisecond)
+	result, err := s.fetchJournalRank(context.Background(), "Nature", "test-key", 500*time.Millisecond)
+	if err != nil || result.Status != "found" {
+		t.Fatalf("queued request spent upstream timeout before sending: %+v, %v", result, err)
 	}
 }
 
@@ -174,7 +195,7 @@ func TestJournalRankLive(t *testing.T) {
 	defer store.DB.Close()
 	s := NewServer(store, "test-secret", "")
 	for _, name := range []string{"Nature", "Journal of Machine Learning Research"} {
-		result, err := s.fetchJournalRank(context.Background(), name, key)
+		result, err := s.fetchJournalRank(context.Background(), name, key, 20*time.Second)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}

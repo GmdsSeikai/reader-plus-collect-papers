@@ -75,6 +75,7 @@ it("hides selected indicators in exclusion mode", async () => {
 });
 
 it("omits whole badges when the title column is too narrow", async () => {
+  let badgeWidth = 40;
   const oldWidth = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "offsetWidth",
@@ -85,7 +86,7 @@ it("omits whole badges when the title column is too narrow", async () => {
   );
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
-    get: () => 40,
+    get: () => badgeWidth,
   });
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
     configurable: true,
@@ -123,6 +124,11 @@ it("omits whole badges when the title column is too narrow", async () => {
     expect(
       host.querySelectorAll(".journal-rank-badge:not([data-hidden])"),
     ).toHaveLength(1);
+    badgeWidth = 80;
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(
+      host.querySelectorAll('.journal-rank-badge[data-hidden="true"]'),
+    ).toHaveLength(2);
   } finally {
     await act(async () => root.unmount());
     if (oldWidth)

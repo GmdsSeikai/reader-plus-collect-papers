@@ -381,7 +381,7 @@ func (s *Server) cachedJournalRank(name, hash string, refresh bool) (journalRank
 	return result, true
 }
 
-func (s *Server) fetchJournalRank(ctx context.Context, name, key string) (journalRankResult, error) {
+func (s *Server) fetchJournalRank(ctx context.Context, name, key string, upstreamTimeout time.Duration) (journalRankResult, error) {
 	s.journalRankMu.Lock()
 	defer s.journalRankMu.Unlock()
 	if wait := time.Until(s.journalRankLast.Add(550 * time.Millisecond)); wait > 0 {
@@ -392,12 +392,14 @@ func (s *Server) fetchJournalRank(ctx context.Context, name, key string) (journa
 		}
 	}
 	s.journalRankLast = time.Now()
+	requestCtx, cancel := context.WithTimeout(ctx, upstreamTimeout)
+	defer cancel()
 	u, _ := url.Parse(journalRankURL)
 	params := u.Query()
 	params.Set("secretKey", key)
 	params.Set("publicationName", name)
 	u.RawQuery = params.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return journalRankResult{}, errors.New("无法创建期刊查询")
 	}
@@ -463,9 +465,7 @@ func (s *Server) documentJournalRank(w http.ResponseWriter, r *http.Request) {
 		if cached, ok := s.cachedJournalRank(name, hash, refresh); ok {
 			return cached, nil
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		result, err := s.fetchJournalRank(ctx, publicationName, key)
+		result, err := s.fetchJournalRank(context.Background(), publicationName, key, 20*time.Second)
 		if err != nil {
 			return result, err
 		}
