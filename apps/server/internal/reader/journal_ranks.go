@@ -40,10 +40,11 @@ type journalRankField struct {
 	Name string `json:"name"`
 }
 type journalRankConfig struct {
-	Enabled   bool               `json:"enabled"`
-	HasKey    bool               `json:"hasKey"`
-	Selected  []string           `json:"selected"`
-	Available []journalRankField `json:"available"`
+	Enabled    bool               `json:"enabled"`
+	HasKey     bool               `json:"hasKey"`
+	FilterMode string             `json:"filterMode"`
+	Selected   []string           `json:"selected"`
+	Available  []journalRankField `json:"available"`
 }
 type journalRankBadge struct {
 	Key     string `json:"key"`
@@ -65,12 +66,13 @@ func journalKeyHash(key string) string {
 }
 
 func (s *Server) journalConfig() (journalRankConfig, string, error) {
-	c := journalRankConfig{Enabled: true, Selected: append([]string(nil), defaultJournalRankFields...), Available: []journalRankField{}}
+	c := journalRankConfig{Enabled: true, FilterMode: "include", Selected: append([]string(nil), defaultJournalRankFields...), Available: []journalRankField{}}
 	var raw, key string
 	if err := s.Store.DB.QueryRow("SELECT value FROM settings WHERE key='journal-rank:config'").Scan(&raw); err == nil {
 		var saved struct {
-			Enabled  *bool    `json:"enabled"`
-			Selected []string `json:"selected"`
+			Enabled    *bool    `json:"enabled"`
+			FilterMode string   `json:"filterMode"`
+			Selected   []string `json:"selected"`
 		}
 		if json.Unmarshal([]byte(raw), &saved) == nil {
 			if saved.Enabled != nil {
@@ -78,6 +80,9 @@ func (s *Server) journalConfig() (journalRankConfig, string, error) {
 			}
 			if saved.Selected != nil {
 				c.Selected = saved.Selected
+			}
+			if saved.FilterMode == "include" || saved.FilterMode == "exclude" {
+				c.FilterMode = saved.FilterMode
 			}
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -142,15 +147,28 @@ func (s *Server) getJournalRankConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putJournalRankConfig(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Enabled  *bool    `json:"enabled"`
-		Selected []string `json:"selected"`
-		Key      *string  `json:"key"`
+		Enabled    *bool    `json:"enabled"`
+		FilterMode string   `json:"filterMode"`
+		Selected   []string `json:"selected"`
+		Key        *string  `json:"key"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
 	if input.Enabled == nil || input.Selected == nil || len(input.Selected) > 128 {
 		fail(w, 400, "期刊指标设置无效")
+		return
+	}
+	if input.FilterMode == "" {
+		current, _, err := s.journalConfig()
+		if err != nil {
+			fail(w, 500, "无法读取期刊指标设置")
+			return
+		}
+		input.FilterMode = current.FilterMode
+	}
+	if input.FilterMode != "include" && input.FilterMode != "exclude" {
+		fail(w, 400, "期刊指标筛选方式无效")
 		return
 	}
 	seen := map[string]bool{}
@@ -171,7 +189,7 @@ func (s *Server) putJournalRankConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	config, _ := json.Marshal(map[string]any{"enabled": *input.Enabled, "selected": input.Selected})
+	config, _ := json.Marshal(map[string]any{"enabled": *input.Enabled, "filterMode": input.FilterMode, "selected": input.Selected})
 	_, err = tx.Exec("INSERT INTO settings(key,value) VALUES('journal-rank:config',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", string(config))
 	if err == nil && input.Key != nil {
 		_, err = tx.Exec("INSERT INTO settings(key,value) VALUES('journal-rank:key',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", strings.TrimSpace(*input.Key))

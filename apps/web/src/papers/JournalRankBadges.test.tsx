@@ -28,6 +28,7 @@ it("shows every selected subject and omits unselected indicators", async () => {
         config={{
           enabled: true,
           hasKey: true,
+          filterMode: "include",
           selected: ["sci", "sciUpSmall"],
           available: [],
         }}
@@ -39,6 +40,37 @@ it("shows every selected subject and omits unselected indicators", async () => {
   expect(host.textContent).toContain("自动化与控制系统4区");
   expect(host.textContent).toContain("计算机：人工智能4区");
   expect(host.textContent).not.toContain("JCI");
+  await act(async () => root.unmount());
+});
+
+it("hides selected indicators in exclusion mode", async () => {
+  vi.mocked(api.documentJournalRank).mockResolvedValue({
+    status: "found",
+    badges: [
+      { key: "sci", name: "SCI/JCR", value: "Q1" },
+      { key: "jci", name: "JCI", value: "0.94" },
+    ],
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  await act(async () =>
+    root.render(
+      <JournalRankBadges
+        id="paper"
+        venue="Nature"
+        config={{
+          enabled: true,
+          hasKey: true,
+          filterMode: "exclude",
+          selected: ["sci"],
+          available: [],
+        }}
+        refreshRevision={0}
+      />,
+    ),
+  );
+  expect(host.textContent).not.toContain("SCI/JCR");
+  expect(host.textContent).toContain("JCI 0.94");
   await act(async () => root.unmount());
 });
 
@@ -54,6 +86,7 @@ it("does not query while the feature is off", async () => {
         config={{
           enabled: false,
           hasKey: true,
+          filterMode: "include",
           selected: ["sci"],
           available: [],
         }}
@@ -77,6 +110,7 @@ it("forces only the requested refresh, then reuses cache for another venue", asy
   const config = {
     enabled: true,
     hasKey: true,
+    filterMode: "include" as const,
     selected: ["sci"],
     available: [],
   };

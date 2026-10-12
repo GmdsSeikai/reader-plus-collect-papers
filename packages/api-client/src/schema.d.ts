@@ -44,6 +44,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         enabled: boolean;
+                        /** @enum {string} */
+                        filterMode?: "include" | "exclude";
                         selected: string[];
                         key?: string;
                     };
@@ -2921,6 +2923,8 @@ export interface components {
         JournalRankConfig: {
             enabled: boolean;
             hasKey: boolean;
+            /** @enum {string} */
+            filterMode: "include" | "exclude";
             selected: string[];
             available: {
                 key: string;

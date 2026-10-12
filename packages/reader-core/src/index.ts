@@ -136,6 +136,7 @@ export interface JournalRankResult {
 export interface JournalRankConfig {
   enabled: boolean;
   hasKey: boolean;
+  filterMode: "include" | "exclude";
   selected: string[];
   available: { key: string; name: string }[];
 }

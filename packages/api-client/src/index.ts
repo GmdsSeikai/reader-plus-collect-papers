@@ -106,6 +106,7 @@ export const api = {
     request<JournalRankConfig>("/api/journal-ranks/config"),
   saveJournalRankConfig: (config: {
     enabled: boolean;
+    filterMode: JournalRankConfig["filterMode"];
     selected: string[];
     key?: string;
   }) =>

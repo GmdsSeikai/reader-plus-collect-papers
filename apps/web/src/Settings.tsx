@@ -106,7 +106,9 @@ export function Settings({
     };
   }, [open]);
   const saveJournalRank = async (
-    patch: Partial<Pick<JournalRankConfig, "enabled" | "selected">>,
+    patch: Partial<
+      Pick<JournalRankConfig, "enabled" | "filterMode" | "selected">
+    >,
     key?: string,
   ) => {
     if (!journalRank) return;
@@ -114,6 +116,7 @@ export function Settings({
     try {
       const saved = await api.saveJournalRankConfig({
         enabled: patch.enabled ?? journalRank.enabled,
+        filterMode: patch.filterMode ?? journalRank.filterMode,
         selected: patch.selected ?? journalRank.selected,
         ...(key !== undefined ? { key } : {}),
       });
@@ -754,8 +757,45 @@ export function Settings({
                       移除 SecretKey
                     </Button>
                   )}
-                  <p className="mt-4 text-xs text-muted-foreground">
-                    选择要同时显示的指标和目录。无数据的标签会省略。
+                  <div className="mt-4 flex items-center gap-2 text-xs">
+                    <span id="journal-rank-filter-label">指标筛选</span>
+                    <Select
+                      value={journalRank.filterMode}
+                      onValueChange={(value) => {
+                        if (value !== "include" && value !== "exclude") return;
+                        void saveJournalRank({
+                          filterMode: value,
+                          selected:
+                            value === "include"
+                              ? journalRank.available.map((field) => field.key)
+                              : [],
+                        });
+                      }}
+                      disabled={journalSaving}
+                    >
+                      <SelectTrigger
+                        aria-labelledby="journal-rank-filter-label"
+                        className="w-48"
+                      >
+                        <SelectValue>
+                          {journalRank.filterMode === "include"
+                            ? "只显示选中的指标"
+                            : "隐藏选中的指标"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="include">
+                          只显示选中的指标
+                        </SelectItem>
+                        <SelectItem value="exclude">隐藏选中的指标</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {journalRank.filterMode === "include"
+                      ? "勾选要显示的指标。"
+                      : "勾选不想显示的指标。"}
+                    无数据或超出标题列宽度的标签会省略。
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
                     {journalRank.available.map((field) => (

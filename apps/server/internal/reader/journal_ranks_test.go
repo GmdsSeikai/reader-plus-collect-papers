@@ -55,10 +55,10 @@ func TestJournalRankConfigDefaultsAndNeverReturnsKey(t *testing.T) {
 	s := NewServer(store, "test-secret", "")
 	w := request(t, s, "GET", "/api/journal-ranks/config", nil)
 	var config journalRankConfig
-	if json.Unmarshal(w.Body.Bytes(), &config) != nil || !config.Enabled || config.HasKey || len(config.Selected) == 0 {
+	if json.Unmarshal(w.Body.Bytes(), &config) != nil || !config.Enabled || config.HasKey || config.FilterMode != "include" || len(config.Selected) == 0 {
 		t.Fatalf("bad default: %s", w.Body.String())
 	}
-	w = request(t, s, "PUT", "/api/journal-ranks/config", strings.NewReader(`{"enabled":true,"selected":["sciif","sciUpSmall"],"key":"private-test-key"}`))
+	w = request(t, s, "PUT", "/api/journal-ranks/config", strings.NewReader(`{"enabled":true,"filterMode":"exclude","selected":["sciif","sciUpSmall"],"key":"private-test-key"}`))
 	if w.Code != 200 || strings.Contains(w.Body.String(), "private-test-key") {
 		t.Fatalf("secret exposed: %d %s", w.Code, w.Body.String())
 	}
@@ -67,8 +67,12 @@ func TestJournalRankConfigDefaultsAndNeverReturnsKey(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	config, key, err := s.journalConfig()
-	if err != nil || config.Enabled || !config.HasKey || key != "private-test-key" || len(config.Selected) != 1 {
+	if err != nil || config.Enabled || !config.HasKey || key != "private-test-key" || config.FilterMode != "exclude" || len(config.Selected) != 1 {
 		t.Fatalf("key-only settings lost: %+v %v", config, err)
+	}
+	w = request(t, s, "PUT", "/api/journal-ranks/config", strings.NewReader(`{"enabled":true,"filterMode":"invalid","selected":[]}`))
+	if w.Code != 400 {
+		t.Fatalf("invalid filter mode accepted: %d %s", w.Code, w.Body.String())
 	}
 }
 

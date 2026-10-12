@@ -2573,17 +2573,21 @@ body[data-resizing] * {
 }
 .paper-table-title-stack {
   min-width: 0;
+  overflow: hidden;
 }
 .journal-rank-badges {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
+  max-width: 100%;
   min-height: 1px;
   margin-top: 3px;
+  overflow: hidden;
 }
 .journal-rank-badge {
+  flex: none;
   max-width: 100%;
   overflow: hidden;
   border-radius: 5px;
@@ -2612,6 +2616,9 @@ body[data-resizing] * {
   color: #905038;
 }
 .journal-rank-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   color: var(--destructive);
 }

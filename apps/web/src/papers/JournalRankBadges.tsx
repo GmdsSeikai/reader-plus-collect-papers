@@ -76,7 +76,11 @@ export function JournalRankBadges({
   }, [id, venue, config?.enabled, config?.hasKey, refreshRevision, retry]);
   if (!config?.enabled || !config.hasKey || !venue.trim()) return null;
   const badges =
-    result?.badges.filter((badge) => config.selected.includes(badge.key)) || [];
+    result?.badges.filter((badge) =>
+      config.filterMode === "exclude"
+        ? !config.selected.includes(badge.key)
+        : config.selected.includes(badge.key),
+    ) || [];
   return (
     <div className="journal-rank-badges" ref={ref} data-row-action>
       {badges.map((badge, index) => (
