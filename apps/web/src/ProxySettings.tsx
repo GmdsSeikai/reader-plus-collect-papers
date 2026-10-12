@@ -94,10 +94,6 @@ export function ProxySettings({ open }: { open: boolean }) {
         const next = await desktop.checkProxy!(draft);
         if (current === revision.current) {
           setResult(next);
-          setState(
-            (saved) =>
-              saved && { ...saved, restartRequired: next.restartRequired },
-          );
         }
       } else await desktop.restart?.();
     } catch (cause) {
@@ -187,7 +183,7 @@ export function ProxySettings({ open }: { open: boolean }) {
             {operation === "save" && <LoaderCircle className="animate-spin" />}
             保存代理设置
           </Button>
-          {state?.restartRequired && (
+          {(state?.restartRequired || mode === "system") && (
             <Button
               variant="outline"
               disabled={pending || changed || !desktop.restart}
@@ -200,7 +196,9 @@ export function ProxySettings({ open }: { open: boolean }) {
         <p className="mt-2 text-xs text-muted-foreground">
           {state?.restartRequired
             ? "代理配置已变化，重启 Reader 后生效。"
-            : "修改后需保存并重启；系统代理变化也需重启。"}
+            : mode === "system"
+              ? "切换系统代理后，请重启 Reader 再检测。"
+              : "修改后需保存并重启 Reader。"}
         </p>
         {state?.warning && (
           <p className="mt-2 text-xs text-muted-foreground">{state.warning}</p>
@@ -219,7 +217,11 @@ export function ProxySettings({ open }: { open: boolean }) {
           检测连接
         </Button>
         <p className="mt-2 text-xs text-muted-foreground">
-          使用上方设置检测，无需先保存。
+          {mode === "system" &&
+          state?.settings.mode === "system" &&
+          !state.restartRequired
+            ? "检测当前已生效的系统代理配置。"
+            : "检测上方配置；修改后保存并重启生效。"}
         </p>
         {result && (
           <div

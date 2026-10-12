@@ -11,7 +11,6 @@ export interface ProxySettingsState {
 
 export interface ProxyCheckResult {
   connected: boolean;
-  restartRequired: boolean;
   route: "direct" | "proxy" | "unknown";
   status?: number;
   elapsedMs: number;

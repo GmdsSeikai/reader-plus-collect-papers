@@ -125,57 +125,24 @@ it("waits for pending saves when another settings session reads state", async ()
   expect(reopened.restartRequired).toBe(true);
 });
 
-it("requires a restart when detection observes a changed system proxy", async () => {
-  const original = { PATH: "/old", NO_PROXY: "localhost" };
-  resolveSystem.mockResolvedValue({ env: original });
+it("tests the active system environment even after OS settings change", async () => {
+  const original = {
+    HTTPS_PROXY: "http://127.0.0.1:7890",
+    NO_PROXY: "localhost",
+  };
+  resolveSystem.mockResolvedValueOnce({ env: original });
   const service = await ProxySettingsService.open(directory, {}, "darwin");
-  execute.mockResolvedValue({
-    stdout: '{"connected":true,"route":"proxy","status":200,"elapsedMs":1}',
-  });
   resolveSystem.mockResolvedValue({
-    env: { ...original, HTTPS_PROXY: "http://127.0.0.1:7897" },
+    env: { HTTPS_PROXY: "http://127.0.0.1:7897" },
   });
-  const detected = await service.check({ mode: "system" }, "/probe");
-  expect(detected.restartRequired).toBe(true);
-  expect((await service.state()).restartRequired).toBe(true);
+  execute.mockResolvedValue({
+    stdout:
+      '{"connected":false,"route":"proxy","elapsedMs":4,"message":"连接失败"}',
+  });
+  await service.check({ mode: "system" }, "/probe");
+  expect(resolveSystem).toHaveBeenCalledOnce();
+  expect(execute.mock.calls[0][2].env).toEqual(original);
   expect(service.activeEnvironment).toEqual(original);
-  resolveSystem.mockResolvedValue({ env: { ...original, PATH: "/new" } });
-  expect(
-    (await service.check({ mode: "system" }, "/probe")).restartRequired,
-  ).toBe(false);
-});
-
-it("waits for system resolution when reopening, without waiting for the network probe", async () => {
-  const service = await ProxySettingsService.open(directory, {}, "darwin");
-  let resolveConfig!: (value: { env: NodeJS.ProcessEnv }) => void;
-  let finishProbe!: (value: { stdout: string }) => void;
-  resolveSystem.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        resolveConfig = resolve;
-      }),
-  );
-  execute.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finishProbe = resolve;
-      }),
-  );
-  const checking = service.check({ mode: "system" }, "/probe");
-  const reading = service.state();
-  let completed = false;
-  void reading.then(() => {
-    completed = true;
-  });
-  await Promise.resolve();
-  expect(completed).toBe(false);
-  resolveConfig({ env: { HTTPS_PROXY: "http://127.0.0.1:7897" } });
-  expect((await reading).restartRequired).toBe(true);
-  expect(execute).toHaveBeenCalledOnce();
-  finishProbe({
-    stdout: '{"connected":true,"route":"proxy","status":200,"elapsedMs":1}',
-  });
-  await checking;
 });
 
 it("falls back from corrupt config and reports system-reading failure inside settings", async () => {
