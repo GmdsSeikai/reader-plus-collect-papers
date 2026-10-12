@@ -108,12 +108,12 @@ it.each(["win32", "darwin"])(
   async (platform) => {
     window.readerDesktop!.platform = platform;
     await render();
-    expect(input("检测地址").value).toBe("https://chatgpt.com");
+    expect(input("检测地址").value).toBe("https://chatgpt.com/robots.txt");
     await type("代理端口", "7897");
     await click("检测连接");
     expect(check).toHaveBeenCalledWith(
       { mode: "manual", host: "127.0.0.1", port: 7897 },
-      "https://chatgpt.com",
+      "https://chatgpt.com/robots.txt",
     );
     expect(save).not.toHaveBeenCalled();
     expect(host.textContent).toContain("HTTP 403 · 18 ms · 经代理");

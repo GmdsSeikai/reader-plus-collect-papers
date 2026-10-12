@@ -23,7 +23,7 @@ export function ProxySettings({ open }: { open: boolean }) {
   const [mode, setMode] = useState<Configuration["mode"]>("system");
   const [host, setHost] = useState("127.0.0.1");
   const [port, setPort] = useState("7890");
-  const [target, setTarget] = useState("https://chatgpt.com");
+  const [target, setTarget] = useState("https://chatgpt.com/robots.txt");
   const [result, setResult] = useState<ProxyCheckResult>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"load" | "save" | "check" | "restart">(
