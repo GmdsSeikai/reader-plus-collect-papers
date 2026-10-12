@@ -20,7 +20,8 @@ const MaxFileBytes = 5 << 20
 const MaxTotalBytes = 100 << 20
 const Retention = 7 * 24 * time.Hour
 
-var privateKey = regexp.MustCompile(`(?i)^(authorization|cookie|set-cookie|key|.*(token|password|secret|api.?key|credential).*|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$`)
+var privateKey = regexp.MustCompile(`(?i)^(authorization|cookie|set-cookie|key|.*(token|password|secret|api.?key|credential).*|userMessage|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$`)
+var userMessageText = regexp.MustCompile(`(?i)["']?userMessage["']?\s*[:=]\s*[^\r\n]*`)
 var panicText = regexp.MustCompile(`(?m)^(panic:|http: panic serving)[^\n]*`)
 var authHeader = regexp.MustCompile(`(?i)(authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*`)
 var auth = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[^\s"',;]+`)
@@ -38,6 +39,7 @@ func RedactText(text string, secrets ...string) string {
 			text = strings.ReplaceAll(text, secret, "[REDACTED]")
 		}
 	}
+	text = userMessageText.ReplaceAllString(text, "[USER MESSAGE REMOVED]")
 	text = panicText.ReplaceAllString(text, "panic: [MESSAGE REMOVED]")
 	text = authHeader.ReplaceAllString(text, "[AUTH HEADER]")
 	text = auth.ReplaceAllString(text, "[AUTH]")

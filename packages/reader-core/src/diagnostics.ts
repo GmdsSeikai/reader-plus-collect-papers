@@ -12,7 +12,7 @@ export type DiagnosticEvent = {
 };
 
 const privateKey =
-  /^(?:authorization|cookie|set-cookie|key|.*(?:token|password|secret|api.?key|credential).*|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$/i;
+  /^(?:authorization|cookie|set-cookie|key|.*(?:token|password|secret|api.?key|credential).*|userMessage|prompt|context|content|sourceText|original|translated|translation|text|quote|note|attachments|references|body)$/i;
 export function redactText(text: string, secrets: string[] = []): string {
   let result = text;
   for (const secret of secrets
@@ -20,6 +20,10 @@ export function redactText(text: string, secrets: string[] = []): string {
     .sort((a, b) => b.length - a.length))
     result = result.split(secret).join("[REDACTED]");
   return result
+    .replace(
+      /["']?userMessage["']?\s*[:=]\s*[^\r\n]*/gi,
+      "[USER MESSAGE REMOVED]",
+    )
     .replace(
       /^(?:panic:|http: panic serving)[^\n]*/gm,
       "panic: [MESSAGE REMOVED]",

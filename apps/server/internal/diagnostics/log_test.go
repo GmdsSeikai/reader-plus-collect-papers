@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -137,4 +138,46 @@ func TestUntrustedTranslationDelimiters(t *testing.T) {
 	if !strings.Contains(safe, "trusted metadata") {
 		t.Fatal("lost trusted metadata")
 	}
+}
+
+func TestHistoricalUserMessagesAreRemovedFromExport(t *testing.T) {
+	logs, err := New(filepath.Join(t.TempDir(), "logs"), "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := "Unpublished Project Nimbus on papers.private.corp"
+	old := fmt.Sprintf(`{"event":"http.failure","status":502,"requestId":"old-request","userMessage":%q}`+"\n", private)
+	if err := os.WriteFile(filepath.Join(logs.Dir, "server-old.jsonl"), []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var buffer bytes.Buffer
+	if err := logs.Export(&buffer, t.TempDir(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range archive.File {
+		if file.Name != "logs/server-old.jsonl" {
+			continue
+		}
+		r, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(r)
+		r.Close()
+		if strings.Contains(string(data), "Nimbus") || strings.Contains(string(data), "papers.private.corp") {
+			t.Fatal("historical user-visible message leaked through export")
+		}
+		if !strings.Contains(string(data), "old-request") || !strings.Contains(string(data), "502") {
+			t.Fatal("historical request metadata was lost")
+		}
+		if strings.Contains(string(RedactLog([]byte(`{"userMessage":"`+private), false)), "Nimbus") {
+			t.Fatal("truncated historical record leaked user-visible text")
+		}
+		return
+	}
+	t.Fatal("historical log file missing")
 }

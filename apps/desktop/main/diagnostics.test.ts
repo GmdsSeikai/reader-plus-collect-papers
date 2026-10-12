@@ -227,3 +227,39 @@ it("keeps application operations alive if the log directory is unavailable", () 
   ).not.toThrow();
   expect(logs.droppedWrites).toBe(1);
 });
+
+it("removes private user messages from retained server logs during desktop export", async () => {
+  const root = directory();
+  const logs = new DiagnosticLogs(join(root, "logs"));
+  mkdirSync(logs.directory);
+  const privateText = "Unpublished Project Nimbus on papers.private.corp";
+  const retained =
+    JSON.stringify({
+      event: "http.failure",
+      status: 502,
+      requestId: "old-request",
+      userMessage: privateText,
+    }) + "\n";
+  const old = join(logs.directory, "server-old.jsonl");
+  writeFileSync(old, retained);
+  const output = join(root, "report.zip");
+  await logs.export(output, join(root, "library"), {}, {});
+  const safe = execFileSync(
+    "python3",
+    [
+      "-c",
+      "import zipfile,sys; print(zipfile.ZipFile(sys.argv[1]).read('logs/server-old.jsonl').decode())",
+      output,
+    ],
+    { encoding: "utf8" },
+  );
+  expect(safe).not.toContain("Nimbus");
+  expect(safe).not.toContain("papers.private.corp");
+  expect(safe).toContain("old-request");
+  expect(safe).toContain("502");
+  expect(readFileSync(old, "utf8")).toBe(retained);
+  expect(redactLog('{"userMessage":"' + privateText)).not.toContain("Nimbus");
+  expect(redactLog('{"userMessage":"' + privateText)).not.toContain(
+    "papers.private.corp",
+  );
+});

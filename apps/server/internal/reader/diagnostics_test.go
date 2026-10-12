@@ -3,9 +3,11 @@ package reader
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,5 +71,54 @@ func TestDiagnosticsWrapperPreservesFlushAndCancellation(t *testing.T) {
 	})).ServeHTTP(recorder, httptest.NewRequest("GET", "http://localhost/stream", nil))
 	if !recorder.Flushed || !strings.Contains(recorder.Body.String(), "delta") {
 		t.Fatal("stream wrapper broke Flush")
+	}
+}
+
+func TestDiagnosticsHTTPFailureKeepsPrivateMessageInResponseOnly(t *testing.T) {
+	s := testServer(t)
+	logs, err := diagnostics.New(filepath.Join(s.Store.Root, "logs"), "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetDiagnostics(logs)
+	// Scholar failures can contain private titles and bare hosts, neither of
+	// which can safely be identified by a generic URL/credential redactor.
+	message := "内部论文 Unpublished Project Nimbus 无法下载；无法连接 papers.private.corp"
+	w := httptest.NewRecorder()
+	s.diagnosticHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fail(w, http.StatusBadGateway, message)
+	})).ServeHTTP(w, httptest.NewRequest("POST", "http://localhost/api/documents/resolve", nil))
+	var response map[string]string
+	if w.Code != 502 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response["error"] != message {
+		t.Fatal("user-visible failure response changed")
+	}
+	entries, err := os.ReadDir(logs.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range entries {
+		data, err := os.ReadFile(filepath.Join(logs.Dir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "Nimbus") || strings.Contains(string(data), "papers.private.corp") || strings.Contains(string(data), "userMessage") {
+			t.Fatal("user-visible message entered persistent logs")
+		}
+		for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+			var event map[string]any
+			if err := json.Unmarshal(line, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event["event"] == "http.failure" {
+				found = true
+				if event["errorCode"] != "http_502" || event["requestId"] != w.Header().Get("X-Reader-Request-ID") {
+					t.Fatal("failure lost its code or request correlation")
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("failure event missing")
 	}
 }

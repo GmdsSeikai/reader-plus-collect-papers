@@ -66,7 +66,8 @@ func respond(w http.ResponseWriter, status int, v any) {
 }
 func fail(w http.ResponseWriter, status int, message string) {
 	if out, ok := w.(*diagnosticResponse); ok {
-		out.server.diagnosticEvent(slog.LevelError, "http.failure", "requestId", out.requestID, "status", status, "userMessage", message)
+		// UI explanations can contain private titles or bare hostnames.
+		out.server.diagnosticEvent(slog.LevelError, "http.failure", "requestId", out.requestID, "status", status, "errorCode", fmt.Sprintf("http_%d", status))
 	}
 	respond(w, status, map[string]string{"error": message})
 }
@@ -219,6 +220,7 @@ func (s *Server) Handler() http.Handler {
 		mux.ServeHTTP(w, r)
 	}))
 }
+
 // webAssets serves the built renderer. Chromium only runs an ES module or a
 // module worker when the response carries a JavaScript MIME type, and host MIME
 // databases map ".mjs" to "text/plain" often enough that Go special-cases ".js"
