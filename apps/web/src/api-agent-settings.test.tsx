@@ -11,7 +11,12 @@ import { useReaderStore } from "./store";
 vi.mock("@reader/api", () => ({
   api: {
     connectorStatus: vi.fn(async () => ({ available: true })),
-    journalRankConfig: vi.fn(async () => ({ enabled: true, hasKey: false, selected: [], available: [] })),
+    journalRankConfig: vi.fn(async () => ({
+      enabled: true,
+      hasKey: false,
+      selected: [],
+      available: [],
+    })),
     providers: vi.fn(),
     aiConfig: vi.fn(),
     saveAIConfig: vi.fn(),
@@ -153,6 +158,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   for (const model of ["deepseek-flash", "deepseek-v4-pro"])
     for (const stage of ["text", "vision"])
       expect(api.testAI).toHaveBeenCalledWith("api", stage, model);
+  expect(api.testAI).toHaveBeenCalledTimes(4);
   expect(
     host.querySelectorAll('.api-model-list [aria-label="图片理解：已通过"]'),
   ).toHaveLength(1);
@@ -169,7 +175,18 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   const card = host.querySelector('[aria-label="配置 API Key"]')!;
   expect(card.querySelector('[aria-label="文本推理：已通过"]')).not.toBeNull();
   expect(card.querySelector('[aria-label="图片理解：已通过"]')).not.toBeNull();
+});
+it("keeps the saved key when changing only the API endpoint and rechecks models", async () => {
+  config.api = { url: "https://api.deepseek.com", model: "", hasKey: true };
+  config.capabilities = {
+    "api:deepseek-flash": { text: true, vision: true, checkedAt: "saved" },
+    "api:deepseek-v4-pro": { text: true, vision: false, checkedAt: "saved" },
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
   await openAPI();
+  expect(input("API Key").value).toBe("");
+  expect(input("API Key").placeholder).toBe("已保存，留空保持不变");
+  expect(api.testAI).not.toHaveBeenCalled();
   // Editing only the address keeps the saved key without resending it.
   await type("API 地址", "https://api.deepseek.com/v1");
   await submit();
@@ -183,7 +200,18 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
       },
     }),
   );
-  expect(api.testAI).toHaveBeenCalledTimes(8);
+  for (const model of ["deepseek-flash", "deepseek-v4-pro"])
+    for (const stage of ["text", "vision"])
+      expect(api.testAI).toHaveBeenCalledWith("api", stage, model);
+  expect(api.testAI).toHaveBeenCalledTimes(4);
+  expect(config.api).toEqual({
+    url: "https://api.deepseek.com/v1",
+    model: "",
+    hasKey: true,
+  });
+  expect(
+    host.querySelectorAll('.api-model-list [aria-label="图片理解：已通过"]'),
+  ).toHaveLength(1);
 });
 it("warns when no listed model passes the vision check", async () => {
   config.api = { url: "https://api.example.com", model: "", hasKey: true };
