@@ -45,16 +45,7 @@ let closing = false;
 let flushed = false;
 const root = resolve(__dirname, "../..");
 async function startServer() {
-  let childEnv = { ...process.env };
-  try {
-    childEnv = await childProxyEnvironment(process.env);
-  } catch (error) {
-    diagnostics?.record("proxy.read_failed", error);
-    dialog.showErrorBox(
-      "无法应用系统代理",
-      "无法读取系统代理，或代理地址、自动配置、直连例外规则暂不受支持。本次保留原有网络环境，Agent 连接可能不可用。请检查手动系统代理后重启 Reader。",
-    );
-  }
+  const childEnv = await childProxyEnvironment(process.env);
   serverToken = randomBytes(32).toString("hex");
   diagnostics?.logs.secrets.push(serverToken);
   diagnostics?.record("server.start_requested");
