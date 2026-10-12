@@ -218,6 +218,7 @@ it("bounds concurrent checks, aborts on quit, and sanitizes native failures", as
   service.stop();
   expect(await check).toMatchObject({
     connected: false,
+    route: "unknown",
     message: "无法完成连接检测，请重试或重新打开 Reader。",
   });
   execute.mockResolvedValue({
@@ -226,6 +227,25 @@ it("bounds concurrent checks, aborts on quit, and sanitizes native failures", as
   expect(
     (await service.check({ mode: "direct" }, "/bin/reader-server")).connected,
   ).toBe(false);
+});
+
+it("keeps failure routing and elapsed time reported by the Go probe", async () => {
+  const service = await ProxySettingsService.open(directory, {}, "linux");
+  execute.mockResolvedValue({
+    stdout:
+      '{"connected":false,"route":"proxy","elapsedMs":12001,"message":"连接超时"}',
+  });
+  expect(
+    await service.check(
+      { mode: "manual", host: "127.0.0.1", port: 7890 },
+      "/probe",
+    ),
+  ).toMatchObject({
+    connected: false,
+    route: "proxy",
+    elapsedMs: 12001,
+    message: "连接超时",
+  });
 });
 
 it("direct mode clears inherited proxies and Electron keeps loopback direct", async () => {

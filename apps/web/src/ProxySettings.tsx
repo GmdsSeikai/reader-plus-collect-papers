@@ -235,8 +235,9 @@ export function ProxySettings({ open }: { open: boolean }) {
             <div>
               <p>
                 {result.connected
-                  ? `已收到响应 · HTTP ${result.status} · ${result.elapsedMs} ms · ${result.route === "proxy" ? "经代理" : "直连"}`
+                  ? `已收到响应 · HTTP ${result.status}`
                   : result.message || "连接失败。"}
+                {` · ${result.elapsedMs} ms · ${{ proxy: "经代理", direct: "直连", unknown: "路由未知" }[result.route]}`}
               </p>
               {result.connected && result.status && result.status >= 400 && (
                 <p className="mt-1 text-xs text-muted-foreground">

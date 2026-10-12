@@ -50,6 +50,7 @@ func probe(ctx context.Context, target string, transport *http.Transport) (resul
 	if transport.Proxy != nil {
 		proxy, proxyErr := transport.Proxy(req)
 		if proxyErr != nil {
+			result.Route = "unknown"
 			result.Message = "代理配置无效，请检查地址和端口。"
 			return
 		}

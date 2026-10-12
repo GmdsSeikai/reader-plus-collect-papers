@@ -3,6 +3,7 @@ package networkprobe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -31,6 +32,15 @@ func TestHTTPProxyAndRedirect(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	result := probe(context.Background(), "http://unresolved.invalid/test", transport)
 	if !result.Connected || result.Route != "proxy" || result.Status != 302 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestInvalidProxyHasUnknownRoute(t *testing.T) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = func(*http.Request) (*url.URL, error) { return nil, errors.New("invalid proxy") }
+	result := probe(context.Background(), "https://chatgpt.com/robots.txt", transport)
+	if result.Connected || result.Route != "unknown" || result.Message == "" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }

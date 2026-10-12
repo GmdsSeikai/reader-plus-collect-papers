@@ -183,6 +183,7 @@ export class ProxySettingsService {
     if (this.checking) throw new Error("正在检测连接，请稍候。");
     this.checking = true;
     const controller = new AbortController();
+    const started = Date.now();
     this.probeController = controller;
     let warning: string | undefined;
     try {
@@ -209,7 +210,7 @@ export class ProxySettingsService {
       const result = JSON.parse(stdout) as ProxyCheckResult;
       if (
         typeof result.connected !== "boolean" ||
-        !["direct", "proxy"].includes(result.route) ||
+        !["direct", "proxy", "unknown"].includes(result.route) ||
         !Number.isFinite(result.elapsedMs) ||
         result.elapsedMs < 0 ||
         (result.connected &&
@@ -226,8 +227,8 @@ export class ProxySettingsService {
     } catch {
       return {
         connected: false,
-        route: "direct",
-        elapsedMs: 0,
+        route: "unknown",
+        elapsedMs: Date.now() - started,
         message: "无法完成连接检测，请重试或重新打开 Reader。",
         warning,
         restartRequired: this.snapshot().restartRequired,

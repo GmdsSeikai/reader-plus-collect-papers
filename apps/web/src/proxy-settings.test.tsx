@@ -182,6 +182,31 @@ it("offers restart when the system proxy changed during this run", async () => {
   expect(restart).not.toHaveBeenCalled();
 });
 
+it.each([
+  ["proxy", "经代理", 12001, "连接超时"],
+  ["proxy", "经代理", 4, "连接失败"],
+  ["direct", "直连", 16, "无法解析目标地址"],
+  ["proxy", "经代理", 90, "TLS 证书验证失败"],
+  ["proxy", "经代理", 3, "代理要求身份认证"],
+  ["unknown", "路由未知", 5, "无法完成连接检测"],
+])(
+  "shows route and duration for a failed %s probe: %s",
+  async (route, label, elapsedMs, message) => {
+    check.mockResolvedValueOnce({
+      connected: false,
+      restartRequired: false,
+      route,
+      elapsedMs,
+      message,
+    });
+    await render();
+    await click("检测连接");
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      `${message} · ${elapsedMs} ms · ${label}`,
+    );
+  },
+);
+
 it("keeps unsaved fields and allows retry when saving fails", async () => {
   await render();
   save.mockRejectedValueOnce(new Error("无法保存代理设置"));
