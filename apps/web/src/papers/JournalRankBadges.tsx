@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "@reader/api";
 import type {
@@ -37,6 +37,7 @@ export function JournalRankBadges({
   const [result, setResult] = useState<JournalRankResult | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(Infinity);
   const lastRefresh = useRef({ refreshRevision, retry });
   useEffect(() => {
     const force =
@@ -74,19 +75,47 @@ export function JournalRankBadges({
       observer?.disconnect();
     };
   }, [id, venue, config?.enabled, config?.hasKey, refreshRevision, retry]);
-  if (!config?.enabled || !config.hasKey || !venue.trim()) return null;
   const badges =
     result?.badges.filter((badge) =>
-      config.filterMode === "exclude"
+      config?.filterMode === "exclude"
         ? !config.selected.includes(badge.key)
-        : config.selected.includes(badge.key),
+        : !!config?.selected.includes(badge.key),
     ) || [];
+  useLayoutEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+    const measure = () => {
+      const elements = container.querySelectorAll<HTMLElement>(
+        ".journal-rank-badge",
+      );
+      const gap = Number.parseFloat(getComputedStyle(container).columnGap) || 0;
+      let width = 0;
+      let count = 0;
+      for (const element of elements) {
+        const next = width + (count ? gap : 0) + element.offsetWidth;
+        if (next > container.clientWidth) break;
+        width = next;
+        count++;
+      }
+      setVisibleCount(count);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [result, config?.filterMode, config?.selected]);
+  if (!config?.enabled || !config.hasKey || !venue.trim()) return null;
   return (
     <div className="journal-rank-badges" ref={ref} data-row-action>
       {badges.map((badge, index) => (
         <span
           className="journal-rank-badge"
           data-tone={tone(badge)}
+          data-hidden={index >= visibleCount || undefined}
           key={`${badge.key}:${badge.subject}:${index}`}
           title={[badge.name, badge.subject, badge.value, badge.year]
             .filter(Boolean)

@@ -74,6 +74,70 @@ it("hides selected indicators in exclusion mode", async () => {
   await act(async () => root.unmount());
 });
 
+it("omits whole badges when the title column is too narrow", async () => {
+  const oldWidth = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetWidth",
+  );
+  const oldClientWidth = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientWidth",
+  );
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get: () => 40,
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => 60,
+  });
+  vi.mocked(api.documentJournalRank).mockResolvedValue({
+    status: "found",
+    badges: [
+      { key: "sci", name: "SCI/JCR", value: "Q1" },
+      { key: "jci", name: "JCI", value: "0.94" },
+    ],
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <JournalRankBadges
+          id="paper"
+          venue="Nature"
+          config={{
+            enabled: true,
+            hasKey: true,
+            filterMode: "include",
+            selected: ["sci", "jci"],
+            available: [],
+          }}
+          refreshRevision={0}
+        />,
+      ),
+    );
+    expect(
+      host.querySelectorAll('.journal-rank-badge[data-hidden="true"]'),
+    ).toHaveLength(1);
+    expect(
+      host.querySelectorAll(".journal-rank-badge:not([data-hidden])"),
+    ).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount());
+    if (oldWidth)
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", oldWidth);
+    else delete (HTMLElement.prototype as { offsetWidth?: number }).offsetWidth;
+    if (oldClientWidth)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "clientWidth",
+        oldClientWidth,
+      );
+    else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  }
+});
+
 it("does not query while the feature is off", async () => {
   vi.mocked(api.documentJournalRank).mockClear();
   const host = document.createElement("div");

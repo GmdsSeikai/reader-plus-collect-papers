@@ -2576,6 +2576,7 @@ body[data-resizing] * {
   overflow: hidden;
 }
 .journal-rank-badges {
+  position: relative;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -2603,6 +2604,9 @@ body[data-resizing] * {
   background: color-mix(in oklch, #b254d8 24%, var(--background));
   color: #762994;
 }
+.journal-rank-badge[data-hidden="true"] {
+  visibility: hidden;
+}
 .journal-rank-badge[data-tone="mid"] {
   background: color-mix(in oklch, #8d6ad2 22%, var(--background));
   color: #60419c;
@@ -2623,6 +2627,10 @@ body[data-resizing] * {
   color: var(--destructive);
 }
 .journal-rank-refresh {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--background);
   opacity: 0;
 }
 .journal-rank-badges:hover .journal-rank-refresh,
