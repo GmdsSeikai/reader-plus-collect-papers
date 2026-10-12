@@ -28,6 +28,8 @@ import type {
   PaperMetadata,
   PaperMetadataField,
   ReadingStatus,
+  JournalRankConfig,
+  JournalRankResult,
 } from "@reader/core";
 let sessionToken = "";
 export function configureAPI(token: string) {
@@ -100,6 +102,21 @@ function annotationRequest<T>(path: string, init: RequestInit): Promise<T> {
 export type ZoteroScan = components["schemas"]["ZoteroScan"];
 export type ZoteroImportResult = components["schemas"]["ZoteroImportResult"];
 export const api = {
+  journalRankConfig: () =>
+    request<JournalRankConfig>("/api/journal-ranks/config"),
+  saveJournalRankConfig: (config: {
+    enabled: boolean;
+    selected: string[];
+    key?: string;
+  }) =>
+    request<JournalRankConfig>("/api/journal-ranks/config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+  documentJournalRank: (id: string, refresh = false) =>
+    request<JournalRankResult>(
+      `/api/documents/${encodeURIComponent(id)}/journal-rank${refresh ? "?refresh=1" : ""}`,
+    ),
   connectorStatus: () =>
     request<
       paths["/api/connector/status"]["get"]["responses"][200]["content"]["application/json"]

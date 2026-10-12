@@ -4,6 +4,110 @@
  */
 
 export interface paths {
+    "/api/journal-ranks/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read local easyScholar settings without the SecretKey */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settings and known datasets */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankConfig"];
+                    };
+                };
+            };
+        };
+        /** Save easyScholar settings; omitted key preserves the saved key */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        selected: string[];
+                        key?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankConfig"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/journal-rank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query or read cached journal indicators for one paper */
+        get: {
+            parameters: {
+                query?: {
+                    refresh?: "1";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Journal indicator result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/connector/status": {
         parameters: {
             query?: never;
@@ -2814,6 +2918,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        JournalRankConfig: {
+            enabled: boolean;
+            hasKey: boolean;
+            selected: string[];
+            available: {
+                key: string;
+                name: string;
+            }[];
+        };
+        JournalRankResult: {
+            /** @enum {string} */
+            status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+            checkedAt?: string;
+            badges: {
+                key: string;
+                name: string;
+                value: string;
+                subject?: string;
+                year?: string;
+            }[];
+        };
         ZoteroEntry: {
             id: string;
             title: string;

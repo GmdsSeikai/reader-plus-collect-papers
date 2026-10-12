@@ -121,6 +121,24 @@ export type PaperSort =
 /** Optional columns of the paper table; the title is always shown. */
 export type PaperColumn =
   "authors" | "year" | "venue" | "added" | "opened" | "notes" | "status";
+export interface JournalRankBadge {
+  key: string;
+  name: string;
+  value: string;
+  subject?: string;
+  year?: string;
+}
+export interface JournalRankResult {
+  status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+  badges: JournalRankBadge[];
+  checkedAt?: string;
+}
+export interface JournalRankConfig {
+  enabled: boolean;
+  hasKey: boolean;
+  selected: string[];
+  available: { key: string; name: string }[];
+}
 export interface PaperLibraryPreferences {
   /** Category (folder) order, including categories without papers. */
   categories?: string[];
