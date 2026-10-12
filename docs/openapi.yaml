@@ -102,6 +102,119 @@
                 },
             },
         },
+      "/api/journal-ranks/config":
+        {
+          "get":
+            {
+              "summary": "Read local easyScholar settings without the SecretKey",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Settings and known datasets",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "put":
+            {
+              "summary": "Save easyScholar settings; omitted key preserves the saved key",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "enabled": { "type": "boolean" },
+                                  "filterMode":
+                                    {
+                                      "type": "string",
+                                      "enum": ["include", "exclude"],
+                                    },
+                                  "selected":
+                                    {
+                                      "type": "array",
+                                      "items": { "type": "string" },
+                                    },
+                                  "key": { "type": "string" },
+                                },
+                              "required": ["enabled", "selected"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Saved settings",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/journal-rank":
+        {
+          "get":
+            {
+              "summary": "Query or read cached journal indicators for one paper",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "refresh",
+                    "in": "query",
+                    "schema": { "type": "string", "enum": ["1"] },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Journal indicator result",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankResult",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/connector/status":
         {
           "get":
@@ -3331,6 +3444,73 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "JournalRankConfig":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "enabled": { "type": "boolean" },
+                  "hasKey": { "type": "boolean" },
+                  "filterMode":
+                    { "type": "string", "enum": ["include", "exclude"] },
+                  "selected":
+                    { "type": "array", "items": { "type": "string" } },
+                  "available":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                            },
+                          "required": ["key", "name"],
+                        },
+                    },
+                },
+              "required":
+                ["enabled", "hasKey", "filterMode", "selected", "available"],
+            },
+          "JournalRankResult":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "found",
+                          "notFound",
+                          "notApplicable",
+                          "noVenue",
+                          "disabled",
+                        ],
+                    },
+                  "checkedAt": { "type": "string" },
+                  "badges":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                              "value": { "type": "string" },
+                              "subject": { "type": "string" },
+                              "year": { "type": "string" },
+                            },
+                          "required": ["key", "name", "value"],
+                        },
+                    },
+                },
+              "required": ["status", "badges"],
+            },
           "ZoteroEntry":
             {
               "type": "object",

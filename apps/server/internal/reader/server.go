@@ -20,6 +20,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"reader.local/server/internal/diagnostics"
 	"reader.local/server/internal/scholar"
@@ -55,6 +58,9 @@ type Server struct {
 	modelCache             map[string]modelCatalogEntry
 	scholarMu              sync.Mutex
 	scholar                *scholar.Client
+	journalRankMu          sync.Mutex
+	journalRankLast        time.Time
+	journalRankRequests    singleflight.Group
 }
 
 func NewServer(s *Store, token, web string) *Server { return &Server{Store: s, Token: token, Web: web} }
@@ -101,6 +107,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tag-boards/{id}", s.deleteTagBoard)
 	mux.HandleFunc("GET /api/import/zotero", s.zoteroDefaults)
 	mux.HandleFunc("GET /api/connector/status", s.connectorStatus)
+	mux.HandleFunc("GET /api/journal-ranks/config", s.getJournalRankConfig)
+	mux.HandleFunc("PUT /api/journal-ranks/config", s.putJournalRankConfig)
+	mux.HandleFunc("GET /api/documents/{id}/journal-rank", s.documentJournalRank)
 	mux.HandleFunc("GET /api/connector/revision", s.connectorRevisionStatus)
 	mux.HandleFunc("GET /api/documents/{id}/snapshot", s.connectorSnapshotStatus)
 	mux.HandleFunc("POST /api/import/zotero/scan", s.scanZotero)
