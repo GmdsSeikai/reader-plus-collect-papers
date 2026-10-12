@@ -6,9 +6,9 @@ import {
 } from "@reader/core";
 import { contextReferences } from "../references";
 
-const contextLimit = 21000;
+const contextByteLimit = 64000;
 
-/** Only explicit quotations or opted-in chapter text become source references. */
+/** Explicit quotations carry their complete chapters as auxiliary context. */
 export async function composeChatContext({
   adapter,
   selected,
@@ -22,33 +22,57 @@ export async function composeChatContext({
   useSection?: boolean;
   marks?: string;
 }): Promise<{ context: string; references: SourceReference[] }> {
-  const chapter = useSection || (!selected.length && includeChapter);
-  let excerpts = selected;
-  if (chapter && adapter) {
-    const location = adapter.getLocation();
-    excerpts =
-      adapter.getChapterContext && !useSection
-        ? await adapter.getChapterContext(location)
-        : [{ text: await adapter.getContext(), location }];
-  }
+  if (selected.length && !adapter?.getChapterContext)
+    throw new Error("无法读取引用所在的完整章节，请等待文档加载后重试。");
   const references: SourceReference[] = [];
   const parts: string[] = [];
-  // Notes accompany opted-in chapter text, never an ordinary unquoted question.
-  const notes = chapter ? marks.slice(0, 4000) : "";
-  let remaining = contextLimit - (notes ? notes.length + 2 : 0);
-  for (const excerpt of excerpts) {
+  let bytes = 0;
+  const append = (text: string) => {
+    bytes += new TextEncoder().encode(text).length + (parts.length ? 2 : 0);
+    if (bytes > contextByteLimit)
+      throw new Error(
+        "选区及完整章节超过 64 KB，无法完整发送。请减少引用的章节，或分开提问。",
+      );
+    parts.push(text);
+  };
+  for (const excerpt of selected) {
     if (!excerpt.text.trim()) continue;
-    const prefix = `[${chapter ? "原文" : "选区"} · ${locationLabel(excerpt.location)}]\n`;
-    const available = remaining - prefix.length - (parts.length ? 2 : 0);
-    if (available <= 0) break;
-    const text = excerpt.text.slice(0, available);
-    const part = prefix + text;
-    remaining -= part.length + (parts.length ? 2 : 0);
-    parts.push(part);
-    if (chapter) references.push(...contextReferences(text, excerpt.location));
-    else
-      references.push({ text, location: excerpt.location, kind: "selection" });
+    append(`[选区 · ${locationLabel(excerpt.location)}]\n${excerpt.text}`);
+    references.push({
+      text: excerpt.text,
+      location: excerpt.location,
+      kind: "selection",
+    });
   }
-  if (notes) parts.push(notes);
+  if ((selected.length || includeChapter || useSection) && adapter) {
+    const locations = selected.length
+      ? selected.map((s) => s.location)
+      : [adapter.getLocation()];
+    const seen = new Set<string>();
+    for (const location of locations) {
+      // Explicit page actions retain their scope. A quote always needs its chapter.
+      const excerpts =
+        adapter.getChapterContext && (!useSection || selected.length)
+          ? await adapter.getChapterContext(location)
+          : [{ text: await adapter.getContext(), location }];
+      if (selected.length && !excerpts.some((excerpt) => excerpt.text.trim()))
+        throw new Error(
+          "无法读取引用所在的完整章节，请等待文档解析完成后重试。",
+        );
+      for (const excerpt of excerpts) {
+        if (!excerpt.text.trim()) continue;
+        const ref = contextReferences(excerpt.text, excerpt.location)[0]!;
+        const key = JSON.stringify([ref.location, ref.text]);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        append(
+          `[${selected.length ? "辅助章节原文" : "原文"} · ${locationLabel(ref.location)}]\n${ref.text}`,
+        );
+        // Keep the user's chosen passages as the visible quotations.
+        if (!selected.length) references.push(ref);
+      }
+    }
+    if (marks && !selected.length) append(marks.slice(0, 4000));
+  }
   return { context: parts.join("\n\n"), references };
 }

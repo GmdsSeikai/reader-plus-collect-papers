@@ -503,15 +503,9 @@ export class PDFReaderAdapter implements ReaderAdapter {
       this.pdf.numPages,
     );
     const excerpts: ReaderSelection[] = [];
-    let remaining = 21000;
-    for (
-      let page = range.fromPage;
-      page <= range.toPage && remaining > 0;
-      page++
-    ) {
-      const text = (await this.pageText(page)).slice(0, remaining);
+    for (let page = range.fromPage; page <= range.toPage; page++) {
+      const text = await this.pageText(page);
       if (text.trim()) excerpts.push({ text, location: { type: "pdf", page } });
-      remaining -= text.length;
     }
     return excerpts;
   }

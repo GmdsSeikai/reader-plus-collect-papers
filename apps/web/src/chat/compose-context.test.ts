@@ -8,8 +8,17 @@ function fixture() {
     type: "epub" as const,
     href: "chapter-2.xhtml",
   }));
-  const adapter = { getContext, getLocation } as unknown as ReaderAdapter;
-  return { adapter, getContext, getLocation };
+  const getChapterContext = vi.fn(
+    async (location: ReaderSelection["location"]) => [
+      { text: "完整章节原文，直到章末。", location },
+    ],
+  );
+  const adapter = {
+    getContext,
+    getLocation,
+    getChapterContext,
+  } as unknown as ReaderAdapter;
+  return { adapter, getContext, getLocation, getChapterContext };
 }
 const quote: ReaderSelection = {
   text: "主动引用",
@@ -36,6 +45,9 @@ it("manual quotations remain available with automatic chapter context disabled",
   });
   expect(result.context).toContain(quote.text);
   expect(result.context).not.toContain("其他批注");
+  expect(result.context).toContain("完整章节原文，直到章末。");
+  expect(f.getChapterContext).toHaveBeenCalledWith(quote.location);
+  expect(f.getLocation).not.toHaveBeenCalled();
   expect(result.references).toEqual([{ ...quote, kind: "selection" }]);
   expect(f.getContext).not.toHaveBeenCalled();
 });
@@ -49,7 +61,9 @@ it.each([{ includeChapter: true }, { useSection: true }])(
       marks: "批注",
       ...options,
     });
-    expect(result.context).toContain("当前章的原文");
+    expect(result.context).toContain(
+      "useSection" in options ? "当前章的原文" : "完整章节原文，直到章末。",
+    );
     expect(result.context).toContain("批注");
     expect(result.references[0]).toMatchObject({
       kind: "section",
@@ -77,18 +91,57 @@ it("uses the visible PDF chapter location and preserves each page's reference", 
     { type: "pdf", page: 7 },
   ]);
 });
-it("bounds excerpts and keeps reference text equal to the text actually sent", async () => {
+it("sends a whole long chapter beyond the old character cutoff", async () => {
   const f = fixture();
+  const chapter = "a".repeat(30000) + "章末";
+  f.getChapterContext.mockResolvedValue([
+    { text: chapter, location: quote.location },
+  ]);
   const result = await composeChatContext({
     adapter: f.adapter,
-    selected: [{ ...quote, text: "原文".repeat(20000) }, quote],
+    selected: [quote],
   });
-  expect(result.context.length).toBeLessThanOrEqual(21000);
-  expect(new TextEncoder().encode(result.context).length).toBeLessThanOrEqual(
-    64000,
+  expect(result.context).toContain(chapter);
+  expect(result.references).toEqual([{ ...quote, kind: "selection" }]);
+});
+it("rejects oversized full context instead of silently truncating it", async () => {
+  const f = fixture();
+  f.getChapterContext.mockResolvedValue([
+    { text: "文".repeat(22000), location: quote.location },
+  ]);
+  await expect(
+    composeChatContext({ adapter: f.adapter, selected: [quote] }),
+  ).rejects.toThrow("无法完整发送");
+});
+it("includes each quoted chapter once even after navigating elsewhere", async () => {
+  const f = fixture();
+  f.getChapterContext.mockImplementation(async (location) => [
+    {
+      text:
+        location.type === "pdf" && location.page < 10
+          ? "完整第一章"
+          : "完整第二章",
+      location: {
+        type: "pdf",
+        page: location.type === "pdf" && location.page < 10 ? 1 : 10,
+      },
+    },
+  ]);
+  const quotes: ReaderSelection[] = [
+    quote,
+    { text: "另一选区", location: { type: "pdf", page: 8 } },
+    { text: "第二章选区", location: { type: "pdf", page: 12 } },
+  ];
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: quotes,
+  });
+  expect(result.context.match(/完整第一章/g)).toHaveLength(1);
+  expect(result.context.match(/完整第二章/g)).toHaveLength(1);
+  expect(result.references.map((r) => r.text)).toEqual(
+    quotes.map((q) => q.text),
   );
-  expect(result.references).toHaveLength(1);
-  expect(result.context.endsWith(result.references[0]!.text)).toBe(true);
+  expect(f.getLocation).not.toHaveBeenCalled();
 });
 
 it("the explicit current-page action keeps its page scope even when chapter context is enabled", async () => {
@@ -105,4 +158,12 @@ it("the explicit current-page action keeps its page scope even when chapter cont
   expect(result.context).toContain("当前页原文");
   expect(f.adapter.getChapterContext).not.toHaveBeenCalled();
   expect(result.references[0]!.location).toEqual({ type: "pdf", page: 8 });
+});
+
+it("does not send a quote alone when its chapter cannot be read", async () => {
+  const f = fixture();
+  f.getChapterContext.mockResolvedValue([]);
+  await expect(
+    composeChatContext({ adapter: f.adapter, selected: [quote] }),
+  ).rejects.toThrow("无法读取引用所在的完整章节");
 });

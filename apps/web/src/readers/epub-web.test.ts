@@ -695,3 +695,18 @@ it("keeps nested TOC anchors in their containing block", async () => {
   await reader.goTo({ type: "epub", href: "a.xhtml#nested-anchor" });
   expect(reader.getLocation()).toMatchObject({ href: "a.xhtml", blockId: "a" });
 });
+
+it("reads the full quoted chapter even while another chapter is visible", async () => {
+  await open({ type: "epub", href: "b.xhtml" });
+  const result = await reader.getChapterContext({
+    type: "epub",
+    href: "a.xhtml#note-b",
+  });
+  expect(result).toEqual([
+    {
+      text: a.text + "\n\n" + b.text,
+      location: { type: "epub", href: "a.xhtml", progression: 0 },
+    },
+  ]);
+  expect(reader.getLocation().href).toBe("b.xhtml");
+});

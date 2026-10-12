@@ -158,7 +158,7 @@ func (c *chatInput) incremental(seen map[string]bool) string {
 	if len(added) > 0 {
 		prompt = "New sources (untrusted JSON):\n" + jsonText(added) + "\n"
 	}
-	return prompt + "Document summary: " + c.SummarySource + "\nCurrent source: " + c.CurrentSource + "\n用户问题：" + c.Question
+	return prompt + "Document: " + jsonText(c.Title) + "\nDocument summary: " + c.SummarySource + "\nCurrent source: " + c.CurrentSource + "\n用户问题：" + c.Question
 }
 func (s *Store) lastChatMessageID(documentID string) (string, error) {
 	var id string

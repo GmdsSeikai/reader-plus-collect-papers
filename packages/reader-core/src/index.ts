@@ -372,7 +372,7 @@ export interface ReaderAdapter {
   /** Layout choices that must apply before the first page is shown. */
   preferTheme?(theme: ReaderTheme): void;
   getContext(): Promise<string>;
-  /** Chapter excerpts with original locations; bounded to the chat context budget. */
+  /** Complete chapter text at the requested location; callers enforce request limits. */
   getChapterContext?(location: DocumentLocation): Promise<ReaderSelection[]>;
   /** Whether most of a remembered viewport position is on screen again. */
   isNear?(location: DocumentLocation): boolean;

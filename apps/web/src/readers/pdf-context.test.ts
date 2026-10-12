@@ -41,11 +41,12 @@ it("extracts the visible chapter across pages using its outline boundaries", asy
   );
   expect(f.getPage.mock.calls.map(([page]) => page)).toEqual([6, 7, 8, 9]);
 });
-it("bounds extraction before reading more pages when a chapter is long", async () => {
+it("preserves full chapter text beyond the previous character limit", async () => {
   const f = fixture([], () => "文".repeat(25000));
   const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
-  expect(excerpts).toHaveLength(1);
+  expect(excerpts).toHaveLength(20);
   expect(excerpts[0]!.location).toEqual({ type: "pdf", page: 21 });
-  expect(excerpts[0]!.text).toHaveLength(21000);
-  expect(f.getPage).toHaveBeenCalledTimes(1);
+  expect(excerpts[0]!.text).toHaveLength(25000);
+  expect(excerpts.at(-1)!.location).toEqual({ type: "pdf", page: 40 });
+  expect(f.getPage).toHaveBeenCalledTimes(20);
 });

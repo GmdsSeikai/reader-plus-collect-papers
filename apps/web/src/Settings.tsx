@@ -868,7 +868,7 @@ export function Settings({
                 <span>
                   提问时附带本章原文
                   <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                    默认只附带已有的文章摘要。手动引用和章节总结始终发送对应原文，历史对话仍会保留。
+                    普通提问默认附带标题和已有摘要。引用或解释选区时，同时附带选区所在的完整章节。历史对话仍会保留。
                   </span>
                 </span>
               </label>

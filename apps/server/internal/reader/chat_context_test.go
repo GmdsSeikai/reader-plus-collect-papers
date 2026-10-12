@@ -148,3 +148,36 @@ func TestChatChapterPreferencePersists(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryChatKindIncludesTitleAndSummary(t *testing.T) {
+	for _, kind := range []string{"ordinary", "selection", "image"} {
+		t.Run(kind, func(t *testing.T) {
+			s, _ := imageFixture(t)
+			r := request(t, s, "PATCH", "/api/documents/doc", strings.NewReader(`{"title":"本次文章标题","metadata":{"abstract":"本次文章摘要"}}`))
+			if r.Code != 200 {
+				t.Fatal(r.Body)
+			}
+			upstream, calls := fakeAPI(t, func(int, apiCall) string { return "回答" })
+			c := AIConfig{Primary: "api", API: APIConnection{URL: upstream.URL + "/v1", Key: "sk-test"}, Models: map[string]string{"api": "plain"}, VisionModels: map[string]string{"api": "plain"}}
+			passModels(&c, map[string]bool{"plain": true})
+			if err := s.writeAIConfig(c); err != nil {
+				t.Fatal(err)
+			}
+			input := map[string]any{"provider": "api", "prompt": "问题", "context": ""}
+			if kind == "selection" {
+				input["context"] = "选区及完整辅助章节"
+			}
+			if kind == "image" {
+				input["attachments"] = []string{"p1-b1"}
+			}
+			r = request(t, s, "POST", "/api/documents/doc/chat", strings.NewReader(jsonText(input)))
+			if !strings.Contains(r.Body.String(), "event: done") {
+				t.Fatal(r.Body)
+			}
+			payload := jsonText(calls()[0].Messages[1].Content)
+			if !strings.Contains(payload, "本次文章标题") || !strings.Contains(payload, "本次文章摘要") {
+				t.Fatal(payload)
+			}
+		})
+	}
+}

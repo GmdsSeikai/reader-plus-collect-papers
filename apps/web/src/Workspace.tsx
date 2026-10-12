@@ -1387,8 +1387,8 @@ export function Workspace({
                       </Button>
                       <p className="privacy-note">
                         {aiConfig?.chatIncludeChapter
-                          ? "提问时附带本章原文和文章摘要。"
-                          : "提问默认只附带已有的文章摘要，手动引用的内容也会发送。"}
+                          ? "提问时附带标题、已有摘要和本章原文。"
+                          : "提问默认附带标题和已有摘要，引用选区时补充所在章节。"}
                       </p>
                     </div>
                   }
