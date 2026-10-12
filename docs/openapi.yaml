@@ -3210,6 +3210,28 @@
         },
       "/api/collection/imports":
         {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Active import requests",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    { "$ref": "#/components/schemas/CollectionImportRequest" },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
           "post":
             {
               "requestBody":

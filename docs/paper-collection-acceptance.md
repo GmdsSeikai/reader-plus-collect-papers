@@ -17,7 +17,7 @@
 | A09 延迟索引与热门复核 | persistent cursors → scheduler | 补扫中退出、复核周期只完成一部分 | 重启集成 | 最近 7 天复扫；热门待重开列表跨重启继续；整周期完成才推进标记 | not run |
 | A10 公共来源限流与代理 | source gate + 现有 metadata lookup | 预览/发现/查找并行，不同根的两个进程；429/Retry-After；代理启用 | 多进程集成 + 实际代理 | 同一用户 arXiv 请求单连接且间隔 ≥3 秒；跨根共享；退避可取消；真实 transport 使用代理；不声称覆盖其他机器 | not run |
 | A11 引用精确身份 | citation queue → S2 batch | 返回顺序改变、部分 null、external ID 不符 | HTTP + SQLite 集成 | 按 externalIds 匹配；错误身份不更新；不用标题替代；候选可见与下载不受影响 | passed（round-1：TestCitationBatchMatchesByExternalID；真实 S2 仍 not run） |
-| A12 引用零/未知/过期 | citations → 列表排序 | 0、缺数、负数/浮点/字符串、旧值刷新失败、成功下降 | 集成 + 前端行为 | 0 显示 0、未知 NULL、旧值过期保留；7 天成功刷新/24 小时失败退避；接受下降 | passed（round-1：TestCitationZeroUnknownAndStale；前端展示未测） |
+| A12 引用零/未知/过期 | citations → 列表排序 | 0、缺数、负数/浮点/字符串、旧值刷新失败、成功下降 | 集成 + 前端行为 | 0 显示 0、未知 NULL、旧值过期保留；7 天成功刷新/24 小时失败退避；接受下降 | failed（round-1 误标 passed 已纠正；round-2 修复首败退避并有 TestCitationZeroUnknownAndStale、TestCitationFirstFailureSetsBackoff；前端展示与真实调度证据缺失） |
 | A13 热门与相关性语义 | latest/hot list API → UI | 未知引用、低分/无分、仅关闭任务命中 | SQL + 前端测试 | 按首次窗口及累计引用；未知保留；有效相关性独立排序；原文和任务筛选仍可用 | not run |
 | A14 无 AI 闭环 | collection UI → import → PDF reader | 没 CLI、没 Key、额度为零、统计服务离线 | 生产 HTTP 集成 + 人工 UI | 创建作者/关键词任务、发现、查看原文、选择入库、打开 PDF；失败统计/分析不删除候选 | not run（round-1 后端闭环已测 TestCollectionManualDiscoveryLoop、TestCollectionCandidateImportFlow；人工 UI 未做） |
 | A15 不可信原文与严格 JSON | paper analysis adapter → validator | 假 quote、未知/重复/漏任务、错 profile、浮点分、注入命令、半流无终态 | 单元 + 协议集成 | 全部拒绝；不写成功与分数；已发送计量；无工具、下载或状态执行 | not run |
