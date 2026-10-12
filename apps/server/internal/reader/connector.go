@@ -77,7 +77,7 @@ func (s *Server) ConnectorHandler() http.Handler {
 	mux.HandleFunc("GET /v1/folders", s.connectorFolders)
 	mux.HandleFunc("GET /v1/labels", s.connectorLabels)
 	mux.HandleFunc("POST /v1/import", s.connectorImport)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.diagnosticHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, port, err := net.SplitHostPort(r.Host)
 		if err != nil || host != "127.0.0.1" || port != ConnectorPort {
 			fail(w, 403, "invalid host")
@@ -113,7 +113,7 @@ func (s *Server) ConnectorHandler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }
 func (s *Server) connectorSession(w http.ResponseWriter, r *http.Request) {
 	s.connectorMu.Lock()

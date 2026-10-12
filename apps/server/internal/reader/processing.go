@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -347,6 +348,9 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 					s.finishProcessingTask(p.DocumentID, task)
 					continue
 				}
+				taskID := id()
+				taskStarted := time.Now()
+				s.diagnosticEvent(slog.LevelInfo, "processing.start", "taskId", taskID, "documentId", p.DocumentID, "phase", phase)
 				if phase == "learning" {
 					finishStage, stageErr := s.startUsageStage(p.DocumentID, "learning")
 					if stageErr != nil {
@@ -370,6 +374,13 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 					}
 					_ = s.Store.saveProcessing(p)
 				}
+				level := slog.LevelInfo
+				kind := ErrorKind("")
+				if e != nil {
+					level = slog.LevelError
+					kind = errorKind(e)
+				}
+				s.diagnosticEvent(level, "processing.finish", "taskId", taskID, "durationMs", time.Since(taskStarted).Milliseconds(), "documentId", p.DocumentID, "phase", phase, "errorCode", kind)
 				finish()
 				s.finishProcessingTask(p.DocumentID, task)
 			}
