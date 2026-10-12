@@ -53,9 +53,14 @@ type Server struct {
 	scholarMu              sync.Mutex
 	scholar                *scholar.Client
 	drain                  drainState
+	collectionManager      *CollectionManager
 }
 
-func NewServer(s *Store, token, web string) *Server { return &Server{Store: s, Token: token, Web: web} }
+func NewServer(s *Store, token, web string) *Server {
+	srv := &Server{Store: s, Token: token, Web: web}
+	srv.collectionManager = NewCollectionManager(srv)
+	return srv
+}
 func id() string                                    { b := make([]byte, 16); _, _ = rand.Read(b); return hex.EncodeToString(b) }
 func respond(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -178,6 +183,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		respond(w, 200, v)
 	})
+	s.registerCollectionRoutes(mux)
 	mux.HandleFunc("POST /api/lifecycle/drain", s.drainStartHandler)
 	mux.HandleFunc("GET /api/lifecycle/drain/{id}", s.drainStatusHandler)
 	mux.HandleFunc("POST /api/lifecycle/drain/{id}/cancel", s.drainCancelHandler)
