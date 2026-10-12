@@ -558,6 +558,8 @@ export const collectionApi = {
       method: "POST",
       body: JSON.stringify({ items }),
     }),
+  activeImports: () =>
+    request<CollectionImportRequest[]>("/api/collection/imports"),
   importRequest: (id: string) =>
     request<CollectionImportRequest>(
       `/api/collection/imports/${encodeURIComponent(id)}`,

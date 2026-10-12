@@ -162,7 +162,10 @@ export function CollectionPage({
   const [sort, setSort] = useState<"date" | "citations" | "relevance">("date");
   const [busy, setBusy] = useState(false);
   const [imports, setImports] = useState<
-    Record<string, { requestId: string; status: string; error?: string }>
+    Record<
+      string,
+      { requestId: string; status: string; error?: string; documentId?: string }
+    >
   >({});
   const requestSeq = useRef(0);
 
@@ -240,31 +243,63 @@ export function CollectionPage({
       .finally(() => setBusy(false));
   };
 
+  // Polling belongs to this page: switching away stops the loops, and mount
+  // restores every active request from the server's persisted state.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    collectionApi
+      .activeImports()
+      .then((reqs) => {
+        if (!aliveRef.current) return;
+        const next: typeof imports = {};
+        for (const req of reqs) {
+          next[req.arxivId] = {
+            requestId: req.requestId,
+            status: req.status,
+            error: req.error,
+            documentId: req.documentId,
+          };
+          if (
+            req.status === "queued" ||
+            req.status === "downloading" ||
+            req.status === "importing"
+          ) {
+            void pollImport(req.arxivId, req.requestId);
+          }
+        }
+        setImports(next);
+      })
+      .catch(() => {});
+    return () => {
+      aliveRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pollImport = async (arxivId: string, requestId: string) => {
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 600; i++) {
       await new Promise((r) => setTimeout(r, 500));
+      if (!aliveRef.current) return;
       try {
         const req = await collectionApi.importRequest(requestId);
+        if (!aliveRef.current) return;
         setImports((s) => ({
           ...s,
           [arxivId]: {
             requestId,
             status: req.status,
             error: req.error,
+            documentId: req.documentId,
           },
         }));
-        if (req.status === "imported" && req.documentId) {
-          toast.success("已入库，可在论文库打开");
-          onOpenDocument(req.documentId);
-          return;
-        }
-        if (req.status === "awaiting_confirmation") {
-          await collectionApi.confirmImport(requestId);
-        }
+        // Long papers wait for the user's explicit confirmation; polling
+        // never confirms on its own.
         if (
           req.status === "failed" ||
           req.status === "cancelled" ||
-          req.status === "imported"
+          req.status === "imported" ||
+          req.status === "awaiting_confirmation"
         ) {
           return;
         }
@@ -272,6 +307,37 @@ export function CollectionPage({
         return;
       }
     }
+  };
+
+  // User action: confirm one long paper (51–150 pages) for the final commit.
+  const confirmImport = (arxivId: string) => {
+    const state = imports[arxivId];
+    if (!state) return;
+    collectionApi
+      .confirmImport(state.requestId)
+      .then(() => {
+        setImports((s) => ({
+          ...s,
+          [arxivId]: { ...state, status: "importing" },
+        }));
+        void pollImport(arxivId, state.requestId);
+      })
+      .catch((e) => toast.error((e as Error).message));
+  };
+
+  // User action: cancel one queued or downloading request.
+  const cancelImport = (arxivId: string) => {
+    const state = imports[arxivId];
+    if (!state) return;
+    collectionApi
+      .cancelImport(state.requestId)
+      .then(() => {
+        setImports((s) => ({
+          ...s,
+          [arxivId]: { ...state, status: "cancelled" },
+        }));
+      })
+      .catch((e) => toast.error((e as Error).message));
   };
 
   const openDetail = (row: CandidateRow) => {
@@ -452,8 +518,34 @@ export function CollectionPage({
                               : ""}
                           </p>
                         </button>
+                        {state?.status === "awaiting_confirmation" ? (
+                          <Button size="sm" onClick={() => confirmImport(c.arxivId)}>
+                            确认入库
+                          </Button>
+                        ) : null}
+                        {state?.status === "queued" ||
+                        state?.status === "downloading" ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => cancelImport(c.arxivId)}
+                          >
+                            取消
+                          </Button>
+                        ) : null}
                         {state?.status === "imported" ? (
-                          <Badge variant="secondary">已入库</Badge>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => onOpenDocument(state.documentId || "")}
+                          >
+                            已入库 · 打开
+                          </Button>
+                        ) : null}
+                        {state?.status === "failed" ? (
+                          <span className="text-xs text-destructive">
+                            {state.error || "失败"}
+                          </span>
                         ) : null}
                       </div>
                     );
