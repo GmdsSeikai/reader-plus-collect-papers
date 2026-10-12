@@ -842,6 +842,37 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="agent" className="settings-panel" keepMounted>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  aria-label="提问时附带本章原文"
+                  checked={config?.chatIncludeChapter === true}
+                  disabled={!config || saving || aiModelSaving || loading}
+                  onCheckedChange={async (checked) => {
+                    setSaving(true);
+                    try {
+                      const latest = await api.aiConfig();
+                      setAIConfig(
+                        await api.saveAIConfig({
+                          ...latest,
+                          chatIncludeChapter: !!checked,
+                        }),
+                      );
+                    } catch (error) {
+                      toast.error((error as Error).message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                />
+                <span>
+                  提问时附带本章原文
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    默认只附带已有的文章摘要。手动引用和章节总结始终发送对应原文，历史对话仍会保留。
+                  </span>
+                </span>
+              </label>
+            </section>
             <section>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-sm font-medium">Agent 连接</h3>

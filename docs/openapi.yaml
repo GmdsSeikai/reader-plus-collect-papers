@@ -4025,6 +4025,11 @@
               "type": "object",
               "properties":
                 {
+                  "chatIncludeChapter":
+                    {
+                      "type": "boolean",
+                      "description": "Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value.",
+                    },
                   "primary": { "type": "string" },
                   "models":
                     {

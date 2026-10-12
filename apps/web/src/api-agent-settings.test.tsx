@@ -11,7 +11,12 @@ import { useReaderStore } from "./store";
 vi.mock("@reader/api", () => ({
   api: {
     connectorStatus: vi.fn(async () => ({ available: true })),
-    journalRankConfig: vi.fn(async () => ({ enabled: true, hasKey: false, selected: [], available: [] })),
+    journalRankConfig: vi.fn(async () => ({
+      enabled: true,
+      hasKey: false,
+      selected: [],
+      available: [],
+    })),
     providers: vi.fn(),
     aiConfig: vi.fn(),
     saveAIConfig: vi.fn(),
@@ -65,6 +70,7 @@ const openAPI = async () =>
   );
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("PointerEvent", MouseEvent);
   vi.clearAllMocks();
   config = {
     primary: "api",
@@ -227,4 +233,19 @@ it("adds and removes a model ID by hand and checks it", async () => {
   );
   expect(config.apiModels).toEqual([]);
   expect(host.textContent).not.toContain("my-model");
+});
+
+it("defaults chapter context off and persists both toggle states without rechecking models", async () => {
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const toggle = () =>
+    host.querySelector<HTMLElement>('[aria-label="提问时附带本章原文"]')!;
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  await act(async () => toggle().click());
+  expect(config.chatIncludeChapter).toBe(true);
+  expect(useReaderStore.getState().aiConfig?.chatIncludeChapter).toBe(true);
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  await act(async () => toggle().click());
+  expect(config.chatIncludeChapter).toBe(false);
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(api.testAI).not.toHaveBeenCalled();
 });

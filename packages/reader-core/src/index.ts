@@ -372,6 +372,8 @@ export interface ReaderAdapter {
   /** Layout choices that must apply before the first page is shown. */
   preferTheme?(theme: ReaderTheme): void;
   getContext(): Promise<string>;
+  /** Chapter excerpts with original locations; bounded to the chat context budget. */
+  getChapterContext?(location: DocumentLocation): Promise<ReaderSelection[]>;
   /** Whether most of a remembered viewport position is on screen again. */
   isNear?(location: DocumentLocation): boolean;
   setBlocks?(blocks: PDFBlock[]): void;
@@ -526,6 +528,8 @@ export interface APIConnection {
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export interface AIConfig {
+  /** Automatically attach current chapter text to ordinary chat; defaults to false. */
+  chatIncludeChapter?: boolean;
   primary: string;
   models: Record<string, string>;
   efforts?: Record<string, Record<string, ReasoningEffort>>;

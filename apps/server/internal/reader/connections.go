@@ -37,9 +37,11 @@ type Capability struct {
 	Fingerprint   string `json:"-"`
 }
 type AIConfig struct {
-	Primary string                       `json:"primary"`
-	Models  map[string]string            `json:"models"`
-	Efforts map[string]map[string]string `json:"efforts,omitempty"`
+	// Optional for old clients; nil means automatic chapter excerpts are off.
+	ChatIncludeChapter *bool                        `json:"chatIncludeChapter,omitempty"`
+	Primary            string                       `json:"primary"`
+	Models             map[string]string            `json:"models"`
+	Efforts            map[string]map[string]string `json:"efforts,omitempty"`
 	// Translation choices are independent of chat. An empty model means
 	// Reader picks the fast tier from the live catalog.
 	TranslationModels  map[string]string            `json:"translationModels,omitempty"`
@@ -262,6 +264,9 @@ func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old := s.readAIConfig()
+	if c.ChatIncludeChapter == nil {
+		c.ChatIncludeChapter = old.ChatIncludeChapter
+	}
 	if c.Efforts == nil {
 		c.Efforts = old.Efforts
 	}

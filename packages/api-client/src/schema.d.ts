@@ -3189,6 +3189,8 @@ export interface components {
         /** @enum {string} */
         ReasoningEffort: "low" | "medium" | "high" | "max";
         AIConfig: {
+            /** @description Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value. */
+            chatIncludeChapter?: boolean;
             primary: string;
             models: {
                 [key: string]: string;
