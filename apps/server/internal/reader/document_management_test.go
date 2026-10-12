@@ -130,8 +130,8 @@ func TestDeleteSerializesReimportAndRejectsNewBackgroundWork(t *testing.T) {
 		finish()
 		t.Fatal("deletion did not cancel work")
 	}
-	if s.importMu.TryLock() {
-		s.importMu.Unlock()
+	if release, ok := s.importGate.TryAcquire(); ok {
+		release()
 		t.Error("reimport can race with file cleanup")
 	}
 	if _, end, err := s.beginDocumentTask(context.Background(), d.ID); err == nil {

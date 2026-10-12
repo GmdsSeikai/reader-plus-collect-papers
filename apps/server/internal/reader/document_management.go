@@ -69,8 +69,12 @@ func (s *Server) beginDocumentTask(parent context.Context, id string) (context.C
 
 func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 	// IDs are content hashes: serialize cleanup with reimporting the same file.
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		fail(w, 503, err.Error())
+		return
+	}
+	defer release()
 	if status, message := s.purgeDocument(r.Context(), r.PathValue("id")); message != "" {
 		fail(w, status, message)
 		return
@@ -79,7 +83,7 @@ func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // purgeDocument permanently removes a document and its library-owned files.
-// The caller holds importMu. It returns a status and message on failure.
+// The caller holds the library write gate. It returns a status and message on failure.
 func (s *Server) purgeDocument(ctx context.Context, id string) (int, string) {
 	s.documentMu.Lock()
 	if s.deletingDocuments[id] {

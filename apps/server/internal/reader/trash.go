@@ -26,8 +26,12 @@ func (s *Store) TrashedDocuments(library string) ([]Document, error) {
 }
 
 func (s *Server) trashDocument(w http.ResponseWriter, r *http.Request) {
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		fail(w, 503, err.Error())
+		return
+	}
+	defer release()
 	d, status, message := s.moveToTrash(r.Context(), r.PathValue("id"))
 	if status != 0 {
 		fail(w, status, message)
@@ -37,7 +41,7 @@ func (s *Server) trashDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // moveToTrash marks a document deleted and stops its background work. The
-// caller holds importMu. A non-zero status is an HTTP error for message.
+// caller holds the library write gate. A non-zero status is an HTTP error for message.
 func (s *Server) moveToTrash(ctx context.Context, id string) (Document, int, string) {
 	s.documentMu.Lock()
 	if s.deletingDocuments[id] {
@@ -103,8 +107,12 @@ func (s *Server) requeueInterrupted(id, detail string) {
 }
 
 func (s *Server) restoreDocument(w http.ResponseWriter, r *http.Request) {
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		fail(w, 503, err.Error())
+		return
+	}
+	defer release()
 	d, err := s.restore(r.PathValue("id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "文档不存在")
@@ -117,7 +125,7 @@ func (s *Server) restoreDocument(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, d)
 }
 
-// restore is idempotent; the caller holds importMu.
+// restore is idempotent; the caller holds the library write gate.
 func (s *Server) restore(id string) (Document, error) {
 	d, err := s.Store.Document(id)
 	if err != nil || d.DeletedAt == "" {
@@ -153,8 +161,12 @@ func (s *Server) emptyTrash(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "未知书库")
 		return
 	}
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		fail(w, 503, err.Error())
+		return
+	}
+	defer release()
 	docs, err := s.Store.TrashedDocuments(library)
 	if err != nil {
 		fail(w, 500, "无法读取回收站")

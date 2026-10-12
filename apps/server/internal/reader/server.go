@@ -3,8 +3,8 @@ package reader
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -40,7 +40,7 @@ type Server struct {
 	documentMu             sync.Mutex
 	documentTasks          map[string]map[*documentTask]struct{}
 	deletingDocuments      map[string]bool
-	importMu               sync.Mutex
+	importGate             libraryWriteGate
 	configMu               sync.Mutex
 	translationMu          sync.Mutex
 	translationSubscribers map[string]map[chan TranslationBlock]struct{}
@@ -52,6 +52,7 @@ type Server struct {
 	modelCache             map[string]modelCatalogEntry
 	scholarMu              sync.Mutex
 	scholar                *scholar.Client
+	drain                  drainState
 }
 
 func NewServer(s *Store, token, web string) *Server { return &Server{Store: s, Token: token, Web: web} }
@@ -278,24 +279,31 @@ func (e importError) Error() string { return e.message }
 // file returns the existing document, whichever library holds it.
 // A long paper is imported only after the reader confirms (allowLarge).
 func (s *Server) importFile(ctx context.Context, temp, filename, library string, allowLarge bool) (Document, int, error) {
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	return s.importFileAs(ctx, "upload", filename, temp, filename, library, allowLarge)
+}
+
+// importFileAs is importFile with an explicit source owner for the shared
+// install log (upload, resolve, connector, collection).
+func (s *Server) importFileAs(ctx context.Context, owner, ownerRef, temp, filename, library string, allowLarge bool) (Document, int, error) {
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		return Document{}, 503, importError{status: 503, message: err.Error()}
+	}
+	defer release()
 	kind := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
 	failure := func(status int, message string) (Document, int, error) {
 		return Document{}, status, importError{status: status, message: message}
 	}
-	f, err := os.Open(temp)
+	docID, fullSHA, size, err := hashImportFile(temp)
 	if err != nil {
 		return failure(500, "无法验证文件")
 	}
-	hash := sha256.New()
-	size, err := io.Copy(hash, f)
-	f.Close()
-	if err != nil {
-		return failure(500, "无法验证文件")
-	}
-	docID := hex.EncodeToString(hash.Sum(nil))[:32]
 	if d, e := s.Store.Document(docID); e == nil {
+		// A re-import must agree with the recorded full digest, not just the
+		// short content-derived ID.
+		if err = s.Store.verifyExistingImport(docID, fullSHA); err != nil {
+			return failure(500, err.Error())
+		}
 		// Importing a file again brings it back from the trash.
 		if d, err = s.restore(docID); err != nil {
 			return failure(500, "无法恢复回收站中的文档")
@@ -369,48 +377,35 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 			}
 		}
 	}
-	dest := s.Store.File(d)
-	if err = os.Rename(temp, dest); err != nil {
-		return failure(500, "无法保存原文件")
-	}
-	tx, err := s.Store.DB.Begin()
-	if err != nil {
-		_ = os.Remove(dest)
-		return failure(500, "无法写入书库")
-	}
-	defer tx.Rollback()
-	metadata := "{}"
-	if library == "papers" {
-		// Papers imported from files look up their metadata once parsed.
-		metadata = `{"lookup":"pending"}`
-	}
-	_, err = tx.Exec("INSERT INTO documents(id,type,title,author,size,created_at,last_opened_at,category,category_source,classification_status,library,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", d.ID, d.Type, d.Title, d.Author, d.Size, d.CreatedAt, d.LastOpenedAt, d.Category, d.CategorySource, d.ClassificationStatus, d.Library, metadata)
-	if err == nil {
+	spec := importInstall{Owner: owner, OwnerRef: ownerRef, Temp: temp, Filename: filename, Library: library, DocID: docID, FullSHA: fullSHA, Size: size}
+	d, err = s.installImportFile(ctx, spec, func(tx *sql.Tx) (Document, error) {
+		metadata := "{}"
+		if library == "papers" {
+			// Papers imported from files look up their metadata once parsed.
+			metadata = `{"lookup":"pending"}`
+		}
+		_, err := tx.Exec("INSERT INTO documents(id,type,title,author,size,created_at,last_opened_at,category,category_source,classification_status,library,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", d.ID, d.Type, d.Title, d.Author, d.Size, d.CreatedAt, d.LastOpenedAt, d.Category, d.CategorySource, d.ClassificationStatus, d.Library, metadata)
+		if err != nil {
+			return Document{}, err
+		}
 		for href, text := range texts {
-			_, err = tx.Exec("INSERT INTO search_index(document_id,href,content) VALUES(?,?,?)", d.ID, href, text)
-			if err != nil {
-				break
+			if _, err = tx.Exec("INSERT INTO search_index(document_id,href,content) VALUES(?,?,?)", d.ID, href, text); err != nil {
+				return Document{}, err
 			}
 		}
-	}
-	if err == nil {
 		var settings string
 		_ = tx.QueryRow("SELECT value FROM settings WHERE key='reader'").Scan(&settings)
 		p := initialDocumentProcessing(d, settings)
 		b, _ := json.Marshal(p)
-		_, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
-	}
-	if err == nil {
-		err = tx.Commit()
-	}
+		if _, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b); err != nil {
+			return Document{}, err
+		}
+		return d, nil
+	})
 	if err != nil {
-		_ = os.Remove(dest)
-		return failure(500, "书库保存失败")
+		return failure(500, err.Error())
 	}
 	success = true
-	if saved, e := s.Store.Document(d.ID); e == nil {
-		d = saved
-	}
 	return d, 201, nil
 }
 func validLocation(data json.RawMessage, kind string) bool {

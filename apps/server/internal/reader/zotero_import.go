@@ -118,6 +118,10 @@ func (s *Server) importZotero(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.importZoteroEntry(r.Context(), entry)
 	if err != nil {
+		if errors.Is(err, errAdmissionClosed) {
+			fail(w, 503, err.Error())
+			return
+		}
 		fail(w, 400, err.Error())
 		return
 	}
@@ -127,8 +131,11 @@ func (s *Server) importZotero(w http.ResponseWriter, r *http.Request) {
 func (s *Server) importZoteroEntry(ctx context.Context, e *zoteroEntry) (zoteroImportResult, error) {
 	result := zoteroImportResult{Warnings: append([]string{}, e.Warnings...)}
 	// Serializes file ownership with regular uploads; SQL protects metadata/notes.
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		return result, err
+	}
+	defer release()
 	path, err := filepath.EvalSymlinks(e.path)
 	if err != nil {
 		return result, errors.New("PDF 已移动或无法访问，请重新扫描")
@@ -200,6 +207,27 @@ func (s *Server) importZoteroEntry(ctx context.Context, e *zoteroEntry) (zoteroI
 	}
 	docID := hex.EncodeToString(hash.Sum(nil))[:32]
 	result.DocumentID = docID
+	fullSHA := hex.EncodeToString(hash.Sum(nil))
+	existsDoc, err := s.Store.documentExists(docID)
+	if err != nil {
+		return result, err
+	}
+	var zcommitID string
+	zcommitted := false
+	if !existsDoc {
+		// The install log row is written before the data transaction so a crash
+		// keeps a reconcilable record of the staged file. An aborted attempt
+		// closes the row so a retry can take the target again.
+		zcommitID, err = s.Store.beginImportCommit(importInstall{Owner: "zotero", OwnerRef: "zotero:" + e.ID, Temp: temp.Name(), Filename: filepath.Base(path), Library: "papers", DocID: docID, FullSHA: fullSHA, Size: size})
+		if err != nil {
+			return result, err
+		}
+		defer func() {
+			if !zcommitted {
+				_ = s.Store.markImportCommit(zcommitID, importStageFailed, "", "导入未完成")
+			}
+		}()
+	}
 	// Keep imported annotations outside another client's undo snapshot.
 	s.annotationMu.Lock()
 	defer s.annotationMu.Unlock()
@@ -364,9 +392,15 @@ func (s *Server) importZoteroEntry(ctx context.Context, e *zoteroEntry) (zoteroI
 		}
 		copied = true
 	}
+	if zcommitID != "" {
+		if err = markImportCommitTx(tx, zcommitID, importStageCommitted, docID); err != nil {
+			return result, err
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return result, err
 	}
+	zcommitted = true
 	success = true
 	return result, nil
 }

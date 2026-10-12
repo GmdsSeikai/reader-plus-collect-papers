@@ -54,8 +54,12 @@ func (s *Server) mergeDocuments(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请选择 1–20 篇要合并的文档")
 		return
 	}
-	s.importMu.Lock()
-	defer s.importMu.Unlock()
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		fail(w, 503, err.Error())
+		return
+	}
+	defer release()
 	id := r.PathValue("id")
 	master, err := s.Store.Document(id)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && master.DeletedAt != "") {
