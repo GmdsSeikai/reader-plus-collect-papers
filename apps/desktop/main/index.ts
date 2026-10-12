@@ -21,7 +21,10 @@ import {
   type ReaderLinkTarget,
 } from "../../../packages/reader-core/src/reader-link";
 import { writeClipboardText } from "./clipboard";
-import { childProxyEnvironment } from "./proxy";
+import {
+  ProxySettingsService,
+  electronProxyConfiguration,
+} from "./proxy-settings";
 import { startUpdateService } from "./update-service";
 import { devIsolation } from "./dev-isolation";
 const isolation = devIsolation({
@@ -41,11 +44,11 @@ let window: BrowserWindow | undefined;
 let quitting = false;
 let closing = false;
 let flushed = false;
+let restartRequested = false;
+let proxySettings: ProxySettingsService;
 const root = resolve(__dirname, "../..");
-async function startServer() {
-  const childEnv = await childProxyEnvironment(process.env);
-  serverToken = randomBytes(32).toString("hex");
-  const binary = app.isPackaged
+function serverBinary() {
+  return app.isPackaged
     ? join(
         process.resourcesPath,
         "bin",
@@ -57,6 +60,11 @@ async function startServer() {
         "bin",
         process.platform === "win32" ? "reader-server.exe" : "reader-server",
       );
+}
+async function startServer() {
+  const childEnv = proxySettings.activeEnvironment;
+  serverToken = randomBytes(32).toString("hex");
+  const binary = serverBinary();
   const web = app.isPackaged
     ? join(process.resourcesPath, "web")
     : join(root, "web", "dist");
@@ -222,6 +230,13 @@ app
         ]);
       else app.setAsDefaultProtocolClient(READER_SCHEME);
     }
+    proxySettings = await ProxySettingsService.open(
+      app.getPath("userData"),
+      process.env,
+    );
+    await session.defaultSession.setProxy(
+      electronProxyConfiguration(proxySettings.activeSettings),
+    );
     const url = await startServer();
     session.defaultSession.setPermissionRequestHandler(
       (contents, permission, callback, details) => {
@@ -308,6 +323,7 @@ app
           });
           if (result.response === 0) {
             closing = false;
+            restartRequested = false;
             return;
           }
         }
@@ -352,6 +368,35 @@ app
     ipcMain.handle("reader:clipboard-write", (event, text: unknown) =>
       writeClipboardText(event, text, window?.webContents, url),
     );
+    const proxySender = (event: Electron.IpcMainInvokeEvent) => {
+      if (
+        event.sender !== window?.webContents ||
+        event.senderFrame !== window.webContents.mainFrame ||
+        new URL(event.senderFrame.url).origin !== url
+      )
+        throw new Error("Invalid sender");
+    };
+    ipcMain.handle("reader:proxy-settings", (event) => {
+      proxySender(event);
+      return proxySettings.state();
+    });
+    ipcMain.handle("reader:save-proxy-settings", (event, value: unknown) => {
+      proxySender(event);
+      return proxySettings.save(value);
+    });
+    ipcMain.handle(
+      "reader:check-proxy",
+      (event, value: unknown, target: unknown) => {
+        proxySender(event);
+        return proxySettings.check(value, target, serverBinary());
+      },
+    );
+    ipcMain.handle("reader:restart", (event) => {
+      proxySender(event);
+      if (closing || restartRequested) return;
+      restartRequested = true;
+      app.quit();
+    });
     ipcMain.handle("reader:appearance", (event, appearance: unknown) => {
       if (
         event.sender !== window?.webContents ||
@@ -490,7 +535,12 @@ app.on("before-quit", (event) => {
     return;
   }
   quitting = true;
+  if (restartRequested) {
+    restartRequested = false;
+    app.relaunch();
+  }
   updateService?.stop();
+  proxySettings?.stop();
   child?.kill();
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const)

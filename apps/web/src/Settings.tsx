@@ -9,6 +9,7 @@ import {
   Library,
   LoaderCircle,
   Monitor,
+  Network,
   RefreshCw,
   TriangleAlert,
   X,
@@ -53,6 +54,7 @@ import {
   TabsTrigger,
 } from "@reader/ui/components/tabs";
 import { HighlightColorsEditor } from "./HighlightColorsEditor";
+import { ProxySettings } from "./ProxySettings";
 import {
   primaryLibraryMode,
   updateLibraryPreferences,
@@ -409,7 +411,7 @@ export function Settings({
             )}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Agent 连接、显示、阅读与论文库
+            Agent 连接、网络、显示、阅读与论文库
           </DialogDescription>
         </DialogHeader>
         {apiDetails && (
@@ -506,6 +508,12 @@ export function Settings({
               <Monitor />
               显示
             </TabsTrigger>
+            {window.readerDesktop?.proxySettings && (
+              <TabsTrigger value="network">
+                <Network />
+                网络
+              </TabsTrigger>
+            )}
             <TabsTrigger value="reading">
               <Highlighter />
               阅读
@@ -515,6 +523,11 @@ export function Settings({
               论文库
             </TabsTrigger>
           </TabsList>
+          {window.readerDesktop?.proxySettings && (
+            <TabsContent value="network" className="settings-panel" keepMounted>
+              <ProxySettings open={open} />
+            </TabsContent>
+          )}
           <TabsContent value="display" className="settings-panel" keepMounted>
             <section className="mb-6">
               <h3

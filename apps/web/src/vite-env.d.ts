@@ -4,6 +4,15 @@ interface Window {
   readerDesktop?: {
     platform: string;
     checkForUpdates: () => Promise<void>;
+    proxySettings?: () => Promise<import("@reader/core").ProxySettingsState>;
+    saveProxySettings?: (
+      settings: import("@reader/core").ProxySettings,
+    ) => Promise<import("@reader/core").ProxySettingsState>;
+    checkProxy?: (
+      settings: import("@reader/core").ProxySettings,
+      target: string,
+    ) => Promise<import("@reader/core").ProxyCheckResult>;
+    restart?: () => Promise<void>;
     writeClipboardText: (text: string) => Promise<void>;
     setAppearance: (
       appearance: "light" | "sepia" | "dark" | "system",
