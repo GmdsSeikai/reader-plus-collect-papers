@@ -46,6 +46,7 @@ import {
 import { TrashView } from "./TrashView";
 import { PaperLibrary } from "./papers/PaperLibrary";
 import { PaperSidebar } from "./papers/PaperSidebar";
+import { CollectionPage } from "./papers/collection/CollectionPage";
 import { usePaperUI } from "./papers/state";
 import { ImportPaperDialog } from "./papers/ImportPaperDialog";
 import { LibraryModeSwitcher, libraryModes } from "./LibraryModeSwitcher";
@@ -97,6 +98,7 @@ export function App() {
   const [command, setCommand] = useState(false);
   const [importingPaper, setImportingPaper] = useState(false);
   const [nav, setNav] = useState(true);
+  const [collection, setCollection] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hydrated = useRef(false);
   useEffect(() => {
@@ -454,6 +456,16 @@ export function App() {
                 </nav>
               )}
               <div className="sidebar-bottom">
+                {papers ? (
+                  <Button
+                    variant="ghost"
+                    className={`nav-item ${collection ? "active" : ""}`}
+                    onClick={() => setCollection(!collection)}
+                  >
+                    <Search className="size-4" />
+                    论文发现
+                  </Button>
+                ) : null}
                 <Button
                   className="mb-2 h-10 w-full gap-2 rounded-full"
                   onClick={papers ? () => setImportingPaper(true) : chooseFiles}
@@ -500,16 +512,34 @@ export function App() {
               </div>
             </aside>
             {papers ? (
-              <PaperLibrary
-                documents={documents}
-                trash={trash}
-                jobs={jobsById}
-                loading={loading}
-                openDocument={openDocument}
-                moveToBooks={(doc) => void moveDocument(doc, "books")}
-                navOpen={nav}
-                onToggleNav={() => setNav(!nav)}
-              />
+              collection ? (
+                <CollectionPage
+                  navOpen={nav}
+                  onToggleNav={() => setNav(!nav)}
+                  onOpenDocument={(id) => {
+                    void refreshLibrary().then(() => {
+                      const d = useReaderStore
+                        .getState()
+                        .documents.find((x) => x.id === id);
+                      if (d) {
+                        setCollection(false);
+                        openDocument(d);
+                      }
+                    });
+                  }}
+                />
+              ) : (
+                <PaperLibrary
+                  documents={documents}
+                  trash={trash}
+                  jobs={jobsById}
+                  loading={loading}
+                  openDocument={openDocument}
+                  moveToBooks={(doc) => void moveDocument(doc, "books")}
+                  navOpen={nav}
+                  onToggleNav={() => setNav(!nav)}
+                />
+              )
             ) : (
               <main className="library-main">
                 <header className="library-topbar">

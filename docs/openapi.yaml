@@ -2890,6 +2890,521 @@
                 },
             },
         },
+      "/api/collection/tasks":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Discovery tasks",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    { "$ref": "#/components/schemas/CollectionTask" },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "name": { "type": "string" },
+                                  "enabled": { "type": "boolean" },
+                                  "priority": { "type": "integer" },
+                                  "config": { "$ref": "#/components/schemas/CollectionTaskConfig" },
+                                },
+                              "required": ["name"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "201":
+                    {
+                      "description": "Created task",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema": { "$ref": "#/components/schemas/CollectionTask" },
+                            },
+                        },
+                    },
+                  "400": { "description": "Invalid task configuration" },
+                },
+            },
+        },
+      "/api/collection/tasks/{id}":
+        {
+          "put":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "name": { "type": "string" },
+                                  "enabled": { "type": "boolean" },
+                                  "priority": { "type": "integer" },
+                                  "config": { "$ref": "#/components/schemas/CollectionTaskConfig" },
+                                  "expectedRevision": { "type": "integer" },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Updated task",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema": { "$ref": "#/components/schemas/CollectionTask" },
+                            },
+                        },
+                    },
+                  "409": { "description": "Task revision conflict" },
+                },
+            },
+        },
+      "/api/collection/tasks/{id}/runs":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Run accepted or shared open run",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema": { "$ref": "#/components/schemas/CollectionRun" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/runs/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Run state",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema": { "$ref": "#/components/schemas/CollectionRun" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/runs/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202": { "description": "Cancel accepted" },
+                },
+            },
+        },
+      "/api/collection/candidates":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  { "name": "task", "in": "query", "schema": { "type": "string" } },
+                  { "name": "q", "in": "query", "schema": { "type": "string" } },
+                  {
+                    "name": "citation",
+                    "in": "query",
+                    "schema": { "type": "string", "enum": ["known", "unknown"] },
+                  },
+                  {
+                    "name": "sort",
+                    "in": "query",
+                    "schema": { "type": "string", "enum": ["date", "citations", "relevance"] },
+                  },
+                  { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+                  { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+                  { "name": "ignored", "in": "query", "schema": { "type": "string" } },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Candidate page",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "items":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "type": "object",
+                                              "properties":
+                                                {
+                                                  "candidate": { "$ref": "#/components/schemas/CollectionCandidate" },
+                                                  "score": { "type": "integer" },
+                                                },
+                                            },
+                                        },
+                                      "nextCursor": { "type": "string" },
+                                    },
+                                  "required": ["items"],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/candidates/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Candidate detail",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "candidate": { "$ref": "#/components/schemas/CollectionCandidate" },
+                                      "citation": { "$ref": "#/components/schemas/CollectionCitation" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "patch":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties": { "ignored": { "type": "boolean" } },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200": { "description": "Updated candidate" },
+                },
+            },
+        },
+      "/api/collection/imports":
+        {
+          "post":
+            {
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "items":
+                                    {
+                                      "type": "array",
+                                      "items":
+                                        {
+                                          "type": "object",
+                                          "properties":
+                                            {
+                                              "arxivId": { "type": "string" },
+                                              "version": { "type": "integer" },
+                                              "expectedContentHash": { "type": "string" },
+                                            },
+                                          "required": ["arxivId", "version"],
+                                        },
+                                    },
+                                },
+                              "required": ["items"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Per-item import requests",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "items":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "type": "object",
+                                              "properties":
+                                                {
+                                                  "requestId": { "type": "string" },
+                                                  "arxivId": { "type": "string" },
+                                                  "error": { "type": "string" },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/imports/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Import request state",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema": { "$ref": "#/components/schemas/CollectionImportRequest" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/imports/{id}/confirm":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202": { "description": "Commit accepted" },
+                  "409": { "description": "Not confirmable in this state" },
+                },
+            },
+        },
+      "/api/collection/imports/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200": { "description": "Cancel result" },
+                },
+            },
+        },
+      "/api/collection/settings":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Module settings without secrets",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema": { "$ref": "#/components/schemas/CollectionSettings" },
+                            },
+                        },
+                    },
+                },
+            },
+          "put":
+            {
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema": { "$ref": "#/components/schemas/CollectionSettings" },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200": { "description": "Saved settings" },
+                },
+            },
+        },
+      "/api/collection/pause":
+        {
+          "post":
+            {
+              "responses":
+                {
+                  "200": { "description": "Scheduling paused" },
+                },
+            },
+        },
+      "/api/collection/resume":
+        {
+          "post":
+            {
+              "responses":
+                {
+                  "200": { "description": "Scheduling resumed" },
+                },
+            },
+        },
       "/api/trash":
         {
           "get":
@@ -3364,6 +3879,158 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "CollectionTaskConfig":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "v": { "type": "integer" },
+                  "research_topic": { "type": "string" },
+                  "keyword_groups":
+                    {
+                      "type": "array",
+                      "items": { "type": "array", "items": { "type": "string" } },
+                    },
+                  "group_operator_or": { "type": "boolean" },
+                  "authors":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "name": { "type": "string" },
+                              "aliases":
+                                { "type": "array", "items": { "type": "string" } },
+                            },
+                        },
+                    },
+                  "categories":
+                    { "type": "array", "items": { "type": "string" } },
+                  "not_interested": { "type": "string" },
+                  "frequency_hours": { "type": "integer" },
+                  "latest_window_days": { "type": "integer" },
+                  "hot_window_months": { "type": "integer" },
+                },
+              "required": ["v"],
+            },
+          "CollectionTask":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "name": { "type": "string" },
+                  "enabled": { "type": "boolean" },
+                  "priority": { "type": "integer" },
+                  "config": { "$ref": "#/components/schemas/CollectionTaskConfig" },
+                  "queryRevision": { "type": "integer" },
+                  "semanticHash": { "type": "string" },
+                  "nextRunAt": { "type": "string" },
+                  "createdAt": { "type": "string" },
+                  "updatedAt": { "type": "string" },
+                },
+              "required": ["id", "name", "queryRevision"],
+            },
+          "CollectionRun":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "taskId": { "type": "string" },
+                  "queryRevision": { "type": "integer" },
+                  "trigger": { "type": "string" },
+                  "status": { "type": "string" },
+                  "failureClass": { "type": "string" },
+                  "startedAt": { "type": "string" },
+                  "finishedAt": { "type": "string" },
+                },
+              "required": ["id", "taskId", "status"],
+            },
+          "CollectionCandidate":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "arxivId": { "type": "string" },
+                  "title": { "type": "string" },
+                  "abstract": { "type": "string" },
+                  "authors":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "name": { "type": "string" },
+                              "affiliation": { "type": "string" },
+                            },
+                        },
+                    },
+                  "categories":
+                    { "type": "array", "items": { "type": "string" } },
+                  "publishedAt": { "type": "string" },
+                  "updatedAt": { "type": "string" },
+                  "latestVersion": { "type": "integer" },
+                  "doi": { "type": "string" },
+                  "journalRef": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                  "firstSeenAt": { "type": "string" },
+                  "lastSeenAt": { "type": "string" },
+                  "ignored": { "type": "boolean" },
+                },
+              "required": ["arxivId", "title", "abstract", "latestVersion"],
+            },
+          "CollectionCitation":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "arxivId": { "type": "string" },
+                  "servicePaperID": { "type": "string" },
+                  "count": { "type": "integer", "nullable": true },
+                  "successAt": { "type": "string" },
+                  "attemptedAt": { "type": "string" },
+                  "error": { "type": "string" },
+                  "stale": { "type": "boolean" },
+                },
+            },
+          "CollectionImportRequest":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "requestId": { "type": "string" },
+                  "arxivId": { "type": "string" },
+                  "downloadVersion": { "type": "integer" },
+                  "status": { "type": "string" },
+                  "actualSha256": { "type": "string" },
+                  "documentId": { "type": "string" },
+                  "library": { "type": "string" },
+                  "confirmPages": { "type": "integer" },
+                  "error": { "type": "string" },
+                },
+              "required": ["requestId", "arxivId", "downloadVersion", "status"],
+            },
+          "CollectionSettings":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "analysisEnabled": { "type": "boolean" },
+                  "analysisProvider": { "type": "string" },
+                  "analysisModel": { "type": "string" },
+                  "analysisEffort": { "type": "string" },
+                  "dailyLimit": { "type": "integer" },
+                  "requestRpm": { "type": "integer" },
+                  "paused": { "type": "boolean" },
+                  "configVersion": { "type": "integer" },
+                  "hasCitationsKey": { "type": "boolean" },
+                },
+            },
           "ZoteroEntry":
             {
               "type": "object",

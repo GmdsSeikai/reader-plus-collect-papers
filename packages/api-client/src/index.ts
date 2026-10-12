@@ -476,3 +476,108 @@ export async function chat(
     if (event.event === "fallback") onFallback?.(event.data.message);
   });
 }
+
+export type CollectionTask = components["schemas"]["CollectionTask"];
+export type CollectionTaskConfig =
+  components["schemas"]["CollectionTaskConfig"];
+export type CollectionRun = components["schemas"]["CollectionRun"];
+export type CollectionCandidate = components["schemas"]["CollectionCandidate"];
+export type CollectionCitation = components["schemas"]["CollectionCitation"];
+export type CollectionImportRequest =
+  components["schemas"]["CollectionImportRequest"];
+export type CollectionSettings = components["schemas"]["CollectionSettings"];
+
+export const collectionApi = {
+  tasks: () => request<CollectionTask[]>("/api/collection/tasks"),
+  createTask: (body: {
+    name: string;
+    enabled?: boolean;
+    priority?: number;
+    config: CollectionTaskConfig;
+  }) =>
+    request<CollectionTask>("/api/collection/tasks", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateTask: (
+    id: string,
+    body: {
+      name?: string;
+      enabled?: boolean;
+      priority?: number;
+      config?: CollectionTaskConfig;
+      expectedRevision?: number;
+    },
+  ) =>
+    request<CollectionTask>(`/api/collection/tasks/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  runTask: (id: string) =>
+    request<CollectionRun>(`/api/collection/tasks/${encodeURIComponent(id)}/runs`, {
+      method: "POST",
+      body: "{}",
+    }),
+  run: (id: string) =>
+    request<CollectionRun>(`/api/collection/runs/${encodeURIComponent(id)}`),
+  cancelRun: (id: string) =>
+    request<{ status: string }>(
+      `/api/collection/runs/${encodeURIComponent(id)}/cancel`,
+      { method: "POST" },
+    ),
+  candidates: (params: Record<string, string>) => {
+    const q = new URLSearchParams(params);
+    return request<{
+      items: { candidate: CollectionCandidate; score: number }[];
+      nextCursor: string;
+    }>(`/api/collection/candidates?${q}`);
+  },
+  candidate: (id: string) =>
+    request<{
+      candidate: CollectionCandidate;
+      citation: CollectionCitation;
+    }>(`/api/collection/candidates/${encodeURIComponent(id)}`),
+  setIgnored: (id: string, ignored: boolean) =>
+    request<{
+      candidate: CollectionCandidate;
+      citation: CollectionCitation;
+    }>(`/api/collection/candidates/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ignored }),
+    }),
+  importItems: (
+    items: { arxivId: string; version: number; expectedContentHash?: string }[],
+  ) =>
+    request<{
+      items: {
+        requestId: string;
+        arxivId: string;
+        error?: string;
+      }[];
+    }>("/api/collection/imports", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+  importRequest: (id: string) =>
+    request<CollectionImportRequest>(
+      `/api/collection/imports/${encodeURIComponent(id)}`,
+    ),
+  confirmImport: (id: string) =>
+    request<{ status: string }>(
+      `/api/collection/imports/${encodeURIComponent(id)}/confirm`,
+      { method: "POST" },
+    ),
+  cancelImport: (id: string) =>
+    request<{ status: string }>(
+      `/api/collection/imports/${encodeURIComponent(id)}/cancel`,
+      { method: "POST" },
+    ),
+  settings: () => request<CollectionSettings>("/api/collection/settings"),
+  saveSettings: (body: CollectionSettings) =>
+    request<CollectionSettings>("/api/collection/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  pause: () => request<{ paused: boolean }>("/api/collection/pause", { method: "POST" }),
+  resume: () => request<{ paused: boolean }>("/api/collection/resume", { method: "POST" }),
+};
