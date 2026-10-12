@@ -1,0 +1,117 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { expect, it, vi } from "vitest";
+import { api } from "@reader/api";
+import { JournalRankBadges } from "./JournalRankBadges";
+
+vi.mock("@reader/api", () => ({ api: { documentJournalRank: vi.fn() } }));
+
+it("shows every selected subject and omits unselected indicators", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.mocked(api.documentJournalRank).mockResolvedValue({
+    status: "found",
+    badges: [
+      { key: "sci", name: "SCI/JCR", value: "Q1" },
+      { key: "sciUpSmall", name: "中科院小类", value: "自动化与控制系统4区" },
+      { key: "sciUpSmall", name: "中科院小类", value: "计算机：人工智能4区" },
+      { key: "jci", name: "JCI", value: "0.94" },
+    ],
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  await act(async () =>
+    root.render(
+      <JournalRankBadges
+        id="paper"
+        venue="Journal of Machine Learning Research"
+        config={{
+          enabled: true,
+          hasKey: true,
+          selected: ["sci", "sciUpSmall"],
+          available: [],
+        }}
+        refreshRevision={0}
+      />,
+    ),
+  );
+  expect(host.textContent).toContain("SCI/JCR Q1");
+  expect(host.textContent).toContain("自动化与控制系统4区");
+  expect(host.textContent).toContain("计算机：人工智能4区");
+  expect(host.textContent).not.toContain("JCI");
+  await act(async () => root.unmount());
+});
+
+it("does not query while the feature is off", async () => {
+  vi.mocked(api.documentJournalRank).mockClear();
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  await act(async () =>
+    root.render(
+      <JournalRankBadges
+        id="paper"
+        venue="Nature"
+        config={{
+          enabled: false,
+          hasKey: true,
+          selected: ["sci"],
+          available: [],
+        }}
+        refreshRevision={0}
+      />,
+    ),
+  );
+  expect(api.documentJournalRank).not.toHaveBeenCalled();
+  expect(host.textContent).toBe("");
+  await act(async () => root.unmount());
+});
+
+it("forces only the requested refresh, then reuses cache for another venue", async () => {
+  vi.mocked(api.documentJournalRank).mockClear();
+  vi.mocked(api.documentJournalRank).mockResolvedValue({
+    status: "notFound",
+    badges: [],
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const config = {
+    enabled: true,
+    hasKey: true,
+    selected: ["sci"],
+    available: [],
+  };
+  await act(async () =>
+    root.render(
+      <JournalRankBadges
+        id="paper"
+        venue="Nature"
+        config={config}
+        refreshRevision={0}
+      />,
+    ),
+  );
+  await act(async () =>
+    root.render(
+      <JournalRankBadges
+        id="paper"
+        venue="Nature"
+        config={config}
+        refreshRevision={1}
+      />,
+    ),
+  );
+  await act(async () =>
+    root.render(
+      <JournalRankBadges
+        id="paper"
+        venue="Science"
+        config={config}
+        refreshRevision={1}
+      />,
+    ),
+  );
+  expect(
+    vi.mocked(api.documentJournalRank).mock.calls.map((call) => call[1]),
+  ).toEqual([false, true, false]);
+  await act(async () => root.unmount());
+});
