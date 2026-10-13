@@ -95,7 +95,41 @@ Socket.prototype.connect = denyNetwork;
   assert.ok(manifest.timings.every((page) => page.regions > 0));
   assert.ok(manifest.blocks.some((block) => block.text.length > 0));
   assert.ok((await readFile(join(output, "paper.md"), "utf8")).length > 0);
+  const corpus = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileURL(guard).href,
+      join(base, "corpus.mjs"),
+      "--input",
+      join(base, "../web/samples/reading-notes.pdf"),
+      "--output",
+      join(temporary, "corpus.json"),
+      "--pages",
+      "1",
+    ],
+    {
+      cwd: temporary,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      encoding: "utf8",
+      timeout: 60000,
+    },
+  );
+  if (corpus.error) throw corpus.error;
+  assert.equal(corpus.status, 0, corpus.stderr);
+  const original = JSON.parse(
+    await readFile(join(temporary, "corpus.json"), "utf8"),
+  );
+  assert.equal(original.totalPages, pdf.numPages);
+  assert.deepEqual(
+    original.pages.map((page) => page.page),
+    [1],
+  );
+  assert.ok(
+    original.pages.some((page) => page.spans.some((span) => span.text.trim())),
+  );
   assert.deepEqual((await readdir(temporary)).sort(), [
+    "corpus.json",
     "offline.mjs",
     "output",
   ]);
