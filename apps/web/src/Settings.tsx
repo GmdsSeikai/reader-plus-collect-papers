@@ -57,6 +57,7 @@ import {
   TabsTrigger,
 } from "@reader/ui/components/tabs";
 import { HighlightColorsEditor } from "./HighlightColorsEditor";
+import { ProxySettings } from "./ProxySettings";
 import {
   primaryLibraryMode,
   updateLibraryPreferences,
@@ -455,7 +456,7 @@ export function Settings({
             )}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Agent 连接、显示、阅读与论文库
+            Agent 连接、显示、阅读、诊断与论文库
           </DialogDescription>
         </DialogHeader>
         {apiDetails && (
@@ -570,6 +571,11 @@ export function Settings({
             className="settings-panel"
             keepMounted
           >
+            {window.readerDesktop?.proxySettings && (
+              <div className="mb-6">
+                <ProxySettings open={open} />
+              </div>
+            )}
             <section>
               <h3 className="mb-3 text-sm font-medium">本地日志</h3>
               <p className="mb-4 text-xs leading-5 text-muted-foreground">

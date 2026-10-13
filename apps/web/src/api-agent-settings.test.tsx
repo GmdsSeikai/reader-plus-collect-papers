@@ -2,7 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AIConfig, AgentModel } from "@reader/core";
+import type { AIConfig, AgentModel, ProxySettingsState } from "@reader/core";
 import { api } from "@reader/api";
 import { toast } from "sonner";
 import { Settings } from "./Settings";
@@ -132,7 +132,48 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete window.readerDesktop;
   vi.unstubAllGlobals();
+});
+
+it("groups proxy settings and log export under diagnostics without a network tab", async () => {
+  const exportLogs = vi.fn(async () => true);
+  window.readerDesktop = {
+    platform: "darwin",
+    proxySettings: vi.fn(async (): Promise<ProxySettingsState> => ({
+      settings: { mode: "manual", host: "127.0.0.1", port: 7890 },
+      restartRequired: false,
+    })),
+    saveProxySettings: vi.fn(),
+    checkProxy: vi.fn(),
+    restart: vi.fn(),
+    exportDiagnostics: exportLogs,
+    checkForUpdates: vi.fn(),
+    writeClipboardText: vi.fn(),
+    setAppearance: vi.fn(),
+    importFiles: vi.fn(),
+    importLargePapers: vi.fn(),
+    showDocumentFile: vi.fn(),
+    openDocumentFile: vi.fn(),
+    openExternal: vi.fn(),
+    onBeforeClose: vi.fn(),
+    onLibraryChanged: vi.fn(),
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const tabs = Array.from(
+    host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  );
+  expect(tabs.map((tab) => tab.textContent)).not.toContain("网络");
+  const diagnostics = tabs.find((tab) => tab.textContent === "诊断")!;
+  await act(async () => diagnostics.click());
+  const panel = input("代理地址").closest('[role="tabpanel"]')!;
+  expect(panel.getAttribute("aria-labelledby")).toBe(diagnostics.id);
+  expect(panel.textContent).toContain("chatgpt.com/robots.txt");
+  const exportButton = Array.from(
+    panel.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((button) => button.textContent === "导出全部日志")!;
+  await act(async () => exportButton.click());
+  expect(exportLogs).toHaveBeenCalledOnce();
 });
 it("saves the API endpoint and key, then tests the new connection", async () => {
   await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
