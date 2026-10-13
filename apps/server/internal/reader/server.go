@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -23,10 +24,12 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"reader.local/server/internal/diagnostics"
 	"reader.local/server/internal/scholar"
 )
 
 type Server struct {
+	Diagnostics            *diagnostics.Store
 	connectorMu            sync.Mutex
 	connectorAvailable     bool
 	connectorReason        string
@@ -68,6 +71,10 @@ func respond(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func fail(w http.ResponseWriter, status int, message string) {
+	if out, ok := w.(*diagnosticResponse); ok {
+		// UI explanations can contain private titles or bare hostnames.
+		out.server.diagnosticEvent(slog.LevelError, "http.failure", "requestId", out.requestID, "status", status, "errorCode", fmt.Sprintf("http_%d", status))
+	}
 	respond(w, status, map[string]string{"error": message})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -82,10 +89,13 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/diagnostics/events", s.recordDiagnostic)
+	mux.HandleFunc("GET /api/diagnostics/export", s.exportDiagnostics)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /api/documents", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Store.Documents()
 		if e != nil {
+			s.diagnosticEvent(slog.LevelError, "database.read_failed", "requestId", requestID(r.Context()), "cause", e.Error())
 			fail(w, 500, "无法读取书库")
 			return
 		}
@@ -190,7 +200,7 @@ func (s *Server) Handler() http.Handler {
 	if s.Web != "" {
 		mux.Handle("/", webAssets(s.Web))
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.diagnosticHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil {
 			host = r.Host
@@ -217,8 +227,9 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }
+
 // webAssets serves the built renderer. Chromium only runs an ES module or a
 // module worker when the response carries a JavaScript MIME type, and host MIME
 // databases map ".mjs" to "text/plain" often enough that Go special-cases ".js"

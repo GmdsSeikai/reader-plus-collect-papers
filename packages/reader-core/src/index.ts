@@ -623,3 +623,8 @@ export interface EPUBChapters {
   chapters: EPUBChapter[];
   toc: EPUBChapterLink[] | null;
 }
+export type {
+  ProxySettings,
+  ProxySettingsState,
+  ProxyCheckResult,
+} from "./proxy-settings";
