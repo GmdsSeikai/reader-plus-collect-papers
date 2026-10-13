@@ -14,6 +14,16 @@
       "body": "安装 Reader Connector 后，可从论文页面收录 PDF，并选择 Reader 论文库中已有的分类和标签。"
     }
   ],
+  "0.5.3": [
+    {
+      "title": "识别 Zotero 链接附件目录",
+      "body": "导入时自动识别 Zotero 的链接附件基础目录，帮助定位使用相对路径保存的附件。"
+    },
+    {
+      "title": "修复 Windows 代理兼容问题",
+      "body": "支持 Windows Clash 的代理绕过规则；读取系统代理失败时，Reader 仍可继续启动。"
+    }
+  ],
   "0.6.0": [
     {
       "title": "论文库显示期刊评级",

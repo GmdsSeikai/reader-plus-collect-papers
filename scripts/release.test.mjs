@@ -69,6 +69,22 @@ test("release refuses a version mismatch before building", async () => {
   expect(manifests.status).not.toBe(0);
   expect(manifests.stderr).toContain("Root and desktop versions must match");
 });
+test.each([{}, { "0.2.0": [] }, { "0.2.0": [{ title: " " }] }])(
+  "release refuses missing or empty current-version notes: %j",
+  async (notes) => {
+    const cwd = await fixture();
+    await mkdir(join(cwd, "docs"));
+    await writeFile(
+      join(cwd, "docs/release-notes.json"),
+      JSON.stringify(notes),
+    );
+    const result = run("release-source.mjs", cwd);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(
+      /Update docs\/release-notes.json|Release notes require/,
+    );
+  },
+);
 test("release refuses missing or unexpected artifacts", async () => {
   const cwd = await fixture();
   expect(run("release-assets.mjs", cwd).status).not.toBe(0);

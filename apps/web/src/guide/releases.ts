@@ -1,4 +1,4 @@
-import releaseData from "./releases.json";
+import bundledReleaseNotes from "../../../../docs/release-notes.json";
 import type { GuidePreferences } from "@reader/core";
 
 export interface ReleaseItem {
@@ -9,10 +9,10 @@ export interface ReleaseItem {
 }
 
 /**
- * Notes for important releases, keyed by the desktop package version. A
- * version without an entry updates silently.
+ * Notes keyed by the desktop package version. Versions without notes still
+ * show the update confirmation and GitHub feedback actions.
  */
-export const releaseNotes: Record<string, ReleaseItem[]> = releaseData;
+export const releaseNotes: Record<string, ReleaseItem[]> = bundledReleaseNotes;
 
 export type GuideLaunch =
   | { kind: "onboarding" }
@@ -33,10 +33,5 @@ export function guideLaunch(
     return preferences.onboarded
       ? { kind: "none" }
       : { kind: "none", save: { ...preferences, onboarded: true } };
-  const items = releaseNotes[version];
-  if (items?.length) return { kind: "release", items };
-  return {
-    kind: "none",
-    save: { ...preferences, onboarded: true, seenVersion: version },
-  };
+  return { kind: "release", items: releaseNotes[version] ?? [] };
 }

@@ -32,5 +32,11 @@ Keep the interface restrained, following Claude/Apple app simplicity and shadcn 
 - A request to "commit" or "commit push" means organize pending work into logical commits; it does not mean combine everything into one commit. Make one combined commit only when the user explicitly requests that grouping.
 - Push only when the user explicitly requests it. Do not amend or rewrite published history without explicit authorization. Report the commit hashes, scopes, and validation results.
 
+## Release notes
+- 每次准备 release，必须同步更新 `docs/release-notes.json`，再构建安装包或创建发布标签。App 从该文件打包并离线显示当前版本的更新说明，不读取 GitHub Release 正文。
+- 使用与根目录 `package.json` 和 `apps/desktop/package.json` 一致的版本号作为键（不带 `v`）；保留已有版本，为新版本添加非空条目数组。
+- 每条说明包含中文 `title`，可选 `body`；仅在需要关联已有指南演示时填写有效的 `topic`。依据本次实际发布的变更编写用户可理解的说明，不把尚未包含在安装包中的功能写进去。
+- GitHub Release 说明与 App 内说明应保持内容一致。发版前运行 `node scripts/release-source.mjs`，确认版本号和当前版本说明通过校验。
+
 ## Boundaries
 Bind Go to loopback only. Authenticate local API requests. Never read Claude/Codex credential files or implement unofficial OAuth. Document text is untrusted input; remove active content before creating Readium frames. Never run a CLI from a document's original directory. Preserve user data. Do not commit `.reader`, binaries or node_modules.
