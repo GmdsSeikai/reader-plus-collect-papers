@@ -47,10 +47,26 @@ import { startUpdateService } from "./update-service";
 import { day } from "./updates";
 let stop: (() => void) | undefined;
 let assets: string[];
+const send = vi.fn();
 const window = {
   isDestroyed: () => false,
   setProgressBar: vi.fn(),
+  webContents: { send },
 } as unknown as BrowserWindow;
+// Simulates a 200 MB download that reports progress before resolving.
+const downloadWithProgress = (path: string) =>
+  mocks.download.mockImplementationOnce(
+    async (
+      _update: unknown,
+      _directory: string,
+      _request: unknown,
+      onProgress?: (received: number, total?: number) => void,
+    ) => {
+      for (const mb of [0, 50, 50.001, 200])
+        onProgress?.(mb * 1024 * 1024, 200 * 1024 * 1024);
+      return path;
+    },
+  );
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(day * 10);
@@ -134,6 +150,94 @@ it("keeps a Mac running after opening the DMG", async () => {
   expect(mocks.open).toHaveBeenCalledWith("/test/verified.dmg");
   expect(mocks.app.quit).not.toHaveBeenCalled();
 });
+it("shows download progress in the taskbar and the app, then clears it", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
+  mocks.spawn.mockReturnValue({ on: vi.fn().mockReturnThis(), unref: vi.fn() });
+  mocks.dialog.mockResolvedValue({ response: 0 });
+  downloadWithProgress("C:\\test\\Reader-0.2.0-win-x64.exe");
+  const service = await startUpdateService(window);
+  stop = service.stop;
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(window.setProgressBar).toHaveBeenCalledWith(0.25);
+  const reports = send.mock.calls
+    .filter(([channel]) => channel === "reader:update-progress")
+    .map(([, progress]) => progress);
+  // Steps within the same percent are not sent again.
+  expect(reports).toEqual([
+    {
+      version: "0.2.0",
+      phase: "download",
+      received: 0,
+      total: 200 * 1024 * 1024,
+    },
+    {
+      version: "0.2.0",
+      phase: "download",
+      received: 50 * 1024 * 1024,
+      total: 200 * 1024 * 1024,
+    },
+    {
+      version: "0.2.0",
+      phase: "download",
+      received: 200 * 1024 * 1024,
+      total: 200 * 1024 * 1024,
+    },
+    null,
+  ]);
+  expect(window.setProgressBar).toHaveBeenLastCalledWith(-1);
+});
+it("clears download progress before showing a download error", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
+  mocks.download.mockImplementationOnce(
+    async (
+      _update: unknown,
+      _directory: string,
+      _request: unknown,
+      onProgress?: (received: number, total?: number) => void,
+    ) => {
+      onProgress?.(1024 * 1024, 2 * 1024 * 1024);
+      throw new Error("connection lost");
+    },
+  );
+  let clearedBeforeError = false;
+  mocks.dialog.mockImplementation(async (_window, options) => {
+    if (options.type === "error")
+      clearedBeforeError = send.mock.calls.some(
+        ([channel, progress]) =>
+          channel === "reader:update-progress" && progress === null,
+      );
+    return { response: 0 };
+  });
+  const service = await startUpdateService(window);
+  stop = service.stop;
+  await service.check();
+  expect(mocks.dialog).toHaveBeenLastCalledWith(
+    window,
+    expect.objectContaining({ type: "error", detail: "connection lost" }),
+  );
+  expect(clearedBeforeError).toBe(true);
+});
+it("caps the taskbar progress when more bytes arrive than announced", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
+  mocks.spawn.mockReturnValue({ on: vi.fn().mockReturnThis(), unref: vi.fn() });
+  mocks.dialog.mockResolvedValue({ response: 0 });
+  mocks.download.mockImplementationOnce(
+    async (
+      _update: unknown,
+      _directory: string,
+      _request: unknown,
+      onProgress?: (received: number, total?: number) => void,
+    ) => {
+      onProgress?.(3 * 1024 * 1024, 2 * 1024 * 1024);
+      return "C:\\test\\Reader-0.2.0-win-x64.exe";
+    },
+  );
+  const service = await startUpdateService(window);
+  stop = service.stop;
+  await service.check();
+  expect(window.setProgressBar).toHaveBeenCalledWith(1);
+  expect(window.setProgressBar).not.toHaveBeenCalledWith(1.5);
+});
 it("installs the verified Windows update silently after Reader quits", async () => {
   vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
   const child = { on: vi.fn(), unref: vi.fn() };
@@ -147,6 +251,7 @@ it("installs the verified Windows update silently after Reader quits", async () 
   expect(mocks.download).toHaveBeenCalledWith(
     expect.objectContaining({ installer: "Reader-0.2.0-win-x64.exe" }),
     expect.any(String),
+    expect.any(Function),
     expect.any(Function),
   );
   expect(mocks.open).not.toHaveBeenCalled();
@@ -167,7 +272,7 @@ it("installs the verified Windows update silently after Reader quits", async () 
 });
 it("stages a signed Mac update silently and installs it on restart", async () => {
   assets.push("Reader-0.2.0-mac-arm64.zip");
-  mocks.download.mockResolvedValue("/test/user-data/updates/x/Reader.zip");
+  downloadWithProgress("/test/user-data/updates/x/Reader.zip");
   mocks.dialog.mockResolvedValue({ response: 0 });
   const service = await startUpdateService(window);
   stop = service.stop;
@@ -180,6 +285,7 @@ it("stages a signed Mac update silently and installs it on restart", async () =>
         "https://github.com/cynicalight/reader/releases/download/v0.2.0/Reader-0.2.0-mac-arm64.zip",
     }),
     "/test/user-data/updates",
+    expect.any(Function),
     expect.any(Function),
   );
   expect(mocks.stage).toHaveBeenCalledWith(
@@ -197,6 +303,10 @@ it("stages a signed Mac update silently and installs it on restart", async () =>
     expect.objectContaining({ message: "Reader 0.2.0 已准备就绪" }),
   );
   expect(window.setProgressBar).not.toHaveBeenCalledWith(2);
+  expect(send).not.toHaveBeenCalledWith(
+    "reader:update-progress",
+    expect.objectContaining({ phase: "download" }),
+  );
   expect(mocks.quitAndInstall).toHaveBeenCalledTimes(1);
   expect(mocks.open).not.toHaveBeenCalled();
   // A staged version is not downloaded again before the restart.

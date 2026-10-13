@@ -8,7 +8,8 @@ import {
   type ReleaseUpdate,
   type UpdateState,
 } from "./updates";
-import { downloadUpdate } from "./update-download";
+import { downloadUpdate, type DownloadProgress } from "./update-download";
+import type { UpdateProgress } from "../../../packages/reader-core/src/update-progress";
 
 export async function startUpdateService(window: BrowserWindow) {
   const directory = app.getPath("userData");
@@ -68,6 +69,32 @@ export async function startUpdateService(window: BrowserWindow) {
     }
   };
   const alive = () => !stopped && !window.isDestroyed();
+  // Mirrors visible update work in the taskbar or Dock and the in-app toast.
+  const report = (progress: UpdateProgress | null) => {
+    if (window.isDestroyed()) return;
+    window.setProgressBar(
+      !progress
+        ? -1
+        : progress.phase === "download" && progress.total
+          ? // A mismatched Content-Length must not overflow the bar.
+            Math.min(1, progress.received / progress.total)
+          : 2,
+    );
+    window.webContents.send("reader:update-progress", progress);
+  };
+  // Reports whole-percent steps (or 1 MB steps without a size) while visible.
+  const track = (version: string): DownloadProgress => {
+    let last = -1;
+    return (received, total) => {
+      if (!wantsFeedback) return;
+      const step = total
+        ? Math.floor((received / total) * 100)
+        : Math.floor(received / (1024 * 1024));
+      if (step === last) return;
+      last = step;
+      report({ version, phase: "download", received, total });
+    };
+  };
   const request = (url: string, init: RequestInit) => net.fetch(url, init);
   const offerRestart = async (version: string) => {
     const selected = await dialog.showMessageBox(window, {
@@ -92,14 +119,17 @@ export async function startUpdateService(window: BrowserWindow) {
     try {
       const bundle = join(app.getPath("exe"), "..", "..", "..");
       if (!(await canUpdateInPlace(bundle))) return false;
-      if (wantsFeedback) window.setProgressBar(2);
+      // A manual check during a silent download reveals its progress.
       const archive = await downloadUpdate(
         { ...update, ...update.archive },
         join(directory, "updates"),
         request,
+        track(update.version),
       );
       try {
         if (!alive()) return true;
+        if (wantsFeedback)
+          report({ version: update.version, phase: "prepare", received: 0 });
         await stageUpdate(autoUpdater, archive);
         staged = update.version;
       } finally {
@@ -113,7 +143,7 @@ export async function startUpdateService(window: BrowserWindow) {
       );
       return false;
     } finally {
-      if (!window.isDestroyed()) window.setProgressBar(-1);
+      report(null);
     }
     if (alive()) await offerRestart(update.version);
     return true;
@@ -175,11 +205,13 @@ export async function startUpdateService(window: BrowserWindow) {
         });
         if (selected.response !== 0 || !alive()) return;
         downloading = true;
-        window.setProgressBar(2);
+        // The user asked for this download, so its progress is shown.
+        wantsFeedback = true;
         const path = await downloadUpdate(
           result.update,
           join(directory, "updates"),
           request,
+          track(result.update.version),
         );
         if (!alive()) return;
         if (windows) {
@@ -192,6 +224,8 @@ export async function startUpdateService(window: BrowserWindow) {
         const error = await shell.openPath(path);
         if (error) throw new Error(`无法打开安装包：${error}`);
       } catch (error) {
+        // Clear the progress before the error dialog so it does not linger.
+        report(null);
         if (alive()) {
           if (wantsFeedback || downloading)
             await dialog.showMessageBox(window, {
@@ -207,7 +241,7 @@ export async function startUpdateService(window: BrowserWindow) {
         }
       }
     })().finally(() => {
-      if (!window.isDestroyed()) window.setProgressBar(-1);
+      report(null);
       active = undefined;
     });
     return active;

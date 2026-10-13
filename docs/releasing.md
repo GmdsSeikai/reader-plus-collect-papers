@@ -95,9 +95,11 @@ macOS 和 Windows 桌面版在“设置 → 诊断”提供三种模式，默认
 
 更新来源为 `cynicalight/reader` 的最新正式 GitHub Release。仅提示比当前版本更新的正式版，不提示草稿、预发布版或旧版本。Release 必须同时提供当前平台（Apple Silicon Mac、Intel Mac 或 Windows x64）对应的安装包和 `SHA256SUMS.txt`。在“关于 Reader”中可手动检查，手动检查不受每日间隔限制。
 
-macOS 正式版优先原地更新：若当前应用由固定证书签名、Release 提供对应架构的 `mac-arm64.zip` 或 `mac-intel-x64.zip`，后台检查发现新版本时直接下载 zip，不弹窗、不显示进度条（手动检查时显示进度条）。zip 同样核对 SHA-256，校验后在本机 loopback 上以随机路径临时提供给 Electron `autoUpdater`（Squirrel.Mac）。Squirrel 会再检查新应用的签名是否满足当前应用的指定要求（同一 bundle ID 与同一证书），通过后暂存，暂存完成后删除下载的 zip。随后提示“立即重启 / 稍后”：立即重启会照常保存阅读数据后退出并安装新版本；选择稍后时在下次退出 Reader 时安装。重启前再次检查同一版本不会重复下载。原地更新需要 Reader 所在目录可写；当前应用为 ad-hoc 签名（本地构建、旧版本）、Release 没有 zip，或下载、校验、Squirrel 任一步失败时，回退到下面的 DMG 流程。从 ad-hoc 签名的旧版本升级到首个固定证书版本，需要手动安装一次 DMG。
+macOS 正式版优先原地更新：若当前应用由固定证书签名、Release 提供对应架构的 `mac-arm64.zip` 或 `mac-intel-x64.zip`，后台检查发现新版本时直接下载 zip，不弹窗、不显示进度（手动检查时显示进度；后台下载过程中手动检查也会显示剩余进度）。zip 同样核对 SHA-256，校验后在本机 loopback 上以随机路径临时提供给 Electron `autoUpdater`（Squirrel.Mac）。Squirrel 会再检查新应用的签名是否满足当前应用的指定要求（同一 bundle ID 与同一证书），通过后暂存，暂存完成后删除下载的 zip。随后提示“立即重启 / 稍后”：立即重启会照常保存阅读数据后退出并安装新版本；选择稍后时在下次退出 Reader 时安装。重启前再次检查同一版本不会重复下载。原地更新需要 Reader 所在目录可写；当前应用为 ad-hoc 签名（本地构建、旧版本）、Release 没有 zip，或下载、校验、Squirrel 任一步失败时，回退到下面的 DMG 流程。从 ad-hoc 签名的旧版本升级到首个固定证书版本，需要手动安装一次 DMG。
 
 其他情况下发现更新后选择“下载安装包”，应用会通过 Electron 网络栈下载文件，使用已生效的 Reader 代理设置，并在本地核对 SHA-256。校验成功后：macOS 打开 DMG，请先退出 Reader，再将新 Reader 拖入 Applications 完成替换，应用不会自动退出；Windows 照常保存阅读数据并退出 Reader，Go 服务停止后，在 Electron `quit` 事件中以 `--updated /S --force-run` 静默运行 NSIS 安装程序。安装程序沿用上次的安装位置与安装模式（全体用户安装时会弹出 UAC），替换原安装目录后重新打开 Reader，书库在用户数据目录中不受影响。安装程序启动约 1.3 秒后会结束仍在运行的 Reader 进程，所以必须在退出流程结束后才启动它。保存失败时若选择“返回阅读”，安装会推迟到下次退出 Reader 时进行，安装后同样自动重新打开。Windows 静默安装不需要代码签名。下载文件保存在用户数据目录的 `updates/` 下；失败的下载会清理，进程被强制关闭可能留下 `.part` 文件。校验值确认文件与 Release 一致，不能替代开发者签名。
+
+显示进度时，任务栏或 Dock 图标按 `Content-Length` 显示下载百分比，应用右下角的提示同时显示进度条、已下载与总大小（MB）及“开启代理加速”的提示；服务器未返回大小时进度条为不确定状态，只显示已下载大小。macOS 原地更新下载完成后，提示变为“正在准备安装”，Squirrel 暂存完成后消失。进度按整百分比（无大小时按 1 MB）推送给界面。
 
 参见 [Electron 自动更新要求](https://www.electronjs.org/docs/latest/api/auto-updater)。
 

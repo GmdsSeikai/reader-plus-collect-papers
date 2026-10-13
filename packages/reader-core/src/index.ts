@@ -641,3 +641,4 @@ export type {
   ProxySettingsState,
   ProxyCheckResult,
 } from "./proxy-settings";
+export type { UpdateProgress } from "./update-progress";

@@ -9,6 +9,11 @@ interface Window {
     ) => void;
     diagnosticSettings?: (settings: unknown) => void;
     checkForUpdates: () => Promise<void>;
+    onUpdateProgress?: (
+      callback: (
+        progress: import("@reader/core").UpdateProgress | null,
+      ) => void,
+    ) => () => void;
     proxySettings?: () => Promise<import("@reader/core").ProxySettingsState>;
     saveProxySettings?: (
       settings: import("@reader/core").ProxySettings,
