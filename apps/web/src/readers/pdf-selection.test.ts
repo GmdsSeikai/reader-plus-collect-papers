@@ -96,14 +96,14 @@ it("clears the displayed selection after clicking blank PDF space", () => {
   expect(adapter.getSelection()).toBeNull();
   expect(changed).toHaveBeenLastCalledWith(null);
 });
-it("keeps PDF font fallback independent of the app language after viewer resets", async () => {
+it("keeps unknown PDF language independent of the app language after viewer resets", async () => {
   const previousLanguage = document.documentElement.lang;
   document.documentElement.lang = "zh-CN";
   try {
     await adapter.open(paper());
     expect(
       host.querySelector(".pdfViewer")!.closest("[lang]")?.getAttribute("lang"),
-    ).toBe("en");
+    ).toBe("");
   } finally {
     document.documentElement.lang = previousLanguage;
   }
