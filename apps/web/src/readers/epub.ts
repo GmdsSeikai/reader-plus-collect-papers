@@ -825,17 +825,29 @@ export class EPUBReaderAdapter implements ReaderAdapter {
       : submit());
   }
   async getContext() {
-    if (!this.doc || !this.location.href) return "";
-    const response = await fetch(
-      publicationURL(this.doc.id, this.location.href.split("#")[0]),
+    return (
+      (await this.getChapterContext(this.location))[0]?.text.slice(0, 24000) ||
+      ""
     );
+  }
+  async getChapterContext(
+    location: DocumentLocation,
+  ): Promise<ReaderSelection[]> {
+    if (!this.doc || location.type !== "epub" || !location.href) return [];
+    const href = location.href.split("#")[0];
+    const response = await fetch(publicationURL(this.doc.id, href));
     if (!response.ok) throw new Error("无法读取章节");
     const html = new DOMParser().parseFromString(
       await response.text(),
       "text/html",
     );
     html.querySelectorAll("style,script").forEach((el) => el.remove());
-    return html.body.textContent?.trim().slice(0, 24000) || "";
+    return [
+      {
+        text: html.body.textContent?.trim() || "",
+        location: { type: "epub", href, progression: 0 },
+      },
+    ];
   }
   async destroy() {
     if (this.disposed) return;

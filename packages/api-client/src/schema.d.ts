@@ -3269,12 +3269,25 @@ export interface components {
             error?: string;
         };
         APIConnection: {
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            protocol: "auto" | "openai" | "anthropic";
             url: string;
             model: string;
             key?: string;
             hasKey: boolean;
         };
         AgentModel: {
+            effortInfo?: {
+                /** @enum {string} */
+                mode: "levels" | "budget" | "fixed" | "unknown";
+                note: string;
+                mappings?: {
+                    [key: string]: string;
+                };
+            };
             id: string;
             name: string;
             description: string;
@@ -3290,6 +3303,8 @@ export interface components {
         /** @enum {string} */
         ReasoningEffort: "low" | "medium" | "high" | "max";
         AIConfig: {
+            /** @description Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value. */
+            chatIncludeChapter?: boolean;
             primary: string;
             models: {
                 [key: string]: string;
