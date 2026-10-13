@@ -659,6 +659,22 @@ export function Settings({
             <section className="mb-6">
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox
+                  checked={theme.autoCopySelection === true}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoCopySelection: !!checked })
+                  }
+                />
+                <span>
+                  自动复制选中文字
+                  <span className="block text-xs text-muted-foreground">
+                    选中文字或点击高亮、划线等批注时，自动复制到剪贴板
+                  </span>
+                </span>
+              </label>
+            </section>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
                   checked={theme.linkTranslationAnnotations !== false}
                   onCheckedChange={(checked) =>
                     setTheme({ linkTranslationAnnotations: !!checked })
