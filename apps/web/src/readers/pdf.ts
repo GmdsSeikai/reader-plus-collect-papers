@@ -99,6 +99,12 @@ export class PDFReaderAdapter implements ReaderAdapter {
       removePageBorders: true,
     });
     this.links.setViewer(this.viewer);
+    this.bus.on("pagesinit", () => {
+      // PDFViewer resets lang during setup. Explicitly mark it unknown before
+      // text rendering to match PDF.js's measurement canvas and stop inheriting
+      // the app's zh-CN font choice. PDF metadata may supply the language later.
+      viewer.lang = "";
+    });
     this.navigation = new PDFReadingNavigation(
       container,
       this.viewer,
