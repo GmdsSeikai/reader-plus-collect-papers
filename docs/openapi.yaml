@@ -3170,6 +3170,7 @@
                                     {
                                       "candidate": { "$ref": "#/components/schemas/CollectionCandidate" },
                                       "citation": { "$ref": "#/components/schemas/CollectionCitation" },
+                                      "analyses": { "type": "array", "items": { "$ref": "#/components/schemas/CollectionAnalysis" } },
                                     },
                                 },
                             },
@@ -3416,6 +3417,16 @@
                   "200": { "description": "Scheduling paused" },
                 },
             },
+        },
+      "/api/collection/candidates/{id}/analysis":
+        {
+          "post": {
+            "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+            "responses": {
+              "200": { "description": "Validated and persisted analysis or cache hit", "content": { "application/json": { "schema": { "type": "object", "required": ["analyses"], "properties": { "analyses": { "type": "array", "items": { "$ref": "#/components/schemas/CollectionAnalysis" } } } } } } },
+              "409": { "description": "Analysis disabled, unavailable, cancelled, invalid, or quota exhausted" }
+            }
+          }
         },
       "/api/collection/resume":
         {
@@ -4046,13 +4057,33 @@
                   "analysisProvider": { "type": "string" },
                   "analysisModel": { "type": "string" },
                   "analysisEffort": { "type": "string" },
-                  "dailyLimit": { "type": "integer" },
-                  "requestRpm": { "type": "integer" },
+                  "dailyLimit": { "type": "integer", "minimum": 0 },
+                  "requestRpm": { "type": "integer", "minimum": 0 },
                   "paused": { "type": "boolean" },
                   "configVersion": { "type": "integer" },
                   "hasCitationsKey": { "type": "boolean" },
                 },
             },
+          "CollectionAnalysis": {
+            "type": "object",
+            "required": ["cacheKey", "arxivId", "contentHash", "profileHash", "modelFingerprint", "promptVersion", "resultVersion", "status", "attempt", "createdAt", "updatedAt"],
+            "properties": {
+              "cacheKey": { "type": "string" }, "arxivId": { "type": "string" }, "contentHash": { "type": "string" }, "profileHash": { "type": "string" }, "modelFingerprint": { "type": "string" },
+              "promptVersion": { "type": "integer" }, "resultVersion": { "type": "integer" }, "status": { "type": "string", "enum": ["pending", "running", "succeeded", "failed", "interrupted", "blocked"] },
+              "error": { "type": "string" }, "attempt": { "type": "integer" }, "retryAt": { "type": "string" }, "createdAt": { "type": "string" }, "updatedAt": { "type": "string" },
+              "result": { "$ref": "#/components/schemas/CollectionAnalysisResult" }
+            }
+          },
+          "CollectionAnalysisResult": {
+            "type": "object", "required": ["schema_version", "title_zh", "abstract_zh", "assessments"],
+            "properties": {
+              "schema_version": { "type": "integer", "enum": [1] }, "title_zh": { "type": "string" }, "abstract_zh": { "type": "string" },
+              "assessments": { "type": "array", "items": { "type": "object", "required": ["taskId", "profileHash", "relevance_score", "reason_zh", "evidence"], "properties": {
+                "taskId": { "type": "string" }, "profileHash": { "type": "string" }, "relevance_score": { "type": "integer", "minimum": 0, "maximum": 100 }, "reason_zh": { "type": "string" },
+                "evidence": { "type": "array", "items": { "type": "object", "required": ["field", "quote"], "properties": { "field": { "type": "string", "enum": ["title", "abstract"] }, "quote": { "type": "string" } } } }
+              } } }
+            }
+          },
           "ZoteroEntry":
             {
               "type": "object",

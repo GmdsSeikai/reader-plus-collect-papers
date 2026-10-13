@@ -37,7 +37,7 @@ func invokeCLI(ctx context.Context, root, provider, model string, in AIInput, de
 	if provider == "codex" {
 		return invokeCodex(ctx, work, model, in, delta, metrics...)
 	}
-	args := append(claudeArgs(), "--append-system-prompt", readerSystemPrompt)
+	args := append(claudeArgs(), "--append-system-prompt", in.systemPrompt())
 	if in.Effort != "" {
 		args = append(args, "--effort", in.Effort)
 	}
@@ -59,7 +59,16 @@ func invokeCLI(ctx context.Context, root, provider, model string, in AIInput, de
 	defer cancel()
 	cmd := exec.CommandContext(child, provider, args...)
 	cmd.Dir = work
-	cmd.Stdin = input
+	var stdin io.WriteCloser
+	if in.Dispatch == nil {
+		cmd.Stdin = input
+	} else {
+		stdin, e = cmd.StdinPipe()
+		if e != nil {
+			return "", e
+		}
+		defer stdin.Close()
+	}
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = 400 * time.Millisecond
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
@@ -69,6 +78,18 @@ func invokeCLI(ctx context.Context, root, provider, model string, in AIInput, de
 	}
 	if e = cmd.Start(); e != nil {
 		return "", generationError(ErrorConfiguration, "无法启动 Agent，请检查安装路径")
+	}
+	var inputDone chan error
+	if stdin != nil {
+		inputDone = make(chan error, 1)
+		go func() {
+			err := in.Dispatch.deliver(child, func() error { _, err := io.Copy(stdin, input); return err })
+			stdin.Close()
+			if err != nil {
+				cancel()
+			}
+			inputDone <- err
+		}()
 	}
 	stop := context.AfterFunc(child, func() { time.AfterFunc(450*time.Millisecond, func() { _ = stdout.Close() }) })
 	defer stop()
@@ -117,6 +138,11 @@ func invokeCLI(ctx context.Context, root, provider, model string, in AIInput, de
 		cancel()
 	}
 	e = cmd.Wait()
+	if inputDone != nil {
+		if err := <-inputDone; err != nil {
+			return "", err
+		}
+	}
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
@@ -130,7 +156,7 @@ func invokeCLI(ctx context.Context, root, provider, model string, in AIInput, de
 // are advertised; the isolated profile disables all model tools and subagents.
 func invokeKimi(ctx context.Context, work, model string, in AIInput, delta func(string), metrics ...func([]ModelTokens)) (string, error) {
 	profile := filepath.Join(work, "reader.md")
-	if e := os.WriteFile(profile, []byte("---\nname: reader\ndescription: Reader document assistant\ntools: []\nsubagents: []\n---\n"+readerSystemPrompt+"\n"), 0600); e != nil {
+	if e := os.WriteFile(profile, []byte("---\nname: reader\ndescription: Reader document assistant\ntools: []\nsubagents: []\n---\n"+in.systemPrompt()+"\n"), 0600); e != nil {
 		return "", e
 	}
 	args := []string{"--agent-file", profile, "--skills-dir", work}
@@ -165,8 +191,17 @@ func invokeKimi(ctx context.Context, work, model string, in AIInput, delta func(
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if err := lifecycle.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
-			return nil, err
+		send := func() error {
+			return lifecycle.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+		}
+		var sendErr error
+		if method == "session/prompt" {
+			sendErr = in.Dispatch.deliver(ctx, send)
+		} else {
+			sendErr = send()
+		}
+		if sendErr != nil {
+			return nil, sendErr
 		}
 		for scan.Scan() {
 			var msg struct {

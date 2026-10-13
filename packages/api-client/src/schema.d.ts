@@ -2867,6 +2867,7 @@ export interface paths {
                         "application/json": {
                             candidate?: components["schemas"]["CollectionCandidate"];
                             citation?: components["schemas"]["CollectionCitation"];
+                            analyses?: components["schemas"]["CollectionAnalysis"][];
                         };
                     };
                 };
@@ -3165,6 +3166,52 @@ export interface paths {
             responses: {
                 /** @description Scheduling paused */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collection/candidates/{id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Validated and persisted analysis or cache hit */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            analyses: components["schemas"]["CollectionAnalysis"][];
+                        };
+                    };
+                };
+                /** @description Analysis disabled, unavailable, cancelled, invalid, or quota exhausted */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3688,6 +3735,40 @@ export interface components {
             paused?: boolean;
             configVersion?: number;
             hasCitationsKey?: boolean;
+        };
+        CollectionAnalysis: {
+            cacheKey: string;
+            arxivId: string;
+            contentHash: string;
+            profileHash: string;
+            modelFingerprint: string;
+            promptVersion: number;
+            resultVersion: number;
+            /** @enum {string} */
+            status: "pending" | "running" | "succeeded" | "failed" | "interrupted" | "blocked";
+            error?: string;
+            attempt: number;
+            retryAt?: string;
+            createdAt: string;
+            updatedAt: string;
+            result?: components["schemas"]["CollectionAnalysisResult"];
+        };
+        CollectionAnalysisResult: {
+            /** @enum {integer} */
+            schema_version: 1;
+            title_zh: string;
+            abstract_zh: string;
+            assessments: {
+                taskId: string;
+                profileHash: string;
+                relevance_score: number;
+                reason_zh: string;
+                evidence: {
+                    /** @enum {string} */
+                    field: "title" | "abstract";
+                    quote: string;
+                }[];
+            }[];
         };
         ZoteroEntry: {
             id: string;

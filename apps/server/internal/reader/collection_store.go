@@ -16,16 +16,16 @@ const collectionMetaID = 1
 // CollectionSettings are module-level non-secret preferences. API keys stay in
 // the existing protected configuration owner and are only reported as hasKey.
 type CollectionSettings struct {
-	AnalysisEnabled   bool   `json:"analysisEnabled"`
-	AnalysisProvider  string `json:"analysisProvider,omitempty"`
-	AnalysisModel     string `json:"analysisModel,omitempty"`
-	AnalysisEffort    string `json:"analysisEffort,omitempty"`
-	CitationsAPIKey   string `json:"-"`
-	DailyLimit        int    `json:"dailyLimit"`
-	RequestRPM        int    `json:"requestRpm"`
-	Paused            bool   `json:"paused"`
-	ConfigVersion     int    `json:"configVersion"`
-	HasCitationsKey   bool   `json:"hasCitationsKey"`
+	AnalysisEnabled  bool   `json:"analysisEnabled"`
+	AnalysisProvider string `json:"analysisProvider,omitempty"`
+	AnalysisModel    string `json:"analysisModel,omitempty"`
+	AnalysisEffort   string `json:"analysisEffort,omitempty"`
+	CitationsAPIKey  string `json:"-"`
+	DailyLimit       int    `json:"dailyLimit"`
+	RequestRPM       int    `json:"requestRpm"`
+	Paused           bool   `json:"paused"`
+	ConfigVersion    int    `json:"configVersion"`
+	HasCitationsKey  bool   `json:"hasCitationsKey"`
 }
 
 func defaultCollectionSettings() CollectionSettings {
@@ -177,8 +177,8 @@ func (s *Store) CollectionSettings() (CollectionSettings, error) {
 	if err := json.Unmarshal([]byte(body), &cfg); err != nil {
 		return defaultCollectionSettings(), fmt.Errorf("采集设置损坏: %w", err)
 	}
-	if cfg.DailyLimit < 1 {
-		cfg.DailyLimit = 1
+	if cfg.DailyLimit < 0 || cfg.RequestRPM < 0 {
+		return cfg, errors.New("采集额度配置无效")
 	}
 	return cfg, nil
 }
@@ -186,19 +186,31 @@ func (s *Store) CollectionSettings() (CollectionSettings, error) {
 // SaveCollectionSettings writes the module settings as one versioned document.
 // Callers must not put API keys into this body.
 func (s *Store) SaveCollectionSettings(cfg CollectionSettings) error {
-	if err := s.CollectionWritable(); err != nil {
+	if cfg.DailyLimit < 0 || cfg.RequestRPM < 0 {
+		return errors.New("额度和请求频率不能为负数")
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
 		return err
 	}
-	cfg.ConfigVersion++
-	if cfg.DailyLimit < 1 {
-		cfg.DailyLimit = 1
+	defer tx.Rollback()
+	if err := collectionWritableTx(tx); err != nil {
+		return err
 	}
+	current, err := collectionSettingsTx(tx)
+	if err != nil {
+		return err
+	}
+	cfg.ConfigVersion = current.ConfigVersion + 1
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec("INSERT INTO collection_settings(id,body,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,updated_at=excluded.updated_at", collectionMetaID, string(b), now())
-	return err
+	_, err = tx.Exec("INSERT INTO collection_settings(id,body,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,updated_at=excluded.updated_at", collectionMetaID, string(b), now())
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SaveCollectionTask inserts or updates a task with optimistic revision.

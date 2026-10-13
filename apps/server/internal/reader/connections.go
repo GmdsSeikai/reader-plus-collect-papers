@@ -61,11 +61,21 @@ type savedConfig struct {
 	Fingerprints map[string]string `json:"fingerprints"`
 }
 type AIInput struct {
-	Chat   *chatInput
-	Effort string
-	Prompt string
-	Image  []byte
-	Images [][]byte
+	Chat     *chatInput
+	System   string              `json:"-"`
+	Dispatch *generationDispatch `json:"-"`
+	NoRetry  bool                `json:"-"`
+	Effort   string
+	Prompt   string
+	Image    []byte
+	Images   [][]byte
+}
+
+func (in AIInput) systemPrompt() string {
+	if in.System != "" {
+		return in.System
+	}
+	return readerSystemPrompt
 }
 
 func (in AIInput) images() [][]byte {

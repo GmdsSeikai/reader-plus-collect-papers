@@ -73,6 +73,7 @@ type GenerationService struct {
 	connections   map[string]generationConnection
 	attemptFailed func(string, bool, error)
 	usageSink     func(UsageCall) error
+	dispatchGate  func(context.Context) error
 }
 
 func (s *Server) generationService(config AIConfig) *GenerationService {
@@ -81,6 +82,7 @@ func (s *Server) generationService(config AIConfig) *GenerationService {
 
 func (s *Server) taskGenerationService(config AIConfig, task modelTask) *GenerationService {
 	g := &GenerationService{primary: config.Primary, connections: map[string]generationConnection{}}
+	g.dispatchGate = s.waitModelRPM
 	models, efforts := config.Models, config.Efforts
 	if task == taskTranslation {
 		models, efforts = config.TranslationModels, config.TranslationEfforts
@@ -167,7 +169,7 @@ func (a configuredCLIAdapter) streamWith(ctx context.Context, req GenerateReques
 		}
 		return nil
 	})
-	if err == nil || !automatic || cli.model == "" || visible.Load() || emitFailed.Load() || ctx.Err() != nil || errorKind(err) == ErrorCanceled {
+	if err == nil || req.Input.NoRetry || !automatic || cli.model == "" || visible.Load() || emitFailed.Load() || ctx.Err() != nil || errorKind(err) == ErrorCanceled {
 		return result, err
 	}
 	log.Printf("%s %s model %s failed before output, retrying with the CLI default: %v", a.provider, a.task, cli.model, err)
@@ -278,6 +280,9 @@ func (g *GenerationService) Generate(ctx context.Context, in AIInput, interactiv
 	return g.generate(ctx, in, interactive, emit != nil, emit)
 }
 func (g *GenerationService) attempt(ctx context.Context, provider string, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
+	if in.Dispatch == nil && g.dispatchGate != nil {
+		in.Dispatch = &generationDispatch{Before: g.dispatchGate}
+	}
 	call := UsageCall{ID: id(), Provider: provider, StartedAt: now(), Status: "running", Models: []ModelTokens{{Model: ""}}}
 	if g.usageSink != nil {
 		if err := g.usageSink(call); err != nil {

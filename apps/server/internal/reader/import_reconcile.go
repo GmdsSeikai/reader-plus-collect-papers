@@ -71,6 +71,9 @@ func (s *Server) RecoverImports() error {
 	if err := s.Store.recoverOpenRuns(); err != nil {
 		return err
 	}
+	if err := s.Store.RecoverAnalysisAttempts(); err != nil {
+		return err
+	}
 	// Committed logs still need reconciliation when a crash left their request
 	// unfinished. Completed historical imports are verified when opened.
 	rows, err := s.Store.DB.Query(`SELECT commit_id,owner,owner_ref,document_id,library,filename,target_rel,full_sha256,size,stage FROM import_commits

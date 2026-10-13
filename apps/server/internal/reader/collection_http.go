@@ -28,10 +28,10 @@ func (s *Server) collectionTasksList(w http.ResponseWriter, r *http.Request) {
 }
 
 type collectionTaskBody struct {
-	Name    *string               `json:"name"`
-	Config  *CollectionTaskConfig `json:"config"`
-	Enabled *bool                 `json:"enabled"`
-	Priority *int                 `json:"priority"`
+	Name     *string               `json:"name"`
+	Config   *CollectionTaskConfig `json:"config"`
+	Enabled  *bool                 `json:"enabled"`
+	Priority *int                  `json:"priority"`
 	// ExpectedRevision guards updates against stale forms; omitted on create.
 	ExpectedRevision *int `json:"expectedRevision"`
 }
@@ -202,6 +202,12 @@ func (s *Server) collectionCandidatesList(w http.ResponseWriter, r *http.Request
 		// task is enabled.
 		f.Since = s.windowStart(f.Channel, f.TaskID)
 	}
+	var identityErr error
+	f.AnalysisFingerprint, identityErr = s.activeAnalysisFingerprint()
+	if identityErr != nil {
+		collectionFail(w, 500, "analysis-unavailable", "无法读取分析身份")
+		return
+	}
 	page, err := s.Store.CollectionCandidates(f)
 	if err != nil {
 		collectionFail(w, 500, "query-invalid", "查询失败")
@@ -259,7 +265,22 @@ func (s *Server) collectionCandidateGet(w http.ResponseWriter, r *http.Request) 
 		collectionFail(w, 404, "query-invalid", "候选不存在")
 		return
 	}
-	respond(w, 200, map[string]any{"candidate": c, "citation": cit})
+	fingerprint, err := s.activeAnalysisFingerprint()
+	if err != nil {
+		collectionFail(w, 500, "analysis-unavailable", "无法读取分析身份")
+		return
+	}
+	materials, err := analysisMaterials(s.Store, c.ArXivID)
+	if err != nil {
+		collectionFail(w, 500, "analysis-unavailable", "无法读取分析任务")
+		return
+	}
+	analyses, _, err := s.Store.cachedAnalysisFragments(c, materials, fingerprint)
+	if err != nil {
+		collectionFail(w, 500, "analysis-unavailable", "分析缓存无效")
+		return
+	}
+	respond(w, 200, map[string]any{"candidate": c, "citation": cit, "analyses": analyses})
 }
 
 func (s *Server) collectionCandidatePatch(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +369,7 @@ func (s *Server) registerCollectionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/collection/candidates", s.collectionCandidatesList)
 	mux.HandleFunc("GET /api/collection/candidates/{id}", s.collectionCandidateGet)
 	mux.HandleFunc("PATCH /api/collection/candidates/{id}", s.collectionCandidatePatch)
+	mux.HandleFunc("POST /api/collection/candidates/{id}/analysis", s.collectionAnalyze)
 	mux.HandleFunc("GET /api/collection/settings", s.collectionSettingsGet)
 	mux.HandleFunc("PUT /api/collection/settings", s.collectionSettingsPut)
 	mux.HandleFunc("POST /api/collection/pause", s.collectionPause)

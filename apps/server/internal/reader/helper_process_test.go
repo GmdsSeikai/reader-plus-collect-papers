@@ -23,6 +23,8 @@ func TestMain(m *testing.M) {
 			runTranslationSessionProcess()
 		case "chat-session":
 			runChatSessionProcess()
+		case "analysis-session":
+			runAnalysisSessionProcess()
 		case "models":
 			runModelProcess()
 		case "models-wait":

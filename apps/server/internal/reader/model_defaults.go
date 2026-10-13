@@ -9,8 +9,9 @@ import (
 type modelTask string
 
 const (
-	taskChat        modelTask = "chat"
-	taskTranslation modelTask = "translation"
+	taskChat          modelTask = "chat"
+	taskTranslation   modelTask = "translation"
+	taskPaperAnalysis modelTask = "paper-analysis"
 	// Only the API agent picks a separate model for image input.
 	taskVision modelTask = "vision"
 )
@@ -85,6 +86,9 @@ func newerVersion(a, b []int) bool {
 // variants and newer versions beat older ones; catalog order breaks ties.
 // No match returns "" so the CLI keeps its own default.
 func defaultTaskModel(task modelTask, provider string, models []AgentModel) string {
+	if task == taskPaperAnalysis {
+		task = taskTranslation
+	}
 	families := append(append([]string{}, taskFamilies[task][provider]...), taskFamilies[task][""]...)
 	for _, family := range families {
 		var best *AgentModel

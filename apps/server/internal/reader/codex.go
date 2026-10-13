@@ -193,7 +193,7 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 			}
 			return appendText(p.Item.ID, strings.TrimPrefix(p.Item.Text, previous))
 		case "error":
-			if !p.WillRetry {
+			if !p.WillRetry || in.NoRetry {
 				return providerError
 			}
 		case "turn/completed":
@@ -227,8 +227,15 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if err := lifecycle.send(map[string]any{"id": id, "method": method, "params": params}); err != nil {
-			return nil, err
+		send := func() error { return lifecycle.send(map[string]any{"id": id, "method": method, "params": params}) }
+		var sendErr error
+		if method == "turn/start" {
+			sendErr = in.Dispatch.deliver(ctx, send)
+		} else {
+			sendErr = send()
+		}
+		if sendErr != nil {
+			return nil, sendErr
 		}
 		for {
 			msg, err := read()
@@ -256,7 +263,34 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 			return "", err
 		}
 		params := map[string]any{"cwd": work, "ephemeral": true, "sandbox": "read-only", "approvalPolicy": "never",
-			"baseInstructions": readerSystemPrompt}
+			"baseInstructions": in.systemPrompt()}
+		if in.NoRetry {
+			configuration, readErr := call("config/read", map[string]any{"includeLayers": false})
+			if readErr != nil {
+				return "", generationError(ErrorConfiguration, "无法核验 Codex 重试配置")
+			}
+			var effective struct {
+				Config *struct {
+					Provider *string `json:"model_provider"`
+				} `json:"config"`
+			}
+			if json.Unmarshal(configuration, &effective) != nil || effective.Config == nil {
+				return "", generationError(ErrorProtocol, "Codex 配置响应无效")
+			}
+			provider := "openai"
+			if effective.Config.Provider != nil {
+				provider = *effective.Config.Provider
+			}
+			if provider == "" {
+				return "", generationError(ErrorConfiguration, "Codex 模型供应商无效")
+			}
+			for _, r := range provider {
+				if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+					return "", generationError(ErrorConfiguration, "Codex 模型供应商名称不受支持")
+				}
+			}
+			params["config"] = map[string]any{"model_providers." + provider + ".request_max_retries": 0, "model_providers." + provider + ".stream_max_retries": 0}
+		}
 		if model != "" {
 			params["model"] = model
 		}

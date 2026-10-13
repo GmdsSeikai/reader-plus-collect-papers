@@ -25,13 +25,15 @@ type CollectionManager struct {
 	// gen is the wait group of the current StartCollection generation. Each
 	// start (including a resumed drain) gets a fresh group so one generation's
 	// stop never waits on the next generation's work.
-	gen      *collectionGeneration
-	paused   bool
-	stopped  bool
-	draining bool
-	queue    chan collectionJob
-	baseCtx  context.Context
-	clock    func() time.Time
+	gen              *collectionGeneration
+	paused           bool
+	stopped          bool
+	draining         bool
+	queue            chan collectionJob
+	baseCtx          context.Context
+	clock            func() time.Time
+	analysisSerial   chan struct{}
+	analysisSchedule sync.Mutex
 }
 
 type collectionJob struct {
@@ -43,11 +45,12 @@ type collectionJob struct {
 // NewCollectionManager builds the manager with the shared gates.
 func NewCollectionManager(s *Server) *CollectionManager {
 	return &CollectionManager{
-		server:  s,
-		gate:    scholar.NewSourceGate("arxiv", 3*time.Second),
-		s2Gate:  scholar.NewSourceGate("s2", time.Second),
-		running: map[string]context.CancelFunc{},
-		queue:   make(chan collectionJob, 64),
+		server:         s,
+		gate:           scholar.NewSourceGate("arxiv", 3*time.Second),
+		s2Gate:         scholar.NewSourceGate("s2", time.Second),
+		running:        map[string]context.CancelFunc{},
+		queue:          make(chan collectionJob, 64),
+		analysisSerial: make(chan struct{}, 1),
 	}
 }
 
@@ -211,6 +214,7 @@ func (m *CollectionManager) tickOnce(ctx context.Context) {
 	}
 	m.startDueTasks(ctx)
 	m.runHotHistoryCycle(ctx)
+	m.runAnalysisRound(ctx)
 	if _, err := m.RefreshCitations(ctx, m.citationKey()); err != nil {
 		log.Printf("citation refresh: %v", err)
 	}

@@ -37,6 +37,7 @@ type Server struct {
 	Token                  string
 	Web                    string
 	aiMu                   sync.Mutex
+	modelRate              modelRateGate
 	documentMu             sync.Mutex
 	documentTasks          map[string]map[*documentTask]struct{}
 	deletingDocuments      map[string]bool
@@ -61,7 +62,7 @@ func NewServer(s *Store, token, web string) *Server {
 	srv.collectionManager = NewCollectionManager(srv)
 	return srv
 }
-func id() string                                    { b := make([]byte, 16); _, _ = rand.Read(b); return hex.EncodeToString(b) }
+func id() string { b := make([]byte, 16); _, _ = rand.Read(b); return hex.EncodeToString(b) }
 func respond(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

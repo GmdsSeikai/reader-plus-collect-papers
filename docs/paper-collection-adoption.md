@@ -206,6 +206,8 @@ arXiv 用 HTTPS Atom API，按 `submittedDate` 降序；查询通过参数编码
 
 增加实际消费的 `taskPaperAnalysis`；给 `AIInput` 增加内部系统提示词选择及请求所有者，CLI/API adapter 都使用该选择。采集使用固定结构化提示词，聊天/全文翻译继续原提示词；HTTP 请求不能任意覆盖系统提示词。Codex 创建独立 session/工作目录，不访问 `codexChatCache`；Claude/Kimi 独立进程或会话；API 不复用阅读上下文。
 
+分析入口为 `POST /api/collection/candidates/{id}/analysis`，后台由既有 scheduler 推进。Codex 分析会话只从 `config/read` 解析供应商标识，在本次 `thread/start.config` 覆盖该供应商的 HTTP/流重试次数为 0，不修改 CLI 用户配置。字段依据 [官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) 和安装版本生成的 App Server schema；配置响应及密钥不写日志。该路径的受控协议测试不代替实际安装版本和账号验证。
+
 采集路径禁用 `GenerationService` 的自动 `text-api`/`image-api` 备用和 `configuredCLIAdapter` 的未显式计量模型重试。重试由采集 owner 安排，每次解析发送身份、取得额度与门禁；模型不悄悄更换。失败不修改聊天模型的能力状态。请求取消、部分输出和超时不保存成功 JSON，也不写聊天消息；现有聊天 SSE 合同不变。
 
 统一生成入场覆盖聊天、全文翻译、图片生成、能力测试和采集的真实发送路径。共享按连接身份分区的原子 RPM 门禁；CLI 无法读取账户身份时按 provider 保守共享，API 按协议/规范 URL 分区，指纹不包含密钥。模块分析并发默认 1，其他工作继续既有 worker 行为；门禁等待可取消，用户对话优先但用有限轮转避免后台永远无法发出。

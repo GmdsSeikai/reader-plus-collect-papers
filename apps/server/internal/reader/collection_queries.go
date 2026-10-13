@@ -176,18 +176,19 @@ func validateCollectionRunTx(tx *sql.Tx, runID string, runToken int64, revision 
 
 // CandidateFilter selects candidate list pages.
 type CandidateFilter struct {
-	CursorDate string
-	CursorID   string
-	CursorNum  int
-	TaskID     string
-	Channel    string
-	Since      string
-	Search     string
-	Citation   string
-	Sort       string
-	TaskRev    int
-	Limit      int
-	Ignored    *bool
+	AnalysisFingerprint string
+	CursorDate          string
+	CursorID            string
+	CursorNum           int
+	TaskID              string
+	Channel             string
+	Since               string
+	Search              string
+	Citation            string
+	Sort                string
+	TaskRev             int
+	Limit               int
+	Ignored             *bool
 }
 
 // CandidatePage is one keyset page. Score is the effective relevance; SortKey
@@ -297,6 +298,9 @@ func (s *Store) CollectionCandidates(f CandidateFilter) (CandidatePage, error) {
 		if f.TaskID != "" {
 			cond += " AND " + alias + ".task_id='" + f.TaskID + "'"
 		}
+		if f.TaskID == "" {
+			cond += " AND EXISTS(SELECT 1 FROM collection_tasks et WHERE et.task_id=" + alias + ".task_id AND et.enabled=1)"
+		}
 		if f.Channel != "" {
 			cond += " AND " + alias + ".channel='" + f.Channel + "'"
 		}
@@ -325,7 +329,20 @@ func (s *Store) CollectionCandidates(f CandidateFilter) (CandidatePage, error) {
 	}
 	// Relevance scores share the effective-relationship scope, so closing a
 	// task or moving its revision removes its stale scores from ranking.
-	scoreCol := "(SELECT MAX(COALESCE(m2.ai_score,m2.rule_score)) FROM collection_matches m2 WHERE " + matchCond("m2") + ")"
+	effectiveScore := "m2.rule_score"
+	if f.AnalysisFingerprint != "" {
+		if len(f.AnalysisFingerprint) != 64 {
+			return page, errors.New("无效的分析身份")
+		}
+		for _, r := range f.AnalysisFingerprint {
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+				return page, errors.New("无效的分析身份")
+			}
+		}
+		valid := `EXISTS(SELECT 1 FROM collection_analyses a,json_each(a.assessments_json,'$.assessments') j WHERE a.cache_key=m2.analysis_cache_key AND a.status='succeeded' AND a.content_hash=c.content_hash AND a.model_fingerprint='` + f.AnalysisFingerprint + `' AND a.prompt_version=1 AND a.result_version=1 AND json_extract(j.value,'$.task_id')=m2.task_id AND json_extract(j.value,'$.profile_hash')=(SELECT semantic_hash FROM collection_tasks WHERE task_id=m2.task_id))`
+		effectiveScore = "CASE WHEN " + valid + " THEN COALESCE(m2.ai_score,m2.rule_score) ELSE m2.rule_score END"
+	}
+	scoreCol := "(SELECT MAX(" + effectiveScore + ") FROM collection_matches m2 WHERE " + matchCond("m2") + ")"
 	citCol := "(SELECT citation_count FROM collection_citations x WHERE x.arxiv_id=c.arxiv_id)"
 	order := "c.published_at DESC, c.arxiv_id DESC"
 	keyExpr := "0"

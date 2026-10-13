@@ -9,7 +9,9 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -54,7 +56,7 @@ func completionContent(in AIInput) any {
 
 // apiRequest sends one authenticated request to the configured endpoint.
 // Redirects are refused so the key never reaches another origin.
-func apiRequest(ctx context.Context, c APIConnection, method, path string, body []byte) (*http.Response, error) {
+func apiRequest(ctx context.Context, c APIConnection, method, path string, body []byte, hooks ...*generationDispatch) (*http.Response, error) {
 	if c.URL == "" {
 		return nil, generationError(ErrorConfiguration, "未配置 API")
 	}
@@ -75,17 +77,74 @@ func apiRequest(ctx context.Context, c APIConnection, method, path string, body 
 	if c.Key != "" {
 		request.Header.Set("Authorization", "Bearer "+c.Key)
 	}
+	var dispatch *generationDispatch
+	if len(hooks) > 0 {
+		dispatch = hooks[0]
+	}
+	writeResult := make(chan error, 1)
+	var headersWritten atomic.Bool
+	var cancelDispatch context.CancelFunc
+	if dispatch != nil {
+		if dispatch.Before != nil {
+			if err := dispatch.Before(ctx); err != nil {
+				return nil, err
+			}
+		}
+		requestCtx, cancel := context.WithCancel(ctx)
+		cancelDispatch = cancel
+		trace := &httptrace.ClientTrace{
+			WroteHeaders: func() { headersWritten.Store(true) },
+			WroteRequest: func(info httptrace.WroteRequestInfo) {
+				err := info.Err
+				if info.Err == nil && dispatch.Sent != nil {
+					err = dispatch.Sent()
+				}
+				select {
+				case writeResult <- err:
+				default:
+				}
+				if err != nil {
+					cancel()
+				}
+			},
+		}
+		request = request.WithContext(httptrace.WithClientTrace(requestCtx, trace))
+	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return generationError(ErrorConfiguration, "API 重定向已拒绝")
 	}}
 	response, e := client.Do(request)
+	if e == nil && dispatch != nil {
+		var writeErr error
+		select {
+		case writeErr = <-writeResult:
+		case <-ctx.Done():
+			writeErr = ctx.Err()
+		}
+		if writeErr != nil {
+			cancelDispatch()
+			response.Body.Close()
+			return nil, writeErr
+		}
+	}
 	if e != nil {
+		if cancelDispatch != nil {
+			cancelDispatch()
+		}
+		if dispatch != nil && !headersWritten.Load() && dispatch.NotDelivered != nil {
+			if err := dispatch.NotDelivered(); err != nil {
+				return nil, err
+			}
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, generationError(ErrorNetwork, "API 网络请求失败或超时")
 	}
 	if response.StatusCode != 200 {
+		if cancelDispatch != nil {
+			cancelDispatch()
+		}
 		response.Body.Close()
 		kind := ErrorUpstream
 		if response.StatusCode == 401 || response.StatusCode == 403 {
@@ -96,8 +155,18 @@ func apiRequest(ctx context.Context, c APIConnection, method, path string, body 
 		}
 		return nil, generationError(kind, fmt.Sprintf("API 返回 HTTP %d", response.StatusCode))
 	}
+	if cancelDispatch != nil {
+		response.Body = &dispatchResponseBody{response.Body, cancelDispatch}
+	}
 	return response, nil
 }
+
+type dispatchResponseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *dispatchResponseBody) Close() error { defer b.cancel(); return b.ReadCloser.Close() }
 
 func streamCompletion(ctx context.Context, c APIConnection, req completionRequest, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
 	// Respect the request-specific generation deadline (longer for batches).
@@ -106,14 +175,14 @@ func streamCompletion(ctx context.Context, c APIConnection, req completionReques
 		ctx, cancel = context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
 	}
-	messages := append([]completionMessage{{"system", readerSystemPrompt}}, req.History...)
+	messages := append([]completionMessage{{"system", in.systemPrompt()}}, req.History...)
 	messages = append(messages, completionMessage{"user", completionContent(in)})
 	payload := map[string]any{"model": req.Model, "messages": messages, "stream": true, "n": 1, "stream_options": map[string]bool{"include_usage": true}}
 	if req.Effort != "" {
 		payload["reasoning_effort"] = req.Effort
 	}
 	body, _ := json.Marshal(payload)
-	response, e := apiRequest(ctx, c, "POST", "/chat/completions", body)
+	response, e := apiRequest(ctx, c, "POST", "/chat/completions", body, in.Dispatch)
 	if e != nil {
 		return GenerateResult{}, e
 	}
