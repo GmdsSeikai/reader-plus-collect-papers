@@ -2,8 +2,11 @@ package reader
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,6 +23,9 @@ import (
 // recoverOpenRuns marks runs a crash left open as interrupted and bumps their
 // exec tokens so late responses can never advance their slices.
 func (s *Store) recoverOpenRuns() error {
+	if err := s.CollectionWritable(); err != nil {
+		return err
+	}
 	rows, err := s.DB.Query("SELECT run_id,task_id FROM collection_runs WHERE status IN ('queued','running')")
 	if err != nil {
 		return err
@@ -51,14 +57,26 @@ func (s *Store) recoverOpenRuns() error {
 // closed rows. A newer module schema disables collection-log repairs while
 // leaving reading fully functional.
 func (s *Server) RecoverImports() error {
+	if err := s.Store.CollectionWritable(); err != nil {
+		if errors.Is(err, errCollectionSchemaTooNew) {
+			return nil
+		}
+		return err
+	}
+	release, err := s.importGate.Acquire()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := s.Store.recoverOpenRuns(); err != nil {
 		return err
 	}
-	if err := s.Store.CollectionWritable(); err != nil {
-		log.Printf("import recovery skipped: %v", err)
-		return nil
-	}
-	rows, err := s.Store.DB.Query("SELECT commit_id,owner,owner_ref,document_id,library,filename,target_rel,full_sha256,size,stage FROM import_commits WHERE stage IN ('prepared','installed') ORDER BY created_at")
+	// Committed logs still need reconciliation when a crash left their request
+	// unfinished. Completed historical imports are verified when opened.
+	rows, err := s.Store.DB.Query(`SELECT commit_id,owner,owner_ref,document_id,library,filename,target_rel,full_sha256,size,stage FROM import_commits
+		WHERE stage IN ('prepared','installed') OR (stage='committed' AND
+		(owner_ref IN (SELECT request_id FROM collection_imports WHERE status IN ('queued','downloading','importing','interrupted')) OR
+		document_id IN (SELECT document_id FROM collection_imports WHERE status IN ('queued','downloading','importing','interrupted')))) ORDER BY created_at`)
 	if err != nil {
 		return err
 	}
@@ -78,9 +96,25 @@ func (s *Server) RecoverImports() error {
 	}
 	rows.Close()
 	for _, c := range commits {
+		if c.stage == importStageCommitted && c.documentID != "" {
+			if _, err := s.Store.Document(c.documentID); errors.Is(err, sql.ErrNoRows) {
+				s.failRecoveredImport(c.commitID, c.ownerRef, c.fullSHA, "原文档已移除，不自动重新创建")
+				continue
+			} else if err != nil {
+				return err
+			}
+		}
 		s.recoverOneImport(c.commitID, c.owner, c.ownerRef, c.library, c.filename, c.targetRel, c.fullSHA, c.size)
 	}
 	s.sweepInterruptedImports()
+	var remaining int
+	if err := s.Store.DB.QueryRow(`SELECT (SELECT count(*) FROM import_commits WHERE stage IN ('prepared','installed'))+
+		(SELECT count(*) FROM collection_imports WHERE status IN ('queued','downloading','importing'))`).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining != 0 {
+		return fmt.Errorf("导入恢复仍有 %d 项未结束，未启动后台任务", remaining)
+	}
 	s.cleanupOwnerStagedFiles()
 	return nil
 }
@@ -90,7 +124,23 @@ func (s *Server) RecoverImports() error {
 // the row as failed. Unknown or mismatching target files are never
 // overwritten or deleted.
 func (s *Server) recoverOneImport(commitID, owner, ownerRef, library, filename, targetRel, fullSHA string, size int64) {
-	dest := filepath.Join(s.Store.Root, filepath.FromSlash(targetRel))
+	if len(fullSHA) != 64 {
+		s.failRecoveredImport(commitID, ownerRef, fullSHA, "登记摘要无效")
+		return
+	}
+	if _, err := hex.DecodeString(fullSHA); err != nil {
+		s.failRecoveredImport(commitID, ownerRef, fullSHA, "登记摘要无效")
+		return
+	}
+	if filepath.ToSlash(filepath.Clean(filepath.FromSlash(targetRel))) != importTargetRel(fullSHA[:32], filename) {
+		s.failRecoveredImport(commitID, ownerRef, fullSHA, "登记路径与文档身份不符")
+		return
+	}
+	dest, pathErr := s.Store.ownedFilePath(targetRel)
+	if pathErr != nil {
+		s.failRecoveredImport(commitID, ownerRef, fullSHA, pathErr.Error())
+		return
+	}
 	if st, err := os.Stat(dest); err == nil && st.Mode().IsRegular() {
 		_, actual, actualSize, herr := hashImportFile(dest)
 		if herr == nil && strings.EqualFold(actual, fullSHA) && (size == 0 || actualSize == size) {
@@ -98,13 +148,17 @@ func (s *Server) recoverOneImport(commitID, owner, ownerRef, library, filename, 
 			return
 		}
 		// A different file owns this path now: keep its bytes and refuse.
-		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "目标文件与登记摘要不符，未覆盖")
+		s.failRecoveredImport(commitID, ownerRef, fullSHA, "目标文件与登记摘要不符，未覆盖")
+		return
+	}
+	if _, err := os.Lstat(dest); !errors.Is(err, os.ErrNotExist) {
+		s.failRecoveredImport(commitID, ownerRef, fullSHA, "目标文件不可验证，未覆盖")
 		return
 	}
 	// Missing official file: repair only from a verified, owned cache copy.
-	if cache, ok := s.verifiedCacheCopy(ownerRef, fullSHA); ok {
+	if cache, ok := s.recoveryCache(ownerRef, fullSHA); ok {
 		if err := os.MkdirAll(filepath.Dir(dest), 0700); err == nil {
-			if err := copyFile(cache, dest); err == nil {
+			if err := copyRecoveryFile(cache, dest); err == nil {
 				_, actual, actualSize, herr := hashImportFile(dest)
 				if herr == nil && strings.EqualFold(actual, fullSHA) && (size == 0 || actualSize == size) {
 					s.resumeImportCommit(commitID, owner, ownerRef, library, filename, targetRel, fullSHA, size)
@@ -114,7 +168,7 @@ func (s *Server) recoverOneImport(commitID, owner, ownerRef, library, filename, 
 			}
 		}
 	}
-	_ = s.Store.markImportCommit(commitID, importStageFailed, "", "正式文件缺失且无可信缓存修复")
+	s.failRecoveredImport(commitID, ownerRef, fullSHA, "正式文件缺失且无可信缓存修复")
 }
 
 // resumeImportCommit completes the database side of an import whose official
@@ -126,6 +180,10 @@ func (s *Server) resumeImportCommit(commitID, owner, ownerRef, library, filename
 	docID := fullSHA[:32]
 	existing, err := s.Store.Document(docID)
 	if err == nil {
+		if existing.Type != strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".") || filepath.ToSlash(s.Store.File(existing)) != filepath.ToSlash(filepath.Join(s.Store.Root, filepath.FromSlash(targetRel))) {
+			s.failRecoveredImport(commitID, ownerRef, fullSHA, "已有文档类型或文件身份不符")
+			return
+		}
 		// The document landed before the crash (or predates the log): close
 		// the log and repair the association without touching reading data.
 		tx, terr := s.Store.DB.Begin()
@@ -135,7 +193,10 @@ func (s *Server) resumeImportCommit(commitID, owner, ownerRef, library, filename
 		}
 		if werr := collectionWritableTx(tx); werr == nil {
 			if werr = markImportCommitTx(tx, commitID, importStageCommitted, docID); werr == nil {
-				terr = tx.Commit()
+				terr = linkRecoveredRequestTx(tx, ownerRef, existing, fullSHA)
+				if terr == nil {
+					terr = tx.Commit()
+				}
 			} else {
 				terr = werr
 			}
@@ -147,7 +208,6 @@ func (s *Server) resumeImportCommit(commitID, owner, ownerRef, library, filename
 			_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复提交失败")
 			return
 		}
-		s.linkImportRequest(ownerRef, docID, existing.Library)
 		return
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -215,7 +275,7 @@ func (s *Server) resumeImportCommit(commitID, owner, ownerRef, library, filename
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复提交失败")
 		return
 	}
-	if _, err := tx.Exec("UPDATE collection_imports SET document_id=?, library=? WHERE request_id=? AND document_id=''", doc.ID, doc.Library, ownerRef); err != nil {
+	if err := linkRecoveredRequestTx(tx, ownerRef, doc, fullSHA); err != nil {
 		tx.Rollback()
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复提交失败")
 		return
@@ -229,21 +289,6 @@ func (s *Server) resumeImportCommit(commitID, owner, ownerRef, library, filename
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复提交失败")
 		return
 	}
-	s.linkImportRequest(ownerRef, doc.ID, doc.Library)
-}
-
-// linkImportRequest converges a collection request whose document landed
-// before the crash: it reports imported instead of staying interrupted.
-func (s *Server) linkImportRequest(requestID, docID, library string) {
-	if requestID == "" {
-		return
-	}
-	if _, err := s.Store.CollectionImport(requestID); err != nil {
-		return
-	}
-	_, _ = s.Store.claimImport(requestID, []string{importQueued, importDownloading, importDownloaded, importAwaitingConfirmation, importImporting, importInterrupted}, map[string]any{
-		"status": importImported, "document_id": docID, "library": library, "error": "",
-	})
 }
 
 // sweepInterruptedImports marks requests a crash left mid-preparation as
@@ -266,7 +311,27 @@ func (s *Server) sweepInterruptedImports() {
 	for _, r := range mid {
 		if r.documentID != "" {
 			if d, err := s.Store.Document(r.documentID); err == nil {
-				s.linkImportRequest(r.requestID, d.ID, d.Library)
+				req, rerr := s.Store.CollectionImport(r.requestID)
+				file, ferr := s.Store.ownedFilePath(importTargetRel(d.ID, d.ID+"."+d.Type))
+				if rerr == nil && ferr == nil && d.Type == "pdf" && len(req.ActualSHA256) == 64 {
+					_, actual, _, herr := hashImportFile(file)
+					if herr == nil && strings.EqualFold(actual, req.ActualSHA256) {
+						tx, terr := s.Store.DB.Begin()
+						if terr == nil {
+							terr = linkRecoveredRequestTx(tx, r.requestID, d, actual)
+							if terr == nil {
+								terr = tx.Commit()
+							}
+							if terr != nil {
+								tx.Rollback()
+							}
+						}
+						if terr == nil {
+							continue
+						}
+					}
+				}
+				_, _ = s.Store.claimImport(r.requestID, []string{importQueued, importDownloading, importImporting}, map[string]any{"status": importFailed, "error": "已有文档的正式文件未通过校验"})
 				continue
 			}
 		}
@@ -290,18 +355,29 @@ func (s *Server) cleanupOwnerStagedFiles() {
 	}
 	rows.Close()
 	for _, rid := range ids {
-		staged := filepath.Join(s.Store.Root, "cache", "paper-collection", rid, "staged.pdf")
-		_ = os.Remove(staged)
+		if filepath.Base(rid) != rid || rid == "." || rid == ".." {
+			continue
+		}
+		if staged, err := s.Store.ownedFilePath(filepath.ToSlash(filepath.Join("cache", "paper-collection", rid, "staged.pdf"))); err == nil {
+			_ = os.Remove(staged)
+		}
 	}
 }
 
 // verifiedCacheCopy finds an owner-attributed cache file whose full digest
 // matches. Only cache/paper-collection/<request>/ copies are ever considered.
 func (s *Server) verifiedCacheCopy(requestID, fullSHA string) (string, bool) {
-	if requestID == "" {
+	if requestID == "" || filepath.Base(requestID) != requestID || requestID == "." || requestID == ".." {
 		return "", false
 	}
-	dir := filepath.Join(s.Store.Root, "cache", "paper-collection", requestID)
+	req, err := s.Store.CollectionImport(requestID)
+	if err != nil || (req.ActualSHA256 != "" && !strings.EqualFold(req.ActualSHA256, fullSHA)) {
+		return "", false
+	}
+	dir, err := s.Store.ownedFilePath(filepath.ToSlash(filepath.Join("cache", "paper-collection", requestID)))
+	if err != nil {
+		return "", false
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", false
@@ -310,10 +386,120 @@ func (s *Server) verifiedCacheCopy(requestID, fullSHA string) (string, bool) {
 		if e.IsDir() {
 			continue
 		}
-		p := filepath.Join(dir, e.Name())
+		p, err := s.Store.ownedFilePath(filepath.ToSlash(filepath.Join("cache", "paper-collection", requestID, e.Name())))
+		if err != nil {
+			continue
+		}
+		if e.Name() != "staged.pdf" && filepath.ToSlash(filepath.Clean(filepath.FromSlash(req.CacheRelPath))) != filepath.ToSlash(filepath.Join("cache", "paper-collection", requestID, e.Name())) {
+			continue
+		}
 		if _, actual, _, err := hashImportFile(p); err == nil && strings.EqualFold(actual, fullSHA) {
 			return p, true
 		}
 	}
 	return "", false
+}
+
+func linkRecoveredRequestTx(tx *sql.Tx, requestID string, d Document, fullSHA string) error {
+	if err := collectionWritableTx(tx); err != nil {
+		return err
+	}
+	status, condition := importImported, ""
+	if d.DeletedAt != "" {
+		status, condition = importAwaitingConfirmation, "trash-restore"
+	}
+	_, err := tx.Exec(`UPDATE collection_imports SET status=?,document_id=?,library=?,actual_sha256=?,error='',"condition"=?,updated_at=?
+		WHERE request_id=? AND status IN ('queued','downloading','downloaded','awaiting_confirmation','importing','interrupted')`, status, d.ID, d.Library, fullSHA, condition, now(), requestID)
+	return err
+}
+
+func (s *Server) failRecoveredImport(commitID, ownerRef, fullSHA, message string) {
+	tx, err := s.Store.DB.Begin()
+	if err != nil {
+		log.Printf("import recovery %s: %v", commitID, err)
+		return
+	}
+	defer tx.Rollback()
+	if err = collectionWritableTx(tx); err == nil {
+		_, err = tx.Exec("UPDATE import_commits SET stage='failed',error=?,updated_at=? WHERE commit_id=?", message, now(), commitID)
+	}
+	if err == nil {
+		_, err = tx.Exec(`UPDATE collection_imports SET status='failed',error=?,updated_at=?
+		WHERE (request_id=? OR (actual_sha256=? AND document_id<>'')) AND status IN ('queued','downloading','importing','interrupted')`, message, now(), ownerRef, fullSHA)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		log.Printf("import recovery %s: %v", commitID, err)
+	}
+}
+
+func (s *Server) recoveryCache(ownerRef, fullSHA string) (string, bool) {
+	if file, ok := s.verifiedCacheCopy(ownerRef, fullSHA); ok {
+		return file, true
+	}
+	rows, err := s.Store.DB.Query("SELECT request_id FROM collection_imports WHERE actual_sha256=? AND status NOT IN ('cancelled','failed')", fullSHA)
+	if err != nil {
+		return "", false
+	}
+	ids := []string{}
+	for rows.Next() {
+		var rid string
+		if err := rows.Scan(&rid); err != nil {
+			rows.Close()
+			return "", false
+		}
+		ids = append(ids, rid)
+	}
+	rows.Close()
+	for _, rid := range ids {
+		if file, ok := s.verifiedCacheCopy(rid, fullSHA); ok {
+			return file, true
+		}
+	}
+	return "", false
+}
+
+func (s *Store) ownedFilePath(relative string) (string, error) {
+	rel := filepath.Clean(filepath.FromSlash(relative))
+	if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("文件路径越界")
+	}
+	current := s.Root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("文件路径包含链接")
+		}
+	}
+	return current, nil
+}
+
+func copyRecoveryFile(source, target string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	if copyErr == nil {
+		copyErr = out.Sync()
+	}
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }

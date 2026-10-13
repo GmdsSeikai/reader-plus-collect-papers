@@ -120,6 +120,9 @@ func TestRecoverPreparedWithCacheKeepsRetryable(t *testing.T) {
 	cacheDir := filepath.Join(s.Store.Root, "cache", "paper-collection", "req-1")
 	os.MkdirAll(cacheDir, 0700)
 	os.WriteFile(filepath.Join(cacheDir, "2301.00001v1.pdf"), data, 0600)
+	if err := s.Store.InsertCollectionImport(CollectionImportRequest{RequestID: "req-1", ArXivID: "2301.00001", DownloadVersion: 1, Status: importImporting, ActualSHA256: full, CacheRelPath: "cache/paper-collection/req-1/2301.00001v1.pdf", CreatedAt: now(), UpdatedAt: now()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.RecoverImports(); err != nil {
 		t.Fatal(err)
 	}
