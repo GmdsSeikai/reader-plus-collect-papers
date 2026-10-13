@@ -209,6 +209,8 @@ arXiv 用 HTTPS Atom API，按 `submittedDate` 降序；查询通过参数编码
 
 手动分析入口为 `POST /api/collection/candidates/{id}/analysis`，返回 `202` 与已提交的持久命令；重复提交同一论文的开放命令返回同一 ID。服务拥有执行生命周期，关闭页面不取消命令。`GET /api/collection/analysis/{id}` 与候选详情返回状态；显式取消使用 `POST /api/collection/analysis/{id}/cancel`，只针对该 ID，已关闭命令不覆盖终态或取消后续命令。配置关闭、模型切换与暂停在设置事务中关闭开放命令，再取消运行句柄；保存结果事务再次核对命令、正文、任务语义与分析配置。启动对账将 queued/running 标为 interrupted，不自动重发；发送前预占可释放，已发送与发送不确定请求保守计费。
 
+Windows 的 npm `.cmd/.bat` 入口不作为 prompt 的 shell 执行器。启动前核对对应包身份并定位其原生 Codex/Claude 程序；模型发现、请求、可用性检测与会话身份使用同一解析路径。原生安装沿用 PATH；缺少原生程序时明确失败，不将模型或原文拼入 shell。2026-10-13 已用受控原生协议进程验证 npm 布局下的生产分析路径，并用现机 Codex 0.162.1、Claude 2.1.281 的 `--version` 验证启动；后者不证明账号推理或取消行为。
+
 后台自动分析由既有 scheduler 推进。Codex 分析会话只从 `config/read` 解析供应商标识，在本次 `thread/start.config` 覆盖该供应商的 HTTP/流重试次数为 0，不修改 CLI 用户配置。字段依据 [官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) 和安装版本生成的 App Server schema；配置响应及密钥不写日志。该路径的受控协议测试不代替实际安装版本和账号验证。
 
 采集路径禁用 `GenerationService` 的自动 `text-api`/`image-api` 备用和 `configuredCLIAdapter` 的未显式计量模型重试。重试由采集 owner 安排，每次解析发送身份、取得额度与门禁；模型不悄悄更换。失败不修改聊天模型的能力状态。请求取消、部分输出和超时不保存成功 JSON，也不写聊天消息；现有聊天 SSE 合同不变。

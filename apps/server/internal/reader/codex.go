@@ -41,7 +41,7 @@ func newCodexSession(work, model string) (*codexSession, error) {
 	} {
 		args = append(args, "-c", setting)
 	}
-	cmd := exec.Command("codex", args...)
+	cmd := agentCommand(nil, "codex", args...)
 	cmd.Dir, cmd.Stderr, cmd.WaitDelay = work, io.Discard, 3*time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

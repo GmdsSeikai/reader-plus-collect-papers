@@ -3,7 +3,6 @@ package reader
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -48,7 +47,7 @@ func (c *codexChatCache) acquire(root, model string, in AIInput) (*codexSession,
 		return nil, in, generationError(ErrorCanceled, "服务已关闭")
 	}
 	chat := in.Chat
-	executable, _ := exec.LookPath("codex")
+	executable, _ := agentExecutable("codex")
 	key := executable + "\x00" + model + "\x00" + in.Effort + "\x00" + chat.Title
 	e := c.entry
 	if e != nil && (e.key != key || e.document != chat.DocumentID || e.savedID != chat.PriorID || e.pending != nil || e.turns >= 64 || e.sourceBytes >= 256000) {
