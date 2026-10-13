@@ -121,6 +121,9 @@ func (s *Server) purgeDocument(ctx context.Context, id string) (int, string) {
 	defer tx.Rollback()
 	// FTS virtual tables have no foreign-key cascade.
 	if _, err = tx.Exec("DELETE FROM search_index WHERE document_id=?", id); err == nil {
+		_, err = tx.Exec("DELETE FROM document_passages_fts WHERE document_id=?", id)
+	}
+	if err == nil {
 		_, err = tx.Exec("DELETE FROM documents WHERE id=?", id)
 	}
 	if err == nil {

@@ -99,7 +99,10 @@ func OpenStore(root string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS document_relations(a TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,b TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(a,b),CHECK(a<b));
  CREATE TABLE IF NOT EXISTS connector_snapshots(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,source_url TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS document_relations_b ON document_relations(b);
- CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(document_id UNINDEXED,href UNINDEXED,content,tokenize='unicode61');`)
+ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(document_id UNINDEXED,href UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS document_corpora(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,fingerprint TEXT NOT NULL,revision TEXT NOT NULL,body TEXT NOT NULL);
+ CREATE VIRTUAL TABLE IF NOT EXISTS document_passages_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,block_id UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);`)
 	if err != nil {
 		db.Close()
 		return nil, err

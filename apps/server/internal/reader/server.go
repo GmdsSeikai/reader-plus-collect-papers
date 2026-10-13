@@ -39,6 +39,7 @@ type Server struct {
 	annotationMu           sync.Mutex
 	annotationHistory      []annotationChange
 	codexChat              codexChatCache
+	corpusMu               sync.Mutex
 	Store                  *Store
 	Token                  string
 	Web                    string
