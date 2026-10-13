@@ -83,40 +83,133 @@ func joinAnnotationQuotes(first, second string) string {
 	// their overlap cannot be reconstructed safely; never discard quoted text.
 	return strings.TrimSpace(first + "\n" + second)
 }
-func mergeSourceSentenceLinks(a, b json.RawMessage) (json.RawMessage, bool) {
-	var left, right struct {
+
+// Links can be sparse while translations are incomplete. Combine their known
+// sentence order with unique anchors in the final quote; creation order and
+// opaque block IDs do not describe the document's reading order.
+func mergeSourceSentenceLinks(a, b Annotation, quote string) (json.RawMessage, bool) {
+	type sentenceLink struct {
 		Origin string            `json:"origin"`
 		Parts  []json.RawMessage `json:"parts"`
 	}
-	if len(a) == 0 || string(a) == "null" {
-		return nil, len(b) == 0 || string(b) == "null"
+	var left, right struct {
+		Link *sentenceLink `json:"sentenceLink"`
 	}
-	if len(b) == 0 || string(b) == "null" || json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil || left.Origin != "source" || right.Origin != "source" || len(left.Parts) == 0 || len(right.Parts) == 0 {
+	if json.Unmarshal(a.Location, &left) != nil || json.Unmarshal(b.Location, &right) != nil {
 		return nil, false
 	}
-	seen := map[string]bool{}
+	if left.Link == nil || right.Link == nil {
+		return nil, left.Link == nil && right.Link == nil
+	}
+	if left.Link.Origin != "source" || right.Link.Origin != "source" || len(left.Link.Parts) == 0 || len(right.Link.Parts) == 0 {
+		return nil, false
+	}
+	type partOrder struct {
+		BlockID string `json:"blockId"`
+		Index   *int   `json:"sentenceIndex"`
+		Source  string `json:"source"`
+		Anchor  string `json:"anchor"`
+	}
 	parts := []json.RawMessage{}
-	for _, part := range append(left.Parts, right.Parts...) {
-		var normalized any
-		if json.Unmarshal(part, &normalized) != nil {
-			return nil, false
-		}
-		key, _ := json.Marshal(normalized)
-		if !seen[string(key)] {
-			parts = append(parts, part)
-			seen[string(key)] = true
+	positions := []partOrder{}
+	seen := map[string]int{}
+	sequences := [2][]int{}
+	for side, input := range [][]json.RawMessage{left.Link.Parts, right.Link.Parts} {
+		for _, part := range input {
+			var normalized map[string]any
+			var position partOrder
+			if json.Unmarshal(part, &normalized) != nil || normalized == nil || json.Unmarshal(part, &position) != nil {
+				return nil, false
+			}
+			// Normalize object key order while retaining every original field.
+			key, _ := json.Marshal(normalized)
+			index, exists := seen[string(key)]
+			if !exists {
+				index = len(parts)
+				seen[string(key)] = index
+				parts = append(parts, part)
+				positions = append(positions, position)
+			}
+			sequences[side] = append(sequences[side], index)
 		}
 	}
-	merged, _ := json.Marshal(struct {
-		Origin string            `json:"origin"`
-		Parts  []json.RawMessage `json:"parts"`
-	}{"source", parts})
+	// Preserve each selection's sentence order. Shared sentences connect
+	// backwards extensions without assuming either selection was saved first.
+	edges := make([]map[int]bool, len(parts))
+	incoming := make([]int, len(parts))
+	before := func(from, to int) {
+		if from == to || edges[from][to] {
+			return
+		}
+		if edges[from] == nil {
+			edges[from] = map[int]bool{}
+		}
+		edges[from][to] = true
+		incoming[to]++
+	}
+	for _, sequence := range sequences {
+		for i := 1; i < len(sequence); i++ {
+			before(sequence[i-1], sequence[i])
+		}
+	}
+	normalize := func(text string) string {
+		return strings.ReplaceAll(strings.Join(strings.Fields(text), ""), "\u00ad", "")
+	}
+	text := normalize(quote)
+	offsets := make([]int, len(positions))
+	for i, position := range positions {
+		anchor := position.Anchor
+		if anchor == "" {
+			anchor = position.Source
+		}
+		anchor = normalize(anchor)
+		offsets[i] = -1
+		if anchor != "" {
+			if offset := strings.Index(text, anchor); offset >= 0 && offset == strings.LastIndex(text, anchor) {
+				offsets[i] = offset
+			}
+		}
+	}
+	for i, a := range positions {
+		for j, b := range positions {
+			if offsets[i] >= 0 && offsets[j] >= 0 && offsets[i] < offsets[j] {
+				before(i, j)
+			}
+			if a.BlockID != "" && a.BlockID == b.BlockID && a.Index != nil && b.Index != nil && *a.Index < *b.Index {
+				before(i, j)
+			}
+		}
+	}
+	ordered := make([]json.RawMessage, 0, len(parts))
+	for len(ordered) < len(parts) {
+		next := -1
+		for i, count := range incoming {
+			if count != 0 {
+				continue
+			}
+			if next != -1 {
+				// Keep records separate when available positions cannot determine
+				// a unique order; insertion order would silently invent one.
+				return nil, false
+			}
+			next = i
+		}
+		if next == -1 {
+			return nil, false // Contradictory link orders.
+		}
+		ordered = append(ordered, parts[next])
+		incoming[next] = -1
+		for to := range edges[next] {
+			incoming[to]--
+		}
+	}
+	merged, _ := json.Marshal(sentenceLink{"source", ordered})
 	return merged, true
 }
+
 func mergeAnnotationMark(a, b Annotation) (Annotation, bool) {
 	// Translated ranges live in another coordinate space. Their source geometry
 	// cannot be united without also updating the translated ranges.
-	var leftFields, rightFields map[string]json.RawMessage
 	for _, location := range []json.RawMessage{a.Location, b.Location} {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(location, &fields) != nil {
@@ -125,26 +218,11 @@ func mergeAnnotationMark(a, b Annotation) (Annotation, bool) {
 		if value := fields["translation"]; len(value) > 0 && string(value) != "null" {
 			return a, false
 		}
-		if leftFields == nil {
-			leftFields = fields
-		} else {
-			rightFields = fields
-		}
 	}
 	if (a.Kind != "underline" && a.Kind != "highlight") || a.Kind != b.Kind || a.DocumentID != b.DocumentID {
 		return a, false
 	}
-	link, linked := mergeSourceSentenceLinks(leftFields["sentenceLink"], rightFields["sentenceLink"])
-	if !linked {
-		return a, false
-	}
 	if merged, ok := mergeEPUBMark(a, b); ok {
-		if len(link) > 0 {
-			var location map[string]json.RawMessage
-			json.Unmarshal(merged.Location, &location)
-			location["sentenceLink"] = link
-			merged.Location, _ = json.Marshal(location)
-		}
 		return merged, true
 	}
 	var left, right annotationPDFLocation
@@ -173,6 +251,10 @@ func mergeAnnotationMark(a, b Annotation) (Annotation, bool) {
 		quote = joinAnnotationQuotes(a.Quote, b.Quote)
 	default:
 		quote = joinAnnotationQuotes(b.Quote, a.Quote)
+	}
+	link, linked := mergeSourceSentenceLinks(a, b, quote)
+	if !linked {
+		return a, false
 	}
 	// Preserve extra location fields and any note text attached by an older client.
 	var location map[string]json.RawMessage
@@ -312,6 +394,10 @@ func mergeEPUBMark(a, b Annotation) (Annotation, bool) {
 	default:
 		quote = joinAnnotationQuotes(first.Quote, last.Quote)
 	}
+	link, linked := mergeSourceSentenceLinks(a, b, quote)
+	if !linked {
+		return a, false
+	}
 	var location map[string]json.RawMessage
 	json.Unmarshal(first.Location, &location)
 	var firstLocation, lastLocation annotationEPUBLocation
@@ -344,6 +430,9 @@ func mergeEPUBMark(a, b Annotation) (Annotation, bool) {
 	raw, _ := json.Marshal(locator)
 	location["locator"], _ = json.Marshal(string(raw))
 	location["quote"], _ = json.Marshal(quote)
+	if len(link) > 0 {
+		location["sentenceLink"] = link
+	}
 	a.Location, _ = json.Marshal(location)
 	a.Quote = quote
 	if b.Note != "" && b.Note != a.Note {

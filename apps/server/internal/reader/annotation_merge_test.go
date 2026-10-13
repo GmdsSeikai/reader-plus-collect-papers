@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -405,4 +406,131 @@ func TestLinkedAndTranslatedUnderlinesKeepTheirAnchors(t *testing.T) {
 			t.Fatalf("merged incompatible %s anchors", field)
 		}
 	}
+}
+
+func TestSourceLinkedMarkDocumentOrder(t *testing.T) {
+	type part struct {
+		BlockID       string `json:"blockId"`
+		SourceHash    string `json:"sourceHash"`
+		SentenceIndex int    `json:"sentenceIndex"`
+		Source        string `json:"source"`
+		Target        string `json:"target"`
+	}
+	// Block IDs are deliberately not in lexical document order.
+	parts := []part{{"z-first", "hash", 0, "A", "甲"}, {"m-middle", "hash", 0, "B", "乙"}, {"a-last", "hash", 0, "C", "丙"}}
+	for _, format := range []string{"pdf", "epub"} {
+		for _, kind := range []string{"highlight", "underline"} {
+			for _, tc := range []struct {
+				name               string
+				oldStart, oldEnd   int
+				newStart, newEnd   int
+				oldParts, newParts []int
+			}{
+				{"extend backwards", 2, 5, 0, 3, []int{1, 2}, []int{0, 1}},
+				{"contain older selection", 2, 3, 0, 5, []int{1}, []int{0, 1, 2}},
+				{"extend forwards", 0, 3, 2, 5, []int{0, 1}, []int{1, 2}},
+				{"same start", 0, 3, 0, 5, []int{0, 1}, []int{0, 1, 2}},
+				{"fill middle link", 0, 5, 2, 3, []int{0, 2}, []int{1}},
+			} {
+				t.Run(format+"/"+kind+"/"+tc.name, func(t *testing.T) {
+					makeMark := func(id string, start, end int, indexes []int) Annotation {
+						quote := "A B C"[start:end]
+						a := pdfUnderline(id, []annotationRect{{.1 + float64(start)*.02, .2, float64(end-start) * .02, .02}}, quote)
+						if format == "epub" {
+							a = epubUnderline(id, start, end, quote)
+						}
+						a.Kind = kind
+						var location map[string]json.RawMessage
+						json.Unmarshal(a.Location, &location)
+						selected := []part{}
+						for _, index := range indexes {
+							selected = append(selected, parts[index])
+						}
+						location["sentenceLink"], _ = json.Marshal(map[string]any{"origin": "source", "parts": selected})
+						a.Location, _ = json.Marshal(location)
+						return a
+					}
+					old := makeMark("old", tc.oldStart, tc.oldEnd, tc.oldParts)
+					incoming := makeMark("new", tc.newStart, tc.newEnd, tc.newParts)
+					merged, ok := mergeAnnotationMark(old, incoming)
+					if !ok || merged.ID != old.ID || merged.Quote != "A B C" {
+						t.Fatalf("merge: %+v, %v", merged, ok)
+					}
+					var location struct {
+						SentenceLink struct{ Parts []part } `json:"sentenceLink"`
+					}
+					json.Unmarshal(merged.Location, &location)
+					if !reflect.DeepEqual(location.SentenceLink.Parts, parts) {
+						t.Fatalf("wrong source/translation order or first navigation block: %+v", location.SentenceLink.Parts)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestSourceSentenceLinkOrderBoundaries(t *testing.T) {
+	part := func(block string, index int) map[string]any {
+		// Identical excerpts at different sentence indexes are different links.
+		return map[string]any{"blockId": block, "sourceHash": "h", "sentenceIndex": index, "source": "Repeated.", "target": "重复。"}
+	}
+	mark := func(parts ...map[string]any) Annotation {
+		location, _ := json.Marshal(map[string]any{"sentenceLink": map[string]any{"origin": "source", "parts": parts}})
+		return Annotation{Location: location}
+	}
+	t.Run("sentence indexes disambiguate equal selection boundaries", func(t *testing.T) {
+		linked, ok := mergeSourceSentenceLinks(mark(part("block", 10)), mark(part("block", 2)), "Repeated. Repeated.")
+		if !ok {
+			t.Fatal("could not order sentences in the same block")
+		}
+		var link struct {
+			Parts []struct {
+				Index int `json:"sentenceIndex"`
+			} `json:"parts"`
+		}
+		json.Unmarshal(linked, &link)
+		if len(link.Parts) != 2 || link.Parts[0].Index != 2 || link.Parts[1].Index != 10 {
+			t.Fatalf("repeated excerpts lost or numeric order reversed: %s", linked)
+		}
+	})
+	t.Run("shared sentences order partial excerpts", func(t *testing.T) {
+		a, b, c := part("z-first", 0), part("middle", 0), part("a-last", 0)
+		linked, ok := mergeSourceSentenceLinks(mark(b, c), mark(a, b), "peated.")
+		if !ok {
+			t.Fatal("could not join ordered snapshots at their shared sentence")
+		}
+		var link struct {
+			Parts []map[string]any `json:"parts"`
+		}
+		json.Unmarshal(linked, &link)
+		if len(link.Parts) != 3 || link.Parts[0]["blockId"] != "z-first" || link.Parts[2]["blockId"] != "a-last" {
+			t.Fatalf("partial excerpt reordered: %s", linked)
+		}
+	})
+	t.Run("extracted anchors order sparse links", func(t *testing.T) {
+		a, b := part("z-first", 0), part("a-last", 0)
+		a["anchor"], b["anchor"] = "First sentence.", "Last sentence."
+		linked, ok := mergeSourceSentenceLinks(mark(b), mark(a), "First\nsen\u00adtence. Last sentence.")
+		if !ok {
+			t.Fatal("could not order links by extracted anchors")
+		}
+		var link struct {
+			Parts []map[string]any `json:"parts"`
+		}
+		json.Unmarshal(linked, &link)
+		if len(link.Parts) != 2 || link.Parts[0]["blockId"] != "z-first" {
+			t.Fatalf("extracted anchors ignored: %s", linked)
+		}
+	})
+	t.Run("ambiguous blocks stay separate", func(t *testing.T) {
+		if _, ok := mergeSourceSentenceLinks(mark(part("a", 0)), mark(part("z", 0)), "Repeated. Repeated."); ok {
+			t.Fatal("invented an order for unrelated block IDs at equal boundaries")
+		}
+	})
+	t.Run("contradictory snapshots stay separate", func(t *testing.T) {
+		a, b := part("a", 0), part("b", 0)
+		if _, ok := mergeSourceSentenceLinks(mark(a, b), mark(b, a), "Repeated. Repeated."); ok {
+			t.Fatal("merged contradictory sentence orders")
+		}
+	})
 }
