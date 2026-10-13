@@ -54,3 +54,7 @@ ZIP 包含：
 5. 取消保存，检查没有残留目标 ZIP；保存到不可写位置时应提示失败，可重新选择位置。
 
 自动测试覆盖脱敏、跨会话/级别导出、旧翻译诊断、ZIP CRC、轮转和过期清理、符号链接边界、IPC frame 校验、离线桌面导出、React 错误界面以及 HTTP ResponseController Flush 兼容。全项目检查仍要求 `pnpm typecheck`、`pnpm test`、`pnpm build`。视觉验收采用人工检查。
+
+## API 适配诊断
+
+API 厂商规则、实际强度映射、上游错误分类和请求关联字段见 [API 厂商适配与错误诊断](api-provider-compatibility.md)。新增 API 错误事件只记录安全的结构化证据，不保存厂商可能回显正文的原始错误 message。

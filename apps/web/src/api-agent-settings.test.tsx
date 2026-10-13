@@ -70,6 +70,7 @@ const openAPI = async () =>
   );
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("PointerEvent", MouseEvent);
   vi.clearAllMocks();
   config = {
     primary: "api",
@@ -189,6 +190,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com",
+        protocol: "auto",
         model: "",
         key: "sk-test",
         hasKey: false,
@@ -235,6 +237,7 @@ it("keeps the saved key when changing only the API endpoint and rechecks models"
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com/v1",
+        protocol: "auto",
         model: "",
         key: undefined,
         hasKey: true,
@@ -247,6 +250,7 @@ it("keeps the saved key when changing only the API endpoint and rechecks models"
   expect(api.testAI).toHaveBeenCalledTimes(4);
   expect(config.api).toEqual({
     url: "https://api.deepseek.com/v1",
+    protocol: "auto",
     model: "",
     hasKey: true,
   });
@@ -296,4 +300,19 @@ it("adds and removes a model ID by hand and checks it", async () => {
   );
   expect(config.apiModels).toEqual([]);
   expect(host.textContent).not.toContain("my-model");
+});
+
+it("defaults chapter context off and persists both toggle states without rechecking models", async () => {
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const toggle = () =>
+    host.querySelector<HTMLElement>('[aria-label="提问时附带本章原文"]')!;
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  await act(async () => toggle().click());
+  expect(config.chatIncludeChapter).toBe(true);
+  expect(useReaderStore.getState().aiConfig?.chatIncludeChapter).toBe(true);
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  await act(async () => toggle().click());
+  expect(config.chatIncludeChapter).toBe(false);
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(api.testAI).not.toHaveBeenCalled();
 });
