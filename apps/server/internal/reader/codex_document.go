@@ -234,7 +234,7 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 		return GenerateResult{}, e
 	}
 	if a.activity != nil {
-		if e = a.activity("writing", ""); e != nil {
+		if e = a.activity("writing", "", "正在根据已读原文生成回答"); e != nil {
 			return GenerateResult{}, e
 		}
 	}

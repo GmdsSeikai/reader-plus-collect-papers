@@ -31,6 +31,9 @@ func TestDeepSeekDocumentAgentOverHTTP(t *testing.T) {
 	if e := os.WriteFile(s.Store.File(d), []byte("original fixture"), 0600); e != nil {
 		t.Fatal(e)
 	}
+	if _, e := s.documentCorpus(t.Context(), "doc", nil); e != nil {
+		t.Fatal(e)
+	}
 	calls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
@@ -121,6 +124,9 @@ func TestDeepSeekDocumentAgentOverHTTP(t *testing.T) {
 	w := request(t, s, "POST", "/api/documents/doc/chat", strings.NewReader(`{"provider":"api","prompt":"Compare nonce, condition and experiment","context":""}`))
 	if calls != 7 || strings.Contains(w.Body.String(), "intermediate tool prose") || strings.Count(w.Body.String(), "event: done") != 1 {
 		t.Fatalf("calls=%d stream=%s", calls, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"phase":"indexing"`) || !strings.Contains(w.Body.String(), "正在检索“COBALT-19”") {
+		t.Fatal("cached chat rebuilt its index or lost the actual search target")
 	}
 	var messages []Message
 	if e := json.Unmarshal(request(t, s, "GET", "/api/documents/doc/messages", nil).Body.Bytes(), &messages); e != nil {

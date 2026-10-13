@@ -3086,7 +3086,7 @@ textarea.paper-note-input {
   padding: 3px;
   cursor: pointer;
 }
-/* Waiting for the first answer chunk; keep the original provider glyph. */
+/* Tool activity uses a quiet book icon; ordinary provider waits keep their glyph. */
 .chat-waiting {
   display: flex;
   align-items: center;
@@ -3097,7 +3097,17 @@ textarea.paper-note-input {
 }
 .chat-waiting-icon {
   display: inline-flex;
+  flex-shrink: 0;
   animation: chat-waiting-spin 2.4s linear infinite;
+}
+.chat-waiting-icon--activity {
+  animation: none;
+}
+.chat-waiting .chat-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @keyframes chat-waiting-spin {
   to {

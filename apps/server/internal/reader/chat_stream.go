@@ -118,20 +118,7 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 						return
 					}
 				} else {
-					in.Chat.Agent = &documentAgent{server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool string) error {
-						message := "读取原文"
-						if tool == "search_document" {
-							message = "检索全文"
-						}
-						if tool == "get_outline" {
-							message = "查看目录与原文范围"
-						}
-						if tool == "pre_retrieval" {
-							message = "检索辅助回答"
-						}
-						if phase == "writing" {
-							message = "根据原文生成回答"
-						}
+					in.Chat.Agent = &documentAgent{server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool, message string) error {
 						return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
 					}}
 				}

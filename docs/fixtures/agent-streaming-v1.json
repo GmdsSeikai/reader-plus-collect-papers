@@ -7,7 +7,7 @@
   },
   {
     "name": "document-activity",
-    "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: activity\ndata: {\"message\":\"准备全文原文\",\"phase\":\"indexing\"}\n\nevent: activity\ndata: {\"message\":\"检索全文\",\"phase\":\"reading\",\"tool\":\"search_document\"}\n\nevent: activity\ndata: {\"message\":\"根据原文生成回答\",\"phase\":\"writing\"}\n\nevent: delta\ndata: {\"text\":\"原文答案 [S1]\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: activity\ndata: {\"message\":\"正在建立全文检索索引\",\"phase\":\"indexing\"}\n\nevent: activity\ndata: {\"message\":\"正在检索 cobalt · 查找相关原文\",\"phase\":\"reading\",\"tool\":\"search_document\"}\n\nevent: activity\ndata: {\"message\":\"正在根据已读原文生成回答\",\"phase\":\"writing\"}\n\nevent: delta\ndata: {\"text\":\"原文答案 [S1]\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
     "text": "原文答案 [S1]",
     "terminal": "done"
   },

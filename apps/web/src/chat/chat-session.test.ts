@@ -63,6 +63,30 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("chat request lifecycle", () => {
+  it("keeps tool activity outside the answer and clears it when final text arrives", async () => {
+    const h = setup();
+    await h.session.load();
+    const send = h.session.send(input);
+    h.emit({
+      event: "activity",
+      data: {
+        phase: "reading",
+        tool: "read_passage",
+        message: "正在查看第 12 页 · 阅读原文与相邻段落",
+      },
+    });
+    expect(h.session.getSnapshot().pending).toMatchObject({
+      content: "",
+      activity: { tool: "read_passage" },
+      notice: expect.stringContaining("第 12 页"),
+    });
+    h.emit({ event: "delta", data: { text: "最终答案" } });
+    h.emit({ event: "done", data: { ok: true } });
+    h.wait.resolve();
+    await send;
+    expect(h.session.getSnapshot().pending?.content).toBe("最终答案");
+    expect(h.session.getSnapshot().pending?.activity).toBeUndefined();
+  });
   it("retains raw text when done is followed by messages failure; retry replaces, never appends", async () => {
     const h = setup();
     await h.session.load();

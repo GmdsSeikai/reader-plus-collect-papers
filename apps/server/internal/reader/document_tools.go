@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 type documentToolDefinition struct {
@@ -51,7 +52,7 @@ type documentAgent struct {
 	Evidence     []documentEvidence  `json:"evidence"`
 	calls, bytes int
 	fatal        error
-	activity     func(string, string) error
+	activity     func(string, string, string) error
 	abort        context.CancelFunc
 }
 
@@ -135,6 +136,15 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 	result := map[string]any{"corpusRevision": a.corpus.Revision, "coverage": a.toolCoverage(), "items": []any{}, "truncated": false}
 	header, _ := json.Marshal(result)
 	itemBudget := (12 << 10) - len(header) - 256
+	activity := func(message string) error {
+		if a.activity != nil {
+			if err := a.activity("reading", tool, message); err != nil {
+				a.fatal = err
+				return err
+			}
+		}
+		return nil
+	}
 	switch tool {
 	case "get_outline":
 		var q struct {
@@ -150,6 +160,9 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 			if e != nil || start < 0 || start >= len(a.corpus.Passages) {
 				return invalid()
 			}
+		}
+		if err := activity("正在查看文档目录 · 定位相关章节"); err != nil {
+			return nil, err
 		}
 		seen := map[string]bool{}
 		for i := start; i < len(a.corpus.Passages); i++ {
@@ -184,6 +197,9 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 			q.Limit = 6
 		}
 		query := strings.TrimSpace(q.Query)
+		if err := activity("正在检索“" + documentActivityLabel(query) + "” · 查找相关原文"); err != nil {
+			return nil, err
+		}
 		terms := strings.Fields(query)
 		if len(terms) > 8 {
 			terms = terms[:8]
@@ -260,6 +276,22 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		if index < 0 {
 			return invalid()
 		}
+		passage := a.corpus.Passages[index]
+		target := "《" + documentActivityLabel(passage.Label) + "》"
+		var location struct {
+			Type string `json:"type"`
+			Page int    `json:"page"`
+		}
+		if json.Unmarshal(passage.Location, &location) == nil && location.Type == "pdf" {
+			target = fmt.Sprintf("第 %d 页", location.Page)
+		}
+		purpose := "阅读相关原文"
+		if q.Before > 0 || q.After > 0 {
+			purpose = "核对原文与相邻段落"
+		}
+		if err := activity("正在查看" + target + " · " + purpose); err != nil {
+			return nil, err
+		}
 		indices := []int{index}
 		for distance := 1; distance <= 3; distance++ {
 			if distance <= q.Before && index-distance >= 0 {
@@ -315,13 +347,17 @@ func (a *documentAgent) callAttempt(ctx context.Context, attempt, tool string, a
 		return nil, generationError(ErrorLimit, "文档工具结果超过限制")
 	}
 	a.Traces = append(a.Traces, documentToolTrace{tool, append(json.RawMessage(nil), args...), raw})
-	if a.activity != nil {
-		if err := a.activity("reading", tool); err != nil {
-			a.fatal = err
-			return nil, err
-		}
-	}
 	return raw, nil
+}
+
+func documentActivityLabel(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, text)
+	return documentExcerpt(strings.Join(strings.Fields(text), " "), 160)
 }
 
 var documentCitationPattern = regexp.MustCompile(`\[S([1-9][0-9]*)\]`)

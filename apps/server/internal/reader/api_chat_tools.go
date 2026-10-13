@@ -257,7 +257,7 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 		}
 	} else {
 		if agent.activity != nil {
-			if err := agent.activity("reading", "pre_retrieval"); err != nil {
+			if err := agent.activity("reading", "pre_retrieval", "正在检索相关原文 · 检索辅助回答"); err != nil {
 				return GenerateResult{}, err
 			}
 		}
@@ -269,7 +269,7 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 		return GenerateResult{}, err
 	}
 	if agent.activity != nil {
-		if err := agent.activity("writing", ""); err != nil {
+		if err := agent.activity("writing", "", "正在根据已读原文生成回答"); err != nil {
 			return GenerateResult{}, err
 		}
 	}
