@@ -534,3 +534,78 @@ func TestSourceSentenceLinkOrderBoundaries(t *testing.T) {
 		}
 	})
 }
+
+func TestMarkMetadataCompatibility(t *testing.T) {
+	for _, kind := range []string{"highlight", "underline"} {
+		for _, tc := range []struct {
+			name   string
+			change func(*Annotation)
+			merge  bool
+		}{
+			{"different color", func(a *Annotation) { a.Color = "#5b9fe8" }, false},
+			{"same color case", func(a *Annotation) { a.Color = "#E6B94C" }, true},
+			{"different tags", func(a *Annotation) { a.Tags = []string{"question"} }, false},
+			{"different tag order", func(a *Annotation) { a.Tags = []string{"important", "method"} }, true},
+			{"linked answer", func(a *Annotation) { a.AnswerID = "answer" }, false},
+			{"resolved state", func(a *Annotation) { a.Resolved = true }, false},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				a := pdfUnderline("first", []annotationRect{{.1, .2, .3, .02}}, "one two")
+				a.Kind, a.Tags = kind, []string{"method", "important"}
+				b := a
+				b.ID = "second"
+				tc.change(&b)
+				_, ok := mergeAnnotationMark(a, b)
+				if ok != tc.merge {
+					t.Fatalf("merge = %v, want %v", ok, tc.merge)
+				}
+			})
+		}
+	}
+}
+
+func TestHighlightRestartPreservesClassification(t *testing.T) {
+	s := testServer(t)
+	var doc Document
+	json.Unmarshal(upload(t, s, "reading-notes.pdf", sample(t, "reading-notes.pdf")).Body.Bytes(), &doc)
+	expected := map[string]string{}
+	for _, item := range []struct{ id, color, tag string }{
+		{"first", "#e6b94c", "method"},
+		{"different-color", "#5b9fe8", "method"},
+		{"different-tag", "#e6b94c", "question"},
+		{"duplicate", "#e6b94c", "method"},
+	} {
+		a := pdfUnderline(item.id, []annotationRect{{.1, .2, .3, .02}}, "same sentence")
+		a.Kind, a.DocumentID, a.Color, a.Tags = "highlight", doc.ID, item.color, []string{item.tag}
+		a.Note = "Keep the note"
+		body, _ := json.Marshal(a)
+		if _, err := s.Store.DB.Exec("INSERT INTO annotations VALUES(?,?,?)", a.ID, doc.ID, string(body)); err != nil {
+			t.Fatal(err)
+		}
+		if item.id != "duplicate" {
+			expected[item.id] = string(body)
+		}
+	}
+	root := s.Store.Root
+	s.Store.DB.Close()
+	store, err := OpenStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB.Close()
+	actual, err := annotationSnapshot(store.DB, doc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actual) != len(expected) {
+		t.Fatalf("startup lost highlight classifications: %v", actual)
+	}
+	for id, body := range expected {
+		var want, got Annotation
+		json.Unmarshal([]byte(body), &want)
+		json.Unmarshal([]byte(actual[id]), &got)
+		if got.ID != id || got.Color != want.Color || !reflect.DeepEqual(got.Tags, want.Tags) || got.Note != want.Note || got.Quote != want.Quote {
+			t.Fatalf("startup changed classification %s: %+v", id, got)
+		}
+	}
+}

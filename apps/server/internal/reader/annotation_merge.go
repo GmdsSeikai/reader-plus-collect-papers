@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -220,6 +221,16 @@ func mergeAnnotationMark(a, b Annotation) (Annotation, bool) {
 		}
 	}
 	if (a.Kind != "underline" && a.Kind != "highlight") || a.Kind != b.Kind || a.DocumentID != b.DocumentID {
+		return a, false
+	}
+	// Colors and tags classify marks. Geometric overlap must not erase a
+	// different classification, including during startup compaction.
+	tags := func(values []string) []string {
+		values = slices.Clone(values)
+		slices.Sort(values)
+		return slices.Compact(values)
+	}
+	if !strings.EqualFold(a.Color, b.Color) || !slices.Equal(tags(a.Tags), tags(b.Tags)) || a.AnswerID != b.AnswerID || a.Resolved != b.Resolved {
 		return a, false
 	}
 	if merged, ok := mergeEPUBMark(a, b); ok {
