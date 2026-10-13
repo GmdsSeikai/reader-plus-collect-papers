@@ -4081,6 +4081,16 @@
                   "paused": { "type": "boolean" },
                   "configVersion": { "type": "integer" },
                   "hasCitationsKey": { "type": "boolean" },
+                  "quota": {
+                    "type": "object", "readOnly": true,
+                    "required": ["utcDay", "sent", "reserved", "uncertain"],
+                    "properties": {
+                      "utcDay": { "type": "string" },
+                      "sent": { "type": "integer", "minimum": 0 },
+                      "reserved": { "type": "integer", "minimum": 0 },
+                      "uncertain": { "type": "integer", "minimum": 0 }
+                    }
+                  },
                 },
             },
           "CollectionAnalysisJob": {
@@ -4728,6 +4738,9 @@
               "type": "object",
               "properties":
                 {
+                  "citationsApiKey": { "type": "string", "writeOnly": true, "description": "Semantic Scholar key; omitted or empty preserves the stored key." },
+                  "hasCitationsKey": { "type": "boolean", "readOnly": true },
+                  "clearCitationsKey": { "type": "boolean", "writeOnly": true, "description": "Explicitly removes the Semantic Scholar key; cannot be combined with a new key." },
                   "primary": { "type": "string" },
                   "models":
                     {

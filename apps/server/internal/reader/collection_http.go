@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -312,12 +313,27 @@ func (s *Server) collectionCandidatePatch(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) collectionSettingsGet(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.Store.CollectionSettings()
+	cfg, err := s.collectionSettingsView()
 	if err != nil {
 		collectionFail(w, 500, "query-invalid", "无法读取采集设置")
 		return
 	}
 	respond(w, 200, cfg)
+}
+
+func (s *Server) collectionSettingsView() (CollectionSettings, error) {
+	cfg, err := s.Store.CollectionSettings()
+	if err != nil {
+		return cfg, err
+	}
+	cfg.HasCitationsKey = s.aiConfig().CitationsAPIKey != ""
+	quota := &CollectionQuota{UTCDay: utcDay(s.collection().clockNow())}
+	err = s.Store.DB.QueryRow("SELECT sent,reserved,uncertain FROM collection_quota_days WHERE utc_day=?", quota.UTCDay).Scan(&quota.Sent, &quota.Reserved, &quota.Uncertain)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return cfg, err
+	}
+	cfg.Quota = quota
+	return cfg, nil
 }
 
 func (s *Server) collectionSettingsPut(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +343,6 @@ func (s *Server) collectionSettingsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	// Secrets are written through the protected AI configuration owner only;
 	// this endpoint never accepts key material.
-	body.CitationsAPIKey = ""
 	previous, err := s.Store.CollectionSettings()
 	if err != nil {
 		collectionFail(w, 500, "query-invalid", "无法读取采集设置")
@@ -346,7 +361,7 @@ func (s *Server) collectionSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if !body.AnalysisEnabled || previous.AnalysisProvider != body.AnalysisProvider || previous.AnalysisModel != body.AnalysisModel || previous.AnalysisEffort != body.AnalysisEffort {
 		s.collection().cancelAnalysisWork()
 	}
-	cfg, err := s.Store.CollectionSettings()
+	cfg, err := s.collectionSettingsView()
 	if err != nil {
 		collectionFail(w, 500, "query-invalid", "无法读取采集设置")
 		return

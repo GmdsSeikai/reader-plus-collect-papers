@@ -507,6 +507,9 @@ export interface APIConnection {
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export interface AIConfig {
+  citationsApiKey?: string;
+  hasCitationsKey?: boolean;
+  clearCitationsKey?: boolean;
   primary: string;
   models: Record<string, string>;
   efforts?: Record<string, Record<string, ReasoningEffort>>;

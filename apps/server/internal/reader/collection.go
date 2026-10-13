@@ -267,11 +267,7 @@ func (m *CollectionManager) scheduleTick(ctx context.Context, gen *collectionGen
 }
 
 func (m *CollectionManager) citationKey() string {
-	cfg, err := m.server.Store.CollectionSettings()
-	if err != nil {
-		return ""
-	}
-	return cfg.CitationsAPIKey
+	return m.server.aiConfig().CitationsAPIKey
 }
 
 // startDueTasks launches automatic runs for enabled tasks whose next run is

@@ -16,16 +16,23 @@ const collectionMetaID = 1
 // CollectionSettings are module-level non-secret preferences. API keys stay in
 // the existing protected configuration owner and are only reported as hasKey.
 type CollectionSettings struct {
-	AnalysisEnabled  bool   `json:"analysisEnabled"`
-	AnalysisProvider string `json:"analysisProvider,omitempty"`
-	AnalysisModel    string `json:"analysisModel,omitempty"`
-	AnalysisEffort   string `json:"analysisEffort,omitempty"`
-	CitationsAPIKey  string `json:"-"`
-	DailyLimit       int    `json:"dailyLimit"`
-	RequestRPM       int    `json:"requestRpm"`
-	Paused           bool   `json:"paused"`
-	ConfigVersion    int    `json:"configVersion"`
-	HasCitationsKey  bool   `json:"hasCitationsKey"`
+	AnalysisEnabled  bool             `json:"analysisEnabled"`
+	AnalysisProvider string           `json:"analysisProvider,omitempty"`
+	AnalysisModel    string           `json:"analysisModel,omitempty"`
+	AnalysisEffort   string           `json:"analysisEffort,omitempty"`
+	DailyLimit       int              `json:"dailyLimit"`
+	RequestRPM       int              `json:"requestRpm"`
+	Paused           bool             `json:"paused"`
+	ConfigVersion    int              `json:"configVersion"`
+	HasCitationsKey  bool             `json:"hasCitationsKey"`
+	Quota            *CollectionQuota `json:"quota,omitempty"`
+}
+
+type CollectionQuota struct {
+	UTCDay    string `json:"utcDay"`
+	Sent      int    `json:"sent"`
+	Reserved  int    `json:"reserved"`
+	Uncertain int    `json:"uncertain"`
 }
 
 func defaultCollectionSettings() CollectionSettings {
@@ -189,6 +196,7 @@ func (s *Store) CollectionSettings() (CollectionSettings, error) {
 // SaveCollectionSettings writes the module settings as one versioned document.
 // Callers must not put API keys into this body.
 func (s *Store) SaveCollectionSettings(cfg CollectionSettings) error {
+	cfg.Quota, cfg.HasCitationsKey = nil, false
 	if cfg.DailyLimit < 0 || cfg.RequestRPM < 0 {
 		return errors.New("额度和请求频率不能为负数")
 	}

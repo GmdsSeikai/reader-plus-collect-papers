@@ -3824,6 +3824,12 @@ export interface components {
             paused?: boolean;
             configVersion?: number;
             hasCitationsKey?: boolean;
+            readonly quota?: {
+                utcDay: string;
+                sent: number;
+                reserved: number;
+                uncertain: number;
+            };
         };
         CollectionAnalysisJob: {
             id: string;
@@ -4115,6 +4121,11 @@ export interface components {
         /** @enum {string} */
         ReasoningEffort: "low" | "medium" | "high" | "max";
         AIConfig: {
+            /** @description Semantic Scholar key; omitted or empty preserves the stored key. */
+            citationsApiKey?: string;
+            readonly hasCitationsKey?: boolean;
+            /** @description Explicitly removes the Semantic Scholar key; cannot be combined with a new key. */
+            clearCitationsKey?: boolean;
             primary: string;
             models: {
                 [key: string]: string;

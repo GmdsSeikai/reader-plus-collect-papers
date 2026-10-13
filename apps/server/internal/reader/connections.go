@@ -50,11 +50,14 @@ type AIConfig struct {
 	VisionEfforts map[string]map[string]string `json:"visionEfforts,omitempty"`
 	// API is the endpoint of the "api" agent; API.Model is unused. APIModels
 	// are model IDs the user added beside the endpoint's /models list.
-	API          APIConnection         `json:"api"`
-	APIModels    []string              `json:"apiModels"`
-	TextAPI      APIConnection         `json:"textAPI"`
-	ImageAPI     APIConnection         `json:"imageAPI"`
-	Capabilities map[string]Capability `json:"capabilities"`
+	API               APIConnection         `json:"api"`
+	APIModels         []string              `json:"apiModels"`
+	TextAPI           APIConnection         `json:"textAPI"`
+	ImageAPI          APIConnection         `json:"imageAPI"`
+	Capabilities      map[string]Capability `json:"capabilities"`
+	CitationsAPIKey   string                `json:"citationsApiKey,omitempty"`
+	HasCitationsKey   bool                  `json:"hasCitationsKey"`
+	ClearCitationsKey bool                  `json:"clearCitationsKey,omitempty"`
 }
 type savedConfig struct {
 	Config       AIConfig          `json:"config"`
@@ -187,6 +190,9 @@ func capable(c AIConfig, p string, vision bool) bool {
 	return v.Fingerprint == configPrint(c, p) && v.Text && (!vision || v.Vision)
 }
 func publicConfig(c AIConfig) AIConfig {
+	c.HasCitationsKey = c.CitationsAPIKey != ""
+	c.CitationsAPIKey = ""
+	c.ClearCitationsKey = false
 	c.API.HasKey = c.API.Key != ""
 	c.API.Key = ""
 	c.TextAPI.HasKey = c.TextAPI.Key != ""
@@ -259,6 +265,11 @@ func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请选择主 Agent")
 		return
 	}
+	c.CitationsAPIKey = strings.TrimSpace(c.CitationsAPIKey)
+	if len(c.CitationsAPIKey) > 4096 || strings.ContainsAny(c.CitationsAPIKey, "\r\n") || c.ClearCitationsKey && c.CitationsAPIKey != "" {
+		fail(w, 400, "引用服务 Key 无效")
+		return
+	}
 	for _, efforts := range []map[string]map[string]string{c.Efforts, c.TranslationEfforts, c.VisionEfforts} {
 		for provider, models := range efforts {
 			for _, effort := range models {
@@ -272,6 +283,12 @@ func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old := s.readAIConfig()
+	if c.ClearCitationsKey {
+		c.CitationsAPIKey = ""
+	} else if c.CitationsAPIKey == "" {
+		c.CitationsAPIKey = old.CitationsAPIKey
+	}
+	c.ClearCitationsKey, c.HasCitationsKey = false, false
 	if c.Efforts == nil {
 		c.Efforts = old.Efforts
 	}
