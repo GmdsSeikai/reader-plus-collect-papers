@@ -53,6 +53,11 @@ func main() {
 	}
 	server := reader.NewServer(store, token, *web)
 	defer server.Close()
+	// Startup recovery reconciles crash-interrupted imports and runs before
+	// any worker starts or request is admitted.
+	if err := server.RecoverImports(); err != nil {
+		log.Fatal(err)
+	}
 	if !*connector {
 		server.SetConnectorUnavailable("disabled")
 	} else {

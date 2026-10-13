@@ -140,6 +140,7 @@ func (s *Server) installImportFile(ctx context.Context, spec importInstall, comm
 	}
 	dest := filepath.Join(s.Store.Root, filepath.FromSlash(importTargetRel(spec.DocID, spec.Filename)))
 	installedByUs := false
+	testCrashPoint("pre-rename")
 	if st, statErr := os.Stat(dest); statErr == nil {
 		// A crash may have installed the file already. Only a verified digest
 		// match may continue; anything else keeps the row open for
@@ -155,7 +156,9 @@ func (s *Server) installImportFile(ctx context.Context, spec importInstall, comm
 		return Document{}, fmt.Errorf("无法保存原文件")
 	} else {
 		installedByUs = true
+		syncDir(filepath.Dir(dest))
 	}
+	testCrashPoint("installed")
 	if err := s.Store.markImportCommit(commitID, importStageInstalled, "", ""); err != nil {
 		if installedByUs {
 			_ = os.Remove(dest)
@@ -176,8 +179,10 @@ func (s *Server) installImportFile(ctx context.Context, spec importInstall, comm
 		err = markImportCommitTx(tx, commitID, importStageCommitted, d.ID)
 	}
 	if err == nil {
+		testCrashPoint("pre-commit")
 		err = tx.Commit()
 	}
+	testCrashPoint("post-commit")
 	if err != nil {
 		// Release the single connection before any non-transactional write;
 		// otherwise the log update deadlocks waiting for this very transaction.
@@ -204,4 +209,24 @@ func (s *Store) documentExists(docID string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// testCrashPoint exits the process at a named install boundary when the test
+// harness sets READER_TEST_CRASH_AT. Production never sets the variable.
+func testCrashPoint(name string) {
+	if os.Getenv("READER_TEST_CRASH_AT") == name {
+		os.Exit(1)
+	}
+}
+
+// syncDir flushes a directory entry after a rename so a crash cannot lose an
+// installed file that the database already recorded. Best effort: some
+// platforms refuse directory fsync.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
