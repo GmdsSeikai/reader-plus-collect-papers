@@ -1854,22 +1854,27 @@ kbd {
 .reference-error {
   color: var(--destructive);
 }
-.reader-block-hover [data-block-action] {
+.block-actions {
   position: absolute;
+  right: -1px;
+  bottom: 100%;
+  display: flex;
+  gap: 4px;
+  /* Padding bridges the gap so the pointer can reach the buttons. */
+  padding-bottom: 4px;
   pointer-events: auto;
   z-index: 1;
+}
+.block-actions [data-block-action] {
   box-shadow: 0 2px 8px #0002;
   border: 1px solid var(--border);
   color: var(--foreground);
   background: var(--popover);
+  opacity: 0.8;
 }
-.block-explain {
-  top: 5px;
-  right: 5px;
-}
-.block-preview {
-  bottom: 5px;
-  right: 5px;
+.block-actions [data-block-action]:hover,
+.block-actions [data-block-action]:focus-visible {
+  opacity: 1;
 }
 .image-attachments {
   display: flex;
@@ -1935,12 +1940,6 @@ kbd {
 }
 .image-preview-scroll img {
   display: block;
-}
-.reader-block-hover[data-compact] .block-explain {
-  top: -31px;
-}
-.reader-block-hover[data-compact] .block-preview {
-  bottom: -31px;
 }
 
 .library-filter-bar {

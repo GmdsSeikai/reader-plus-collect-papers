@@ -319,7 +319,8 @@ export const defaultTheme: ReaderTheme = {
   linkTranslationAnnotations: true,
   epubFlow: "scroll",
 };
-export type PDFBlockAction = "attach" | "preview" | "explain" | "translate";
+export type PDFBlockAction =
+  "attach" | "preview" | "copy" | "explain" | "translate";
 export interface PDFReadingAnchor {
   blockId: string;
   fraction: number;

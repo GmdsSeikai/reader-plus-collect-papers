@@ -108,6 +108,7 @@ import {
 } from "./annotations";
 import { ColorSwatches } from "./ColorSwatches";
 import { useSelectionClipboard } from "./useSelectionClipboard";
+import { copyImage, copyText } from "./chat/clipboard";
 import { NotesPanel } from "./NotesPanel";
 import { ExportNotesDialog } from "./ExportNotesDialog";
 import { EPUBReadingView } from "./translation/EPUBReadingView";
@@ -744,6 +745,15 @@ export function Workspace({
     }
   };
   const blockAction = (block: PDFBlock, action: PDFBlockAction) => {
+    if (action === "copy") {
+      if (block.image)
+        void copyImage(
+          blockImageURL(doc.id, block.id),
+          (block.caption || block.text).trim(),
+        );
+      else void copyText(block.text.trim(), "已复制");
+      return;
+    }
     if (!block.image) {
       if (action === "explain")
         void send("请解释这段原文的含义，区分原文结论与你的补充说明。", [
