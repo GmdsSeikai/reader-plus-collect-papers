@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.mac-only && '[{"os":"macos-15","target":"mac-arm64"}]' || '[{"os":"macos-15","target":"mac-arm64"},{"os":"windows-2022","target":"win-x64"}]') }}
+        include: ${{ fromJSON(inputs.mac-only && '[{"os":"macos-15","target":"mac-arm64"},{"os":"macos-15-intel","target":"mac-intel-x64"}]' || '[{"os":"macos-15","target":"mac-arm64"},{"os":"macos-15-intel","target":"mac-intel-x64"},{"os":"windows-2022","target":"win-x64"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -31,8 +31,8 @@ jobs:
       # No Apple or Windows credentials. macOS uses the fixed self-signed
       # certificate (apps/desktop/mac-sign.cjs) so in-place updates verify.
       CSC_FOR_PULL_REQUEST: "true"
-      READER_MAC_SIGN_P12: ${{ matrix.target == 'mac-arm64' && secrets.MAC_SIGN_P12 || '' }}
-      READER_MAC_SIGN_P12_PASSWORD: ${{ matrix.target == 'mac-arm64' && secrets.MAC_SIGN_P12_PASSWORD || '' }}
+      READER_MAC_SIGN_P12: ${{ startsWith(matrix.target, 'mac-') && secrets.MAC_SIGN_P12 || '' }}
+      READER_MAC_SIGN_P12_PASSWORD: ${{ startsWith(matrix.target, 'mac-') && secrets.MAC_SIGN_P12_PASSWORD || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

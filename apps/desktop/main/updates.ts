@@ -52,6 +52,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 const installerTargets: Record<string, string> = {
   "darwin/arm64": "mac-arm64.dmg",
+  "darwin/x64": "mac-intel-x64.dmg",
   "win32/x64": "win-x64.exe",
 };
 export function selectRelease(
@@ -95,7 +96,7 @@ export function selectRelease(
     checksumURL,
   };
   if (platform === "darwin") {
-    const archive = `Reader-${version}-mac-${arch}.zip`;
+    const archive = `Reader-${version}-${target.replace(/\.dmg$/, ".zip")}`;
     const archiveURL = assetURL(archive);
     if (archiveURL)
       update.archive = { installer: archive, downloadURL: archiveURL };
