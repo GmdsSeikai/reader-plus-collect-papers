@@ -11,7 +11,7 @@ import {
   SelectItem,
 } from "@reader/ui/components/select";
 const protocols = {
-  auto: "自动（中转默认 OpenAI）",
+  auto: "中转站的非官方api默认使用openai协议",
   openai: "OpenAI Chat Completions",
   anthropic: "Anthropic Messages",
 } as const;
