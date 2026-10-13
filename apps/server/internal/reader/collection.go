@@ -202,6 +202,16 @@ func (m *CollectionManager) importWorker(ctx context.Context, gen *collectionGen
 	}
 }
 
+// scheduleTick drives the periodic scheduler; tickOnce holds the per-tick
+// production sequence so tests can drive the same path deterministically.
+func (m *CollectionManager) tickOnce(ctx context.Context) {
+	m.startDueTasks(ctx)
+	m.runHotHistoryCycle(ctx)
+	if _, err := m.RefreshCitations(ctx, m.citationKey()); err != nil {
+		log.Printf("citation refresh: %v", err)
+	}
+}
+
 // scheduleTick starts due automatic runs and refreshes due citations. The
 // scheduler is owned by the manager and stops with it.
 func (m *CollectionManager) scheduleTick(ctx context.Context, gen *collectionGeneration) {
@@ -213,10 +223,7 @@ func (m *CollectionManager) scheduleTick(ctx context.Context, gen *collectionGen
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			m.startDueTasks(ctx)
-			if _, err := m.RefreshCitations(ctx, m.citationKey()); err != nil {
-				log.Printf("citation refresh: %v", err)
-			}
+			m.tickOnce(ctx)
 		}
 	}
 }

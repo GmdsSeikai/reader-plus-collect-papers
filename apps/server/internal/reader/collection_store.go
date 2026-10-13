@@ -136,6 +136,24 @@ func (s *Store) CollectionWritable() error {
 	return nil
 }
 
+// collectionWritableTx is the in-transaction form of CollectionWritable.
+// Callers holding a transaction must use this one: the non-tx form queries
+// through the single connection and would deadlock against the open tx.
+func collectionWritableTx(tx *sql.Tx) error {
+	var version int
+	err := tx.QueryRow("SELECT schema_version FROM collection_meta WHERE id=?", collectionMetaID).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if version > collectionSchemaVersion {
+		return errCollectionSchemaTooNew
+	}
+	return nil
+}
+
 func (s *Store) StoreVersionQuery(version *int) error {
 	err := s.DB.QueryRow("SELECT schema_version FROM collection_meta WHERE id=?", collectionMetaID).Scan(version)
 	if errors.Is(err, sql.ErrNoRows) {
