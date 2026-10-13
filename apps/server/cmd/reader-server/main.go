@@ -98,6 +98,12 @@ func main() {
 	stopProcessing := server.StartProcessing(runContext)
 	defer stopProcessing()
 	httpServer := &http.Server{BaseContext: func(net.Listener) context.Context { return runContext }, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+	removeDiscovery, discoveryErr := reader.WriteDiscovery(root, reader.Discovery{URL: "http://" + listener.Addr().String(), Token: token, PID: os.Getpid(), Version: readerVersion})
+	if discoveryErr != nil {
+		log.Printf("command line discovery unavailable: %v", discoveryErr)
+	} else {
+		defer removeDiscovery()
+	}
 	ready, _ := json.Marshal(map[string]string{"url": "http://" + listener.Addr().String(), "token": token})
 	fmt.Println(string(ready))
 	stop := make(chan os.Signal, 1)
