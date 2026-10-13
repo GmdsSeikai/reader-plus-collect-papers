@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -277,15 +278,27 @@ func runAttempt(ctx context.Context, adapter Adapter, in AIInput, emit func(Prov
 func (g *GenerationService) Generate(ctx context.Context, in AIInput, interactive bool, emit func(ProviderEvent) error) (AIResult, error) {
 	return g.generate(ctx, in, interactive, emit != nil, emit)
 }
-func (g *GenerationService) attempt(ctx context.Context, provider string, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
-	call := UsageCall{ID: id(), Provider: provider, StartedAt: now(), Status: "running", Models: []ModelTokens{{Model: ""}}}
+func (g *GenerationService) attempt(ctx context.Context, provider string, in AIInput, emit func(ProviderEvent) error) (result GenerateResult, err error) {
+	started := time.Now()
+	attemptID := id()
+	slog.Info("generation.start", "attemptId", attemptID, "requestId", requestID(ctx), "provider", provider, "vision", len(in.images()) > 0)
+	defer func() {
+		level := slog.LevelInfo
+		kind := ErrorKind("")
+		if err != nil {
+			level = slog.LevelError
+			kind = errorKind(err)
+		}
+		slog.Log(ctx, level, "generation.finish", "attemptId", attemptID, "requestId", requestID(ctx), "provider", provider, "durationMs", time.Since(started).Milliseconds(), "errorCode", kind)
+	}()
+	call := UsageCall{ID: attemptID, Provider: provider, StartedAt: now(), Status: "running", Models: []ModelTokens{{Model: ""}}}
 	if g.usageSink != nil {
 		if err := g.usageSink(call); err != nil {
 			return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
 		}
 	}
 	var metricMu sync.Mutex
-	result, err := runAttempt(ctx, g.connections[provider].Adapter, in, func(event ProviderEvent) error {
+	result, err = runAttempt(ctx, g.connections[provider].Adapter, in, func(event ProviderEvent) error {
 		if len(event.Metrics) > 0 {
 			metricMu.Lock()
 			call.Models = mergeModelTokens(call.Models, event.Metrics)
