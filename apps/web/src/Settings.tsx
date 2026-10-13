@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { DiagnosticExport } from "./DiagnosticExport";
+import { CommandLineSettings } from "./CommandLineSettings";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
@@ -1036,6 +1037,7 @@ export function Settings({
                 数据目录。发送的选区或章节会交给对应服务。
               </p>
             </section>
+            <CommandLineSettings open={open} />
           </TabsContent>
         </Tabs>
       </DialogContent>

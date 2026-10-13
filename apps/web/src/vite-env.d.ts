@@ -22,6 +22,10 @@ interface Window {
       settings: import("@reader/core").ProxySettings,
     ) => Promise<import("@reader/core").ProxyCheckResult>;
     restart?: () => Promise<void>;
+    commandLine?: () => Promise<import("@reader/core").CommandLineStatus>;
+    setCommandLine?: (
+      installed: boolean,
+    ) => Promise<import("@reader/core").CommandLineStatus>;
     writeClipboardText: (text: string) => Promise<void>;
     setAppearance: (
       appearance: "light" | "sepia" | "dark" | "system",
