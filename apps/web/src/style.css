@@ -1298,6 +1298,19 @@ kbd {
   align-items: center;
   justify-content: space-between;
 }
+.note-card > .note-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.note-editor > textarea {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.note-editor > input {
+  min-width: 0;
+}
 .note-card [data-slot="badge"] {
   font-size: 9px;
 }

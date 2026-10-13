@@ -290,7 +290,7 @@ function NoteCard({
         />
       </Button>
       {editing ? (
-        <div className="space-y-2">
+        <div className="note-editor">
           <Textarea
             autoFocus
             aria-label={question ? "问题" : "批注"}
