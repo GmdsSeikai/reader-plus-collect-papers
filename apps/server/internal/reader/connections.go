@@ -23,10 +23,11 @@ import (
 )
 
 type APIConnection struct {
-	URL    string `json:"url"`
-	Model  string `json:"model"`
-	Key    string `json:"key,omitempty"`
-	HasKey bool   `json:"hasKey"`
+	Protocol string `json:"protocol,omitempty"`
+	URL      string `json:"url"`
+	Model    string `json:"model"`
+	Key      string `json:"key,omitempty"`
+	HasKey   bool   `json:"hasKey"`
 }
 type Capability struct {
 	PendingVision bool   `json:"pendingVision,omitempty"`
@@ -159,7 +160,7 @@ func configPrint(c AIConfig, p string) string {
 	} else if p == "image-api" {
 		value = c.ImageAPI
 	} else if model, ok := strings.CutPrefix(p, "api:"); ok {
-		value = []string{"api", c.API.URL, c.API.Key, model}
+		value = []string{"api", c.API.URL, c.API.Key, c.API.Protocol, apiRulesVersion, model}
 	} else if p == "api" {
 		// Checked per model, never as a whole.
 		return ""
@@ -188,6 +189,9 @@ func publicConfig(c AIConfig) AIConfig {
 	return c
 }
 func validateAPI(c APIConnection) error {
+	if e := validateAPIProtocol(c.Protocol); e != nil {
+		return e
+	}
 	if c.URL == "" && c.Model == "" && c.Key == "" {
 		return nil
 	}
@@ -202,10 +206,19 @@ func validateAPI(c APIConnection) error {
 
 // The API agent chooses models per task, so only the endpoint is required.
 func validateAgentAPI(c APIConnection) error {
+	if e := validateAPIProtocol(c.Protocol); e != nil {
+		return e
+	}
 	if c.URL == "" && c.Key == "" {
 		return nil
 	}
 	return validateAPIURL(c.URL)
+}
+func validateAPIProtocol(protocol string) error {
+	if protocol != "" && protocol != "auto" && protocol != "openai" && protocol != "anthropic" {
+		return errors.New("无效的 API 协议")
+	}
+	return nil
 }
 func validateAPIURL(raw string) error {
 	u, e := url.Parse(raw)
@@ -418,8 +431,8 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 	s.wakeProcessing()
 }
 
-// Probes use the selected model with CLI defaults. Listing models or mapping
-// chat effort is optional metadata and must not block a real capability check.
+// CLI probes use model defaults. API probes exercise saved reasoning settings;
+// catalog failures still allow a selected model to be tested.
 func (s *Server) probeConnection(parent context.Context, c AIConfig, p string, in AIInput, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
@@ -432,9 +445,21 @@ func (s *Server) probeConnection(parent context.Context, c AIConfig, p string, i
 	}
 	var adapter Adapter = cliAdapter{s.Store.Root, p, model}
 	if model, ok := strings.CutPrefix(p, "api:"); ok {
-		// Probe exactly this model, without effort, for text and images alike.
-		choice := apiModelChoice{model, ""}
-		adapter = apiAgentAdapter{c.API, choice, choice, taskChat, func(context.Context) ([]AgentModel, error) { return nil, errors.New("not listed") }}
+		// Exercise the same parameter builder as generation, including the
+		// saved effort. A successful probe establishes acceptance, not efficacy.
+		efforts, selected := c.Efforts, c.Models["api"]
+		if len(in.images()) > 0 {
+			efforts, selected = c.VisionEfforts, c.VisionModels["api"]
+		}
+		effort := efforts["api"][model]
+		if selected == "" && efforts["api"][""] != "" {
+			effort = efforts["api"][""]
+		}
+		if effort == "" {
+			effort = "medium"
+		}
+		choice := apiModelChoice{model, effort}
+		adapter = apiAgentAdapter{c.API, choice, choice, taskChat, s.apiCatalog(c.API)}
 	}
 	if p == "text-api" {
 		adapter = apiAdapter{c.TextAPI}

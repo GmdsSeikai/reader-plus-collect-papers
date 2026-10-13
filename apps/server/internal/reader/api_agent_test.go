@@ -176,7 +176,7 @@ func TestAPIModelCheckIsPerModel(t *testing.T) {
 	if !capable(saved, "api:deepseek-flash", false) || capable(saved, "api:broken", false) || saved.Capabilities["api:broken"].Error == "" {
 		t.Fatalf("per-model results: %+v", saved.Capabilities)
 	}
-	if got := calls(); got[0].Model != "deepseek-flash" || got[0].Effort != "" || got[1].Model != "broken" {
+	if got := calls(); got[0].Model != "deepseek-flash" || got[0].Effort != "high" || got[1].Model != "broken" {
 		t.Fatalf("probes: %+v", got)
 	}
 }

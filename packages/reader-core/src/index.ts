@@ -520,6 +520,8 @@ export interface AICapability {
   error?: string;
 }
 export interface APIConnection {
+  /** Auto detects official endpoints; other addresses use OpenAI Chat Completions. */
+  protocol?: "auto" | "openai" | "anthropic";
   url: string;
   model: string;
   key?: string;
@@ -547,6 +549,11 @@ export interface AIConfig {
   capabilities: Record<string, AICapability>;
 }
 export interface AgentModel {
+  effortInfo?: {
+    mode: "levels" | "budget" | "fixed" | "unknown";
+    note: string;
+    mappings?: Partial<Record<ReasoningEffort, string>>;
+  };
   id: string;
   name: string;
   description: string;

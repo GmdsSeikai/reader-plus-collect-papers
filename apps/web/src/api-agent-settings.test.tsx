@@ -190,6 +190,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com",
+        protocol: "auto",
         model: "",
         key: "sk-test",
         hasKey: false,
@@ -236,6 +237,7 @@ it("keeps the saved key when changing only the API endpoint and rechecks models"
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com/v1",
+        protocol: "auto",
         model: "",
         key: undefined,
         hasKey: true,
@@ -248,6 +250,7 @@ it("keeps the saved key when changing only the API endpoint and rechecks models"
   expect(api.testAI).toHaveBeenCalledTimes(4);
   expect(config.api).toEqual({
     url: "https://api.deepseek.com/v1",
+    protocol: "auto",
     model: "",
     hasKey: true,
   });
@@ -312,4 +315,39 @@ it("defaults chapter context off and persists both toggle states without recheck
   expect(config.chatIncludeChapter).toBe(false);
   expect(toggle().getAttribute("aria-checked")).toBe("false");
   expect(api.testAI).not.toHaveBeenCalled();
+});
+
+it("persists a relay protocol override while retaining its saved key", async () => {
+  config.api = { url: "https://relay.example/v1", model: "", hasKey: true };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  await openAPI();
+  await act(async () =>
+    (
+      host.querySelector('[aria-label="API 协议"]') as HTMLButtonElement
+    ).click(),
+  );
+  const option = Array.from(document.querySelectorAll('[role="option"]')).find(
+    (e) => e.textContent === "Anthropic Messages",
+  ) as HTMLElement;
+  expect(option).toBeDefined();
+  await act(async () => {
+    option.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    option.click();
+  });
+  await submit();
+  expect(config.api).toEqual({
+    url: "https://relay.example/v1",
+    model: "",
+    hasKey: true,
+    protocol: "anthropic",
+  });
+  expect(api.saveAIConfig).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      api: expect.objectContaining({
+        protocol: "anthropic",
+        key: undefined,
+        hasKey: true,
+      }),
+    }),
+  );
 });
