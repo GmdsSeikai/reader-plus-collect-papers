@@ -1370,6 +1370,21 @@
                                                 {
                                                   "$ref": "#/components/schemas/DocumentLocation",
                                                 },
+                                              "sourceId": { "type": "string" },
+                                              "corpusRevision":
+                                                { "type": "string" },
+                                              "contentHash":
+                                                { "type": "string" },
+                                              "precision":
+                                                {
+                                                  "type": "string",
+                                                  "enum":
+                                                    [
+                                                      "page",
+                                                      "block",
+                                                      "paragraph",
+                                                    ],
+                                                },
                                             },
                                           "required": ["text", "location"],
                                         },
@@ -2009,7 +2024,8 @@
                     "name": "capability",
                     "in": "query",
                     "description": "Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration.",
-                    "schema": { "type": "string", "enum": ["text", "vision"] },
+                    "schema":
+                      { "type": "string", "enum": ["text", "vision", "tools"] },
                   },
                   {
                     "name": "model",
@@ -3438,6 +3454,62 @@
                 },
             },
         },
+      "/api/documents/{id}/messages/{message}/sources/{source}":
+        {
+          "get":
+            {
+              "summary": "Validate a persisted original-text citation before navigation",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "source",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Original source is still current",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["valid"],
+                                  "properties":
+                                    { "valid": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "404":
+                    {
+                      "description": "Document, message or source is unavailable",
+                    },
+                  "409":
+                    {
+                      "description": "Original text or citation version has changed",
+                    },
+                },
+            },
+        },
     },
   "components":
     {
@@ -3829,6 +3901,14 @@
                                 {
                                   "$ref": "#/components/schemas/DocumentLocation",
                                 },
+                              "sourceId": { "type": "string" },
+                              "corpusRevision": { "type": "string" },
+                              "contentHash": { "type": "string" },
+                              "precision":
+                                {
+                                  "type": "string",
+                                  "enum": ["page", "block", "paragraph"],
+                                },
                             },
                           "required": ["text", "location"],
                         },
@@ -3877,6 +3957,31 @@
                                     "type": "string",
                                     "enum": ["reading", "reading-image"],
                                   },
+                              },
+                          },
+                      },
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "type": "string", "enum": ["activity"] },
+                        "data":
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["phase", "message"],
+                            "properties":
+                              {
+                                "phase":
+                                  {
+                                    "type": "string",
+                                    "enum": ["indexing", "reading", "writing"],
+                                  },
+                                "message": { "type": "string" },
+                                "tool": { "type": "string" },
                               },
                           },
                       },
@@ -4068,6 +4173,18 @@
                   "vision": { "type": "boolean" },
                   "checkedAt": { "type": "string" },
                   "error": { "type": "string" },
+                  "tools":
+                    {
+                      "type": "string",
+                      "enum": ["passed", "unsupported", "failed"],
+                      "description": "Independent structured tool-call capability; missing means not checked.",
+                    },
+                  "toolError": { "type": "string" },
+                  "toolSchemaVersion":
+                    {
+                      "type": "string",
+                      "description": "Server-owned fingerprint of the checked tool protocol and schemas.",
+                    },
                 },
               "required": ["text", "vision", "checkedAt"],
             },

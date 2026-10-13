@@ -139,6 +139,12 @@ type codexChatAdapter struct {
 }
 
 func (a codexChatAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && len(req.Input.images()) == 0 {
+		a.cache.reset()
+		return a.streamWith(ctx, req, emit, func(cli cliAdapter, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
+			return streamCodexDocumentChat(ctx, cli.root, cli.model, req.Input, emit)
+		})
+	}
 	if req.Input.Chat == nil || len(req.Input.images()) > 0 {
 		return a.configuredCLIAdapter.Stream(ctx, req, emit)
 	}
@@ -169,7 +175,22 @@ func (a codexChatAdapter) Stream(ctx context.Context, req GenerateRequest, emit 
 		return GenerateResult{text, "stop"}, nil
 	})
 }
-func (s *Server) Close() { s.codexChat.close() }
+func (s *Server) Close() {
+	s.documentMu.Lock()
+	s.documentClosed = true
+	var tasks []*documentTask
+	for _, group := range s.documentTasks {
+		for task := range group {
+			task.cancel()
+			tasks = append(tasks, task)
+		}
+	}
+	s.documentMu.Unlock()
+	s.codexChat.close()
+	for _, task := range tasks {
+		<-task.done
+	}
+}
 
 func (c *codexChatCache) deleteDocument(document string) {
 	c.mu.Lock()

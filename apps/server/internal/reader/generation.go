@@ -291,43 +291,16 @@ func (g *GenerationService) attempt(ctx context.Context, provider string, in AII
 		}
 		slog.Log(ctx, level, "generation.finish", "attemptId", attemptID, "requestId", requestID(ctx), "provider", provider, "durationMs", time.Since(started).Milliseconds(), "errorCode", kind)
 	}()
-	call := UsageCall{ID: attemptID, Provider: provider, StartedAt: now(), Status: "running", Models: []ModelTokens{{Model: ""}}}
-	if g.usageSink != nil {
-		if err := g.usageSink(call); err != nil {
-			return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
-		}
+	sink := g.usageSink
+	structuredUsage := in.Chat != nil && in.Chat.Agent != nil && (provider == "codex" || provider == "api" || provider == "text-api")
+	if structuredUsage {
+		in.UsageSink = g.usageSink
+		in.UsageProvider = provider
+		sink = nil
 	}
-	var metricMu sync.Mutex
-	result, err = runAttempt(ctx, g.connections[provider].Adapter, in, func(event ProviderEvent) error {
-		if len(event.Metrics) > 0 {
-			metricMu.Lock()
-			call.Models = mergeModelTokens(call.Models, event.Metrics)
-			if g.usageSink != nil {
-				if err := g.usageSink(call); err != nil {
-					metricMu.Unlock()
-					return generationError(ErrorSave, "无法保存调用统计")
-				}
-			}
-			metricMu.Unlock()
-		}
-		if emit != nil {
-			return emit(event)
-		}
-		return nil
+	result, err = trackModelUsage(UsageCall{ID: attemptID, Provider: provider}, sink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
+		return runAttempt(ctx, g.connections[provider].Adapter, in, send)
 	})
-	call.FinishedAt = now()
-	call.Status = "complete"
-	if err != nil {
-		call.Status = "failed"
-		if errors.Is(err, context.Canceled) {
-			call.Status = "cancelled"
-		}
-	}
-	if g.usageSink != nil {
-		if saveErr := g.usageSink(call); saveErr != nil {
-			return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
-		}
-	}
 	// User cancellation and a disconnected consumer do not invalidate the agent.
 	if err != nil && !errors.Is(ctx.Err(), context.Canceled) && errorKind(err) != ErrorCanceled && g.attemptFailed != nil {
 		g.attemptFailed(provider, len(in.images()) > 0, err)

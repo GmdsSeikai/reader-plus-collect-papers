@@ -115,6 +115,9 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 		return req, generationError(ErrorCapability, "没有通过文本推理检测的 API 模型")
 	}
 	for _, m := range models {
+		if m.ID == req.Model && m.Capability != nil {
+			req.Tools = m.Capability.Tools == "passed" && m.Capability.ToolSchemaVersion == documentToolSchemaVersion
+		}
 		if m.ID == req.Model && len(m.SupportedEfforts) > 0 && choice.level != "" {
 			req.Effort = nativeEffort("api", choice.level, m.ID, models)
 		}
@@ -126,6 +129,9 @@ func (a apiAgentAdapter) Stream(ctx context.Context, req GenerateRequest, emit f
 	completion, err := a.resolve(ctx, len(req.Input.images()) > 0)
 	if err != nil {
 		return GenerateResult{}, err
+	}
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && a.task == taskChat && len(req.Input.images()) == 0 {
+		return streamAPIDocumentChat(ctx, a.conn, completion, req.Input, emit)
 	}
 	return streamCompletion(ctx, a.conn, completion, req.Input, emit)
 }

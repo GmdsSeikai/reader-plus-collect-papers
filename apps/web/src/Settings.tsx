@@ -306,6 +306,31 @@ export function Settings({
     await checkAll([`api:${model.id}`], () => "text", snapshot);
     warnWithoutVision(apiModels);
   };
+  const checkTools = async (model: AgentModel) => {
+    const snapshot = useReaderStore.getState().aiConfig;
+    if (!snapshot) return;
+    setSaving(true);
+    try {
+      const capability = await api.testAI("api", "tools", model.id);
+      const current = useReaderStore.getState().aiConfig;
+      if (current && current.api.url === snapshot.api.url)
+        setAIConfig({
+          ...current,
+          capabilities: {
+            ...current.capabilities,
+            [`api:${model.id}`]: capability,
+          },
+        });
+      if (capability.tools !== "passed")
+        toast.error(
+          capability.toolError || "工具调用未通过，仍可使用检索辅助回答",
+        );
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const saveConfig = async (change: (latest: AIConfig) => AIConfig) => {
     setSaving(true);
     try {
@@ -499,6 +524,19 @@ export function Settings({
                                 onClick={() => void checkModel(model)}
                               >
                                 检测
+                              </Button>
+                            )}
+                            {result?.text && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={saving || testing.has(id)}
+                                onClick={() => void checkTools(model)}
+                                title={result.toolError}
+                              >
+                                {result.tools === "passed"
+                                  ? "检索工具已通过"
+                                  : "检测检索工具"}
                               </Button>
                             )}
                             {model.custom && (

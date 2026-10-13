@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -24,12 +25,19 @@ type codexSession struct {
 	usageComplete                      bool
 	completedTurns                     map[string]bool
 	closeOnce                          sync.Once
+	initialized                        bool
+	baseInstructions                   string
+	documentMCP                        string
+	documentMCPName                    string
 }
 
 func (s *codexSession) close() {
 	s.closeOnce.Do(func() { _ = s.cmd.Process.Kill(); _ = s.stdin.Close(); _ = s.stdout.Close(); _ = s.cmd.Wait() })
 }
 func newCodexSession(work, model string) (*codexSession, error) {
+	return startCodexSession(work, model, nil, "")
+}
+func startCodexSession(work, model string, overrides []string, token string) (*codexSession, error) {
 	args := []string{"app-server", "--listen", "stdio://"}
 	for _, setting := range []string{
 		`approval_policy="never"`, `sandbox_mode="read-only"`,
@@ -42,6 +50,12 @@ func newCodexSession(work, model string) (*codexSession, error) {
 		args = append(args, "-c", setting)
 	}
 	cmd := exec.Command("codex", args...)
+	for _, setting := range overrides {
+		cmd.Args = append(cmd.Args, "-c", setting)
+	}
+	if token != "" {
+		cmd.Env = append(os.Environ(), "READER_DOCUMENT_MCP_TOKEN="+token)
+	}
 	cmd.Dir, cmd.Stderr, cmd.WaitDelay = work, io.Discard, 3*time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -79,7 +93,7 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 			s.close()
 		}
 	}()
-	scan, work, model := s.scan, s.work, s.model
+	work, model := s.work, s.model
 	previousTotal := s.total
 	usageReceived := false
 
@@ -111,13 +125,7 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		}
 		return nil
 	}
-	type message struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
-		Params json.RawMessage `json:"params"`
-		Result json.RawMessage `json:"result"`
-		Error  json.RawMessage `json:"error"`
-	}
+	type message = codexRPCMessage
 	// Notifications can interleave with RPC responses, including turn/start.
 	handle := func(msg message) error {
 		if completed {
@@ -208,55 +216,27 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		}
 		return nil
 	}
-	read := func() (message, error) {
-		var msg message
-		if !scan.Scan() {
-			if ctx.Err() != nil {
-				return msg, ctx.Err()
-			}
-			return msg, generationError(ErrorNetwork, "Codex 输出连接中断或事件过大")
-		}
-		if !utf8.Valid(scan.Bytes()) || json.Unmarshal(scan.Bytes(), &msg) != nil {
-			return msg, generationError(ErrorProtocol, "Codex 输出协议无效")
-		}
-		return msg, nil
-	}
+	read := func() (message, error) { return s.readRPCMessage(ctx) }
 	call := func(method string, params any) (json.RawMessage, error) {
-		s.serial++
-		id := s.serial
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		result, e := s.callRPC(ctx, lifecycle, method, params, handle)
+		if errors.Is(e, errCodexRPCResponse) {
+			return nil, providerError
 		}
-		if err := lifecycle.send(map[string]any{"id": id, "method": method, "params": params}); err != nil {
-			return nil, err
-		}
-		for {
-			msg, err := read()
-			if err != nil {
-				return nil, err
-			}
-			if err = handle(msg); err != nil {
-				return nil, err
-			}
-			var responseID int
-			if msg.Method == "" && json.Unmarshal(msg.ID, &responseID) == nil && responseID == id {
-				if len(msg.Error) > 0 && string(msg.Error) != "null" {
-					return nil, providerError
-				}
-				return msg.Result, nil
-			}
-		}
+		return result, e
 	}
 	var raw json.RawMessage
 	if threadID == "" {
-		if _, err = call("initialize", map[string]any{"clientInfo": map[string]string{"name": "reader", "title": "Reader", "version": "0.1.0"}}); err != nil {
+		if err = s.initializeRPC(ctx, lifecycle, handle); err != nil {
+			if errors.Is(err, errCodexRPCResponse) {
+				return "", providerError
+			}
 			return "", err
 		}
-		if err = lifecycle.send(map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
-			return "", err
+		instructions := s.baseInstructions
+		if instructions == "" {
+			instructions = readerSystemPrompt
 		}
-		params := map[string]any{"cwd": work, "ephemeral": true, "sandbox": "read-only", "approvalPolicy": "never",
-			"baseInstructions": readerSystemPrompt}
+		params := map[string]any{"cwd": work, "ephemeral": true, "sandbox": "read-only", "approvalPolicy": "never", "baseInstructions": instructions}
 		if model != "" {
 			params["model"] = model
 		}
@@ -275,6 +255,17 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		}
 		threadID = thread.Thread.ID
 		s.threadID, s.actualModel = threadID, thread.Model
+		if s.baseInstructions != "" {
+			if _, err = s.verifyDocumentConfig(ctx); err != nil {
+				return "", err
+			}
+			if s.documentMCP != "" {
+				raw, err = call("mcpServerStatus/list", map[string]any{"threadId": threadID, "limit": 100, "detail": "toolsAndAuthOnly"})
+				if err != nil || !validDocumentMCPStatus(raw, s.documentMCPName) {
+					return "", generationError(ErrorCapability, "Codex 文档工具未就绪或工具范围不符")
+				}
+			}
+		}
 	}
 	emitMetrics(metrics, []ModelTokens{{Model: s.actualModel}})
 	input := []any{map[string]string{"type": "text", "text": in.Prompt}}
@@ -320,4 +311,68 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 	s.completedTurns[turnID] = true
 	s.usageComplete = usageReceived
 	return answer.String(), nil
+}
+
+// Configuration discovery and generation use the same session transport.
+type codexRPCMessage struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+	Result json.RawMessage `json:"result"`
+	Error  json.RawMessage `json:"error"`
+}
+
+var errCodexRPCResponse = errors.New("Codex RPC request failed")
+
+func (s *codexSession) readRPCMessage(ctx context.Context) (codexRPCMessage, error) {
+	var msg codexRPCMessage
+	if !s.scan.Scan() {
+		if ctx.Err() != nil {
+			return msg, ctx.Err()
+		}
+		return msg, generationError(ErrorNetwork, "Codex 输出连接中断或事件过大")
+	}
+	if !utf8.Valid(s.scan.Bytes()) || json.Unmarshal(s.scan.Bytes(), &msg) != nil {
+		return msg, generationError(ErrorProtocol, "Codex 输出协议无效")
+	}
+	return msg, nil
+}
+func (s *codexSession) callRPC(ctx context.Context, life *rpcLifecycle, method string, params any, handle func(codexRPCMessage) error) (json.RawMessage, error) {
+	s.serial++
+	serial := s.serial
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err := life.send(map[string]any{"id": serial, "method": method, "params": params}); err != nil {
+		return nil, err
+	}
+	for {
+		msg, err := s.readRPCMessage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err = handle(msg); err != nil {
+			return nil, err
+		}
+		var responseID int
+		if msg.Method == "" && json.Unmarshal(msg.ID, &responseID) == nil && responseID == serial {
+			if len(msg.Error) > 0 && string(msg.Error) != "null" {
+				return nil, errCodexRPCResponse
+			}
+			return msg.Result, nil
+		}
+	}
+}
+func (s *codexSession) initializeRPC(ctx context.Context, life *rpcLifecycle, handle func(codexRPCMessage) error) error {
+	if s.initialized {
+		return nil
+	}
+	if _, err := s.callRPC(ctx, life, "initialize", map[string]any{"clientInfo": map[string]string{"name": "reader", "title": "Reader", "version": "0.5.3"}}, handle); err != nil {
+		return err
+	}
+	if err := life.send(map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
+		return err
+	}
+	s.initialized = true
+	return nil
 }

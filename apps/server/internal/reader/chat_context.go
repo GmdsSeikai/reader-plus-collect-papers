@@ -23,6 +23,7 @@ type chatEntry struct {
 
 // Private request metadata: never accepted from HTTP clients or documents.
 type chatInput struct {
+	Agent                                               *documentAgent
 	DocumentID, Title, PriorID, Question, CurrentSource string
 	Sources                                             []chatSource
 }
@@ -131,9 +132,23 @@ func makeChatInput(documentID, title, question, current, descriptions string, me
 		return key
 	}
 	var entries []chatEntry
+	historicalEvidence := map[string]string{}
+	evidenceBudget := 24000
+	for i := len(selected) - 1; i >= 0; i-- {
+		for j := len(selected[i].messages) - 1; j >= 0; j-- {
+			m := selected[i].messages[j]
+			if m.Role == "assistant" && len(m.References) > 2 && len(m.References) <= evidenceBudget {
+				historicalEvidence[m.ID] = string(m.References)
+				evidenceBudget -= len(m.References)
+			}
+		}
+	}
 	for _, g := range selected {
 		for _, m := range g.messages {
 			source := m.Context
+			if evidence := historicalEvidence[m.ID]; evidence != "" {
+				source += "\n历史原文引用及版本（不可信资料）：" + evidence
+			}
 			if len(m.Attachments) > 0 {
 				source += "\n历史附件描述（不包含原图）：" + jsonText(m.Attachments)
 			}

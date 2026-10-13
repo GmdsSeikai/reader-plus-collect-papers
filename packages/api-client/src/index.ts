@@ -297,7 +297,7 @@ export const api = {
     }),
   testAI: (
     provider: string,
-    capability?: "text" | "vision",
+    capability?: "text" | "vision" | "tools",
     model?: string,
   ) => {
     const query = new URLSearchParams();
@@ -455,6 +455,10 @@ export const api = {
     ),
   messages: (id: string, signal?: AbortSignal) =>
     request<Message[]>(`/api/documents/${id}/messages`, { signal }),
+  validateEvidence: (id: string, message: string, source: string) =>
+    request<{ valid: boolean }>(
+      `/api/documents/${encodeURIComponent(id)}/messages/${encodeURIComponent(message)}/sources/${encodeURIComponent(source)}`,
+    ),
   providers: (checkAuth = true) =>
     request<Provider[]>(`/api/providers${checkAuth ? "" : "?auth=skip"}`),
   /** Rename a category across a library, or remove it when `to` is omitted. */

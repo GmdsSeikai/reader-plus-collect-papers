@@ -430,6 +430,11 @@ export interface Provider {
   status: string;
 }
 export interface SourceReference {
+  /** Server-issued evidence from a completed document reading attempt. */
+  sourceId?: string;
+  corpusRevision?: string;
+  contentHash?: string;
+  precision?: "page" | "block" | "paragraph";
   text: string;
   location: DocumentLocation;
   kind?: "selection" | "section";
@@ -511,6 +516,9 @@ export interface TranslationBlock {
   error?: string;
 }
 export interface AICapability {
+  tools?: "passed" | "unsupported" | "failed";
+  toolSchemaVersion?: string;
+  toolError?: string;
   pendingVision?: boolean;
   text: boolean;
   vision: boolean;

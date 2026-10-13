@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 )
 
 type chatStreamWriter struct {
+	mu         sync.Mutex
 	w          http.ResponseWriter
 	cancel     context.CancelFunc
 	terminal   bool
@@ -17,6 +20,8 @@ type chatStreamWriter struct {
 }
 
 func (s *chatStreamWriter) send(event string, value any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.terminal {
 		return generationError(ErrorProtocol, "输出流已结束")
 	}
@@ -98,6 +103,42 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	if finalErr = out.send("status", map[string]string{"status": status}); finalErr != nil {
 		return
 	}
+	if in.Chat != nil && len(in.images()) == 0 && (config.Primary == "codex" || config.Primary == "api") {
+		d, docErr := s.Store.Document(documentID)
+		if docErr == nil {
+			if _, fileErr := os.Stat(s.Store.File(d)); fileErr == nil {
+				if finalErr = out.send("activity", map[string]string{"phase": "indexing", "message": "准备全文原文"}); finalErr != nil {
+					return
+				}
+				corpus, corpusErr := s.documentCorpus(ctx, documentID)
+				if corpusErr != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					if finalErr = out.send("activity", map[string]string{"phase": "reading", "message": "全文索引未就绪，使用当前摘录"}); finalErr != nil {
+						return
+					}
+				} else {
+					in.Chat.Agent = &documentAgent{server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool string) error {
+						message := "读取原文"
+						if tool == "search_document" {
+							message = "检索全文"
+						}
+						if tool == "get_outline" {
+							message = "查看目录与原文范围"
+						}
+						if tool == "pre_retrieval" {
+							message = "检索辅助回答"
+						}
+						if phase == "writing" {
+							message = "根据原文生成回答"
+						}
+						return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
+					}}
+				}
+			}
+		}
+	}
 	service := s.generationService(config)
 	if _, err := s.Store.DB.Exec("INSERT OR IGNORE INTO chat_usage_coverage(document_id,history_complete) VALUES(?,1)", documentID); err != nil {
 		finalErr = generationError(ErrorSave, "无法保存聊天统计")
@@ -120,12 +161,17 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	if err == nil {
 		if _, err = s.Store.Document(documentID); err != nil {
 			err = generationError(ErrorCanceled, "文档已不可用")
+		} else if in.Chat != nil && in.Chat.Agent != nil {
+			err = s.saveDocumentAgentAnswer(ctx, in.Chat.Agent, result.Text, result.Provider)
 		} else if err = s.Store.saveMessage(Message{DocumentID: documentID, Role: "assistant", Content: result.Text}); err != nil {
 			err = generationError(ErrorSave, "回答已收到，但无法保存到本地数据库")
 		}
 	}
 	finalErr = err
 	if err != nil {
+		if in.Chat != nil && in.Chat.Agent != nil {
+			s.saveFailedDocumentRun(in.Chat.Agent, result.Provider, err)
+		}
 		if ctx.Err() == nil {
 			_ = out.send("error", map[string]string{"error": err.Error()})
 		}

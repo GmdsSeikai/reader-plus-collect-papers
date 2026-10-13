@@ -26,6 +26,9 @@ func (a apiAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(P
 	if e := validateAPI(a.config); e != nil {
 		return GenerateResult{}, generationError(ErrorConfiguration, e.Error())
 	}
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && len(req.Input.images()) == 0 {
+		return streamAPIDocumentChat(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
+	}
 	return streamCompletion(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
 }
 
@@ -39,6 +42,7 @@ type completionMessage struct {
 type completionRequest struct {
 	Model, Effort string
 	History       []completionMessage
+	Tools         bool
 }
 
 func completionContent(in AIInput) any {
@@ -111,6 +115,9 @@ func streamCompletion(ctx context.Context, c APIConnection, req completionReques
 	payload := map[string]any{"model": req.Model, "messages": messages, "stream": true, "n": 1, "stream_options": map[string]bool{"include_usage": true}}
 	if req.Effort != "" {
 		payload["reasoning_effort"] = req.Effort
+		if strings.HasPrefix(strings.ToLower(req.Model), "deepseek") {
+			payload["thinking"] = map[string]string{"type": "enabled"}
+		}
 	}
 	body, _ := json.Marshal(payload)
 	response, e := apiRequest(ctx, c, "POST", "/chat/completions", body)
@@ -127,17 +134,10 @@ func streamCompletion(ctx context.Context, c APIConnection, req completionReques
 
 const maxProviderFrame = 8 << 20 // 1 MiB text can expand sixfold in JSON escapes.
 func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEvent) error) (GenerateResult, error) {
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 4096), maxProviderFrame)
-	var frame, text strings.Builder
+	var text strings.Builder
 	finished := false
 	model := ""
-	protocol := func() (GenerateResult, error) {
-		return GenerateResult{}, generationError(ErrorProtocol, "API 流协议无效或缺少成功终态")
-	}
-	dispatch := func() (bool, error) {
-		data := strings.TrimSuffix(frame.String(), "\n")
-		frame.Reset()
+	dispatch := func(data string) (bool, error) {
 		if data == "" {
 			return false, nil
 		}
@@ -228,18 +228,33 @@ func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEv
 		}
 		return false, nil
 	}
+	if err := consumeCompletionFrames(ctx, r, dispatch); err != nil {
+		return GenerateResult{}, err
+	}
+	return GenerateResult{text.String(), "stop"}, nil
+}
+
+// The existing text stream and tool rounds share framing, limits and EOF rules.
+func consumeCompletionFrames(ctx context.Context, r io.Reader, dispatch func(string) (bool, error)) error {
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 4096), maxProviderFrame)
+	var frame strings.Builder
 	for scan.Scan() {
 		if ctx.Err() != nil {
-			return GenerateResult{}, ctx.Err()
+			return ctx.Err()
 		}
 		line := scan.Text()
 		if line == "" {
-			done, e := dispatch()
-			if e != nil {
-				return GenerateResult{}, e
-			}
-			if done {
-				return GenerateResult{text.String(), "stop"}, nil
+			data := strings.TrimSuffix(frame.String(), "\n")
+			frame.Reset()
+			if data != "" {
+				done, err := dispatch(data)
+				if err != nil {
+					return err
+				}
+				if done {
+					return nil
+				}
 			}
 			continue
 		}
@@ -253,18 +268,17 @@ func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEv
 		value = strings.TrimPrefix(value, " ")
 		if field == "data" {
 			if frame.Len()+len(value)+1 > maxProviderFrame {
-				return protocol()
+				return generationError(ErrorProtocol, "API 事件超过大小限制")
 			}
 			frame.WriteString(value)
 			frame.WriteByte('\n')
 		}
 	}
 	if ctx.Err() != nil {
-		return GenerateResult{}, ctx.Err()
+		return ctx.Err()
 	}
 	if scan.Err() != nil {
-		return GenerateResult{}, generationError(ErrorNetwork, "API 流中断或事件过大")
+		return generationError(ErrorNetwork, "API 流中断或事件过大")
 	}
-	// EOF is never completion, including EOF after finish_reason without [DONE].
-	return protocol()
+	return generationError(ErrorProtocol, "API 流缺少完整成功终态")
 }

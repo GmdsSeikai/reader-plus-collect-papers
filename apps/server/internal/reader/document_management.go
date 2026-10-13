@@ -36,7 +36,7 @@ type documentTask struct {
 func (s *Server) beginDocumentTask(parent context.Context, id string) (context.Context, func(), error) {
 	s.documentMu.Lock()
 	defer s.documentMu.Unlock()
-	if s.deletingDocuments[id] {
+	if s.documentClosed || s.deletingDocuments[id] {
 		return nil, nil, errors.New("document is being deleted")
 	}
 	d, err := s.Store.Document(id)

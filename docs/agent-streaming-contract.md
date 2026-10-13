@@ -1,22 +1,30 @@
 # Agent 流式输出：前后端对接约定
 
+## #41 文档检索扩展 · 2026-10-14
+
+全文工具问答沿用下方请求、正文追加、备用和成功保存约定，增加可选 `activity` 事件：`{phase:"indexing"|"reading"|"writing",message:string,tool?:string}`。原有五种事件的形状不变；不识别该扩展的客户端可以忽略它。
+
+`activity` 只显示准备原文、检索/读取及生成答案的状态，不包含工具参数、工具结果、模型推理或进度百分比。Codex/API 的全文工具路径在读取阶段仅发送 `activity`，读取结束后用收集到的原文生成最终回答，才开始发送 `delta`。成功序列为 `status → activity* → delta+ → done`；备用与失败仍遵守下方终态规则。`activity` 不代表正文已经输出，也不代表请求成功。
+
+本扩展的 OpenAPI、SDK 解码、前端状态显示及共用 fixtures 随 #41 一起更新。下方 2026-10-05 冻结表保留作为原协议基线；其中“事件形状始终不变”指原有事件，新增 `activity` 以本节为准。
+
 ## 本轮联调冻结项 · 2026-10-05
 
 本节是已确认的 LobeHub 前端迁移与后端统一适配工作的固定边界。两方分别执行 [前端任务](./frontend-streaming-migration.md) 和 [后端任务](./backend-streaming-adapter.md)，内部实现可自行决定；修改下表必须先由协调会话确认并同步两方，不能单方改变字段、追加/替换语义或完成条件。
 
-| 项目 | 本轮固定约定 |
-| --- | --- |
-| 接口与认证 | `POST /api/documents/{documentId}/chat`；Reader 会话 Bearer token；JSON 请求。不是 Agent API Key。 |
-| 必填请求字段 | `provider: "codex" \| "claude" \| "kimi" \| "api"`、`prompt: string`、`context: string`；context 可为空。 |
-| 可选请求字段 | `references: SourceReference[]`、`attachments: string[]`，省略等价于空数组；附件是当前文档块 ID。不新增 connectionId 或客户端模型/认证字段。 |
+| 项目             | 本轮固定约定                                                                                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 接口与认证       | `POST /api/documents/{documentId}/chat`；Reader 会话 Bearer token；JSON 请求。不是 Agent API Key。                                                                                              |
+| 必填请求字段     | `provider: "codex" \| "claude" \| "kimi" \| "api"`、`prompt: string`、`context: string`；context 可为空。                                                                                       |
+| 可选请求字段     | `references: SourceReference[]`、`attachments: string[]`，省略等价于空数组；附件是当前文档块 ID。不新增 connectionId 或客户端模型/认证字段。                                                    |
 | 事件与 JSON data | `status {status:"reading"\|"reading-image"}`、`delta {text:string}`、`fallback {message:string}`、`error {error:string}`、`done {ok:true}`。仍使用独立 SSE event 行，不另包 type/payload 外壳。 |
-| 正文 | delta 仅为新增原始文本，保留空格/换行；按到达顺序追加。不是累计全文、HTML 或 AST，不携带推理/工具/日志。 |
-| 成功终态 | 适配器确认成功且完整助手消息保存成功后，仅一次 done；最终全文从 messages 读取并替换临时回答，不再次追加。 |
-| 失败终态 | 流开始前非 200 JSON error；开始后仅一次 error，不再 done；终态后无正文。EOF 本身不代表成功。 |
-| 取消/断流 | AbortSignal 断开请求并停止上游；不承诺取消事件。保存竞态/终态丢失由 messages 核对；不自动重新 POST。 |
-| 备用策略 | 最多从选定 Agent 切换到已配置且验证通过的对应备用 API；只允许首个正文之前切换，先 fallback 再 delta。已显示正文、主动取消、总超时均不自动切换；不能自动轮询另两种 Agent。 |
-| 请求限制 | 维持当前 prompt 16,000 / context 64,000 UTF-8 字节、最多 4 个附件、回答 1MiB、3 分钟总超时及交互请求并发限制。 |
-| 暂不支持 | wire 版本字段/协商、序号、messageId、usage、断点续传、正文替换事件。不得依赖未实现字段。 |
+| 正文             | delta 仅为新增原始文本，保留空格/换行；按到达顺序追加。不是累计全文、HTML 或 AST，不携带推理/工具/日志。                                                                                        |
+| 成功终态         | 适配器确认成功且完整助手消息保存成功后，仅一次 done；最终全文从 messages 读取并替换临时回答，不再次追加。                                                                                       |
+| 失败终态         | 流开始前非 200 JSON error；开始后仅一次 error，不再 done；终态后无正文。EOF 本身不代表成功。                                                                                                    |
+| 取消/断流        | AbortSignal 断开请求并停止上游；不承诺取消事件。保存竞态/终态丢失由 messages 核对；不自动重新 POST。                                                                                            |
+| 备用策略         | 最多从选定 Agent 切换到已配置且验证通过的对应备用 API；只允许首个正文之前切换，先 fallback 再 delta。已显示正文、主动取消、总超时均不自动切换；不能自动轮询另两种 Agent。                       |
+| 请求限制         | 维持当前 prompt 16,000 / context 64,000 UTF-8 字节、最多 4 个附件、回答 1MiB、3 分钟总超时及交互请求并发限制。                                                                                  |
+| 暂不支持         | wire 版本字段/协商、序号、messageId、usage、断点续传、正文替换事件。不得依赖未实现字段。                                                                                                        |
 
 正常序列为 `status → delta+ → done`；备用序列为 `status → fallback → delta+ → done`；失败为 `status → [fallback] → delta* → error`，也可能在建立流前直接 HTTP 失败。SSE 注释可忽略；网络读取分片没有业务含义。主动取消或断网可能没有终态。
 
@@ -79,6 +87,14 @@ X-Accel-Buffering: no
 ```ts
 type ChatStreamEvent =
   | { event: "status"; data: { status: "reading" | "reading-image" } }
+  | {
+      event: "activity";
+      data: {
+        phase: "indexing" | "reading" | "writing";
+        message: string;
+        tool?: string;
+      };
+    }
   | { event: "delta"; data: { text: string } }
   | { event: "fallback"; data: { message: string } }
   | { event: "error"; data: { error: string } }
@@ -88,6 +104,7 @@ type ChatStreamEvent =
 | 事件       | 含义                                                        | 前端处理约定                                           |
 | ---------- | ----------------------------------------------------------- | ------------------------------------------------------ |
 | `status`   | 后端已开始处理。不是进度百分比，也不是回答正文。            | 可以进入等待回答状态。                                 |
+| `activity` | 文档原文准备、读取或最终回答生成状态。                      | 更新本次请求的状态提示，不追加到正文。                 |
 | `delta`    | 回答的新增文本片段。                                        | 按到达顺序追加到本次请求的临时回答，不能替换已有全文。 |
 | `fallback` | 主 Agent 未输出文字便失败，已切换到通过能力测试的备用 API。 | 可以显示提示；不要将提示写入回答正文。                 |
 | `error`    | 本次请求失败。流建立后 HTTP 仍然为 200。                    | 结束生成状态，显示错误；不要继续等待 `done`。          |
@@ -140,7 +157,7 @@ data: {"ok":true}
 | `codex`  | `codex app-server` 的 `item/agentMessage/delta`                                                    | `delta {text}`   |
 | `claude` | Claude Code `stream-json` 的 `content_block_delta / text_delta`，启用 `--include-partial-messages` | `delta {text}`   |
 | `kimi`   | Kimi Code ACP 的 `session/update / agent_message_chunk`                                            | `delta {text}`   |
-| `api`    | OpenAI Chat Completions SSE 中 choice 0 的 `delta.content`；`reasoning_content` 不输出                | `delta {text}`   |
+| `api`    | OpenAI Chat Completions SSE 中 choice 0 的 `delta.content`；`reasoning_content` 不输出             | `delta {text}`   |
 
 前端无需解析上述 CLI 协议，也无需为不同 Agent 编写 SSE 分支。纯文字及带图片请求都使用相同事件结构。Codex 的完整消息事件仅用于补齐未发送后缀与一致性校验，不会重复发送已有内容。
 
@@ -192,6 +209,6 @@ READER_TEST_STREAM_PROVIDER=kimi go test ./internal/reader -run '^TestLiveAgentS
 
 ## 本轮类型与回放证据
 
-[OpenAPI](./openapi.yaml) 的 `ChatStreamEvent` 描述解码后的五事件联合类型；`text/event-stream` 实际仍是 SSE 文本，没有 JSON envelope。生成类型位于 `packages/api-client/src/schema.d.ts`。可共用 [v1 fixtures](./fixtures/agent-streaming-v1.json)，覆盖成功、备用、部分失败和无终态断流。`TestFrozenStreamFixtures` 通过实际 writer 回放，检查事件形状、正文追加及终态后拒绝事件。
+[OpenAPI](./openapi.yaml) 的 `ChatStreamEvent` 描述原有五事件与可选 `activity` 扩展；`text/event-stream` 实际仍是 SSE 文本，没有 JSON envelope。生成类型位于 `packages/api-client/src/schema.d.ts`。可共用 [v1 fixtures](./fixtures/agent-streaming-v1.json)，覆盖成功、文档工具状态、备用、部分失败和无终态断流。`TestFrozenStreamFixtures` 通过实际 writer 回放，检查事件形状、正文追加及终态后拒绝事件；前端使用相同文档工具 fixture 验证状态不混入正文。
 
 本轮真实 CLI 的版本、文字/合成图片首段与完成时间、取消结果及未验证项，以 [后端进度](./implementation/backend-streaming-progress.md) 为准。上文原有历史实测仅描述先前基线。Claude 未登录、商业备用 API 实测、合并前端后的真实人工验收仍待完成；模拟协议和 HTTP gated 测试不替代这些验收。

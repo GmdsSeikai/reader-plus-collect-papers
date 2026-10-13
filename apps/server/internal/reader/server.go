@@ -45,6 +45,7 @@ type Server struct {
 	Web                    string
 	aiMu                   sync.Mutex
 	documentMu             sync.Mutex
+	documentClosed         bool
 	documentTasks          map[string]map[*documentTask]struct{}
 	deletingDocuments      map[string]bool
 	importMu               sync.Mutex
@@ -157,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("GET /api/documents/{id}/search", s.search)
 	mux.HandleFunc("GET /api/documents/{id}/messages", s.messages)
+	mux.HandleFunc("GET /api/documents/{id}/messages/{message}/sources/{source}", s.validateChatEvidence)
 	mux.HandleFunc("POST /api/documents/{id}/chat", s.chat)
 	mux.HandleFunc("GET /api/providers", s.providers)
 	mux.HandleFunc("GET /api/documents/{id}/processing-usage", s.processingUsage)

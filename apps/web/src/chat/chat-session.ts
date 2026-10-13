@@ -179,6 +179,7 @@ export class ChatSession {
             ? "正在阅读图片…"
             : "正在阅读上下文…";
       if (event.event === "fallback") pending.fallback = event.data.message;
+      if (event.event === "activity") pending.notice = event.data.message;
       if (event.event === "error") {
         terminal = true;
         pending.phase = "incomplete";

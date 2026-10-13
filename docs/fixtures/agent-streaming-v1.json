@@ -6,6 +6,12 @@
     "terminal": "done"
   },
   {
+    "name": "document-activity",
+    "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: activity\ndata: {\"message\":\"准备全文原文\",\"phase\":\"indexing\"}\n\nevent: activity\ndata: {\"message\":\"检索全文\",\"phase\":\"reading\",\"tool\":\"search_document\"}\n\nevent: activity\ndata: {\"message\":\"根据原文生成回答\",\"phase\":\"writing\"}\n\nevent: delta\ndata: {\"text\":\"原文答案 [S1]\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "text": "原文答案 [S1]",
+    "terminal": "done"
+  },
+  {
     "name": "fallback",
     "wire": "event: status\ndata: {\"status\":\"reading-image\"}\n\nevent: fallback\ndata: {\"message\":\"codex 调用失败，已切换到 image-api\"}\n\nevent: delta\ndata: {\"text\":\"图片解释\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
     "text": "图片解释",

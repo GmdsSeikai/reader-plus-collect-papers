@@ -1107,6 +1107,11 @@ export interface paths {
                             /** @enum {unknown} */
                             kind?: "selection" | "section";
                             location: components["schemas"]["DocumentLocation"];
+                            sourceId?: string;
+                            corpusRevision?: string;
+                            contentHash?: string;
+                            /** @enum {string} */
+                            precision?: "page" | "block" | "paragraph";
                         }[];
                     };
                 };
@@ -1764,7 +1769,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration. */
-                    capability?: "text" | "vision";
+                    capability?: "text" | "vision" | "tools";
                     /** @description Required for the api provider, which is checked one model at a time; the result is stored under capabilities["api:<model>"]. */
                     model?: string;
                 };
@@ -3017,6 +3022,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/messages/{message}/sources/{source}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Validate a persisted original-text citation before navigation */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    message: string;
+                    source: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Original source is still current */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            valid: boolean;
+                        };
+                    };
+                };
+                /** @description Document, message or source is unavailable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Original text or citation version has changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3167,6 +3228,11 @@ export interface components {
                 /** @enum {unknown} */
                 kind?: "selection" | "section";
                 location: components["schemas"]["DocumentLocation"];
+                sourceId?: string;
+                corpusRevision?: string;
+                contentHash?: string;
+                /** @enum {string} */
+                precision?: "page" | "block" | "paragraph";
             }[];
         };
         Provider: {
@@ -3186,6 +3252,15 @@ export interface components {
             data: {
                 /** @enum {string} */
                 status: "reading" | "reading-image";
+            };
+        } | {
+            /** @enum {string} */
+            event: "activity";
+            data: {
+                /** @enum {string} */
+                phase: "indexing" | "reading" | "writing";
+                message: string;
+                tool?: string;
             };
         } | {
             /** @enum {string} */
@@ -3267,6 +3342,14 @@ export interface components {
             vision: boolean;
             checkedAt: string;
             error?: string;
+            /**
+             * @description Independent structured tool-call capability; missing means not checked.
+             * @enum {string}
+             */
+            tools?: "passed" | "unsupported" | "failed";
+            toolError?: string;
+            /** @description Server-owned fingerprint of the checked tool protocol and schemas. */
+            toolSchemaVersion?: string;
         };
         APIConnection: {
             url: string;

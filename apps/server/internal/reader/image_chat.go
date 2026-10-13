@@ -107,6 +107,12 @@ func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, documentID
 	defer s.aiMu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
+	ctx, finish, taskErr := s.beginDocumentTask(ctx, documentID)
+	if taskErr != nil {
+		fail(w, 404, "文档已不可用")
+		return
+	}
+	defer finish()
 	messages, err := s.Store.chatHistory(documentID)
 	if err != nil {
 		fail(w, 500, "无法读取聊天历史")

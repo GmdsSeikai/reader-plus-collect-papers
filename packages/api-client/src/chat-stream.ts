@@ -1,5 +1,13 @@
 /** Decoded frozen wire contract. No provider-native events enter the renderer. */
 export type ChatStreamEvent =
+  | {
+      event: "activity";
+      data: {
+        phase: "indexing" | "reading" | "writing";
+        message: string;
+        tool?: string;
+      };
+    }
   | { event: "status"; data: { status: "reading" | "reading-image" } }
   | { event: "delta"; data: { text: string } }
   | { event: "fallback"; data: { message: string } }
@@ -13,7 +21,14 @@ export class ChatStreamError extends Error {
     super(message);
   }
 }
-const known = new Set(["status", "delta", "fallback", "error", "done"]);
+const known = new Set([
+  "status",
+  "activity",
+  "delta",
+  "fallback",
+  "error",
+  "done",
+]);
 export function decodeFrame(frame: string): ChatStreamEvent | undefined {
   let event = "message";
   const data: string[] = [];
@@ -35,15 +50,20 @@ export function decodeFrame(frame: string): ChatStreamEvent | undefined {
   if (!parsed || typeof parsed !== "object")
     throw new ChatStreamError("AI 事件数据无效", "protocol");
   const valid =
-    event === "delta"
-      ? typeof parsed.text === "string"
-      : event === "fallback"
-        ? typeof parsed.message === "string"
-        : event === "error"
-          ? typeof parsed.error === "string"
-          : event === "done"
-            ? parsed.ok === true
-            : parsed.status === "reading" || parsed.status === "reading-image";
+    event === "activity"
+      ? ["indexing", "reading", "writing"].includes(String(parsed.phase)) &&
+        typeof parsed.message === "string" &&
+        (parsed.tool === undefined || typeof parsed.tool === "string")
+      : event === "delta"
+        ? typeof parsed.text === "string"
+        : event === "fallback"
+          ? typeof parsed.message === "string"
+          : event === "error"
+            ? typeof parsed.error === "string"
+            : event === "done"
+              ? parsed.ok === true
+              : parsed.status === "reading" ||
+                parsed.status === "reading-image";
   if (!valid)
     throw new ChatStreamError("AI 事件字段无效，完成状态未确认", "protocol");
   return { event, data: parsed } as ChatStreamEvent;
