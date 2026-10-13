@@ -124,3 +124,25 @@ func TestHTTP200BusinessErrorIsNotSuccess(t *testing.T) {
 		})
 	}
 }
+
+func TestBroadRequestErrorPreservesHTTPClassification(t *testing.T) {
+	for _, tt := range []struct {
+		status int
+		want   ErrorKind
+	}{
+		{200, ErrorConfiguration}, {400, ErrorConfiguration}, {422, ErrorConfiguration},
+		{401, ErrorAuthentication}, {403, ErrorPermission}, {402, ErrorBilling},
+		{404, ErrorModel}, {413, ErrorContext}, {429, ErrorLimit}, {503, ErrorUpstream},
+	} {
+		for _, field := range []string{"type", "code"} {
+			body := []byte(fmt.Sprintf(`{"error":{%q:"invalid_request_error"}}`, field))
+			if field == "type" {
+				body = []byte(`{"error":{"type":"invalid_request_error","code":"new_policy_code"}}`)
+			}
+			err := providerFailure(context.Background(), APIConnection{}, tt.status, nil, body, "http")
+			if errorKind(err) != tt.want {
+				t.Errorf("status=%d field=%s: %v want %s", tt.status, field, err, tt.want)
+			}
+		}
+	}
+}

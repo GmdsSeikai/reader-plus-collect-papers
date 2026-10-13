@@ -126,7 +126,13 @@ func providerFailure(ctx context.Context, c APIConnection, status int, header ht
 			kind = ErrorLimit
 		case "context_length_exceeded", "request_too_large":
 			kind = ErrorContext
-		case "invalid_request_error", "unsupported_parameter", "unsupported_value", "invalid_value", "INVALID_ARGUMENT":
+		case "invalid_request_error":
+			// This broad type also accompanies authentication, policy and quota
+			// failures. Preserve meaningful HTTP classifications in those cases.
+			if status >= 200 && status < 300 || status == 400 || status == 422 {
+				kind = ErrorConfiguration
+			}
+		case "unsupported_parameter", "unsupported_value", "invalid_value", "INVALID_ARGUMENT":
 			kind = ErrorConfiguration
 		case "model_not_found", "not_found_error", "resource_not_found_error", "NOT_FOUND":
 			kind = ErrorModel
