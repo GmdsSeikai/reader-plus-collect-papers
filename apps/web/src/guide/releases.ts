@@ -8,8 +8,8 @@ export interface ReleaseItem {
 }
 
 /**
- * Notes for important releases, keyed by the desktop package version. A
- * version without an entry updates silently.
+ * Notes keyed by the desktop package version. Versions without notes still
+ * show the update confirmation and GitHub feedback actions.
  */
 export const releaseNotes: Record<string, ReleaseItem[]> = {
   "0.4.0": [
@@ -48,10 +48,5 @@ export function guideLaunch(
     return preferences.onboarded
       ? { kind: "none" }
       : { kind: "none", save: { ...preferences, onboarded: true } };
-  const items = releaseNotes[version];
-  if (items?.length) return { kind: "release", items };
-  return {
-    kind: "none",
-    save: { ...preferences, onboarded: true, seenVersion: version },
-  };
+  return { kind: "release", items: releaseNotes[version] ?? [] };
 }
