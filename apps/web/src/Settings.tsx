@@ -788,17 +788,6 @@ export function Settings({
                       保存
                     </Button>
                   </div>
-                  {journalRank.hasKey && (
-                    <Button
-                      className="mt-2"
-                      size="xs"
-                      variant="ghost"
-                      disabled={journalSaving}
-                      onClick={() => void saveJournalRank({}, "")}
-                    >
-                      移除 SecretKey
-                    </Button>
-                  )}
                   <div className="mt-4 flex items-center gap-2 text-xs">
                     <span id="journal-rank-filter-label">指标筛选</span>
                     <Select
