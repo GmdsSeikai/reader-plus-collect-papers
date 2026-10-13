@@ -488,9 +488,14 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			sl.FailureClass = "source_limit"
 			return m.finishSlice(sl, run, task, sendToken)
 		}
-		scanFetched += len(result.Entries)
+		validCount := len(result.Entries)
 		nowStr := now()
-		candidates, matches := discoveryPage(task, plan.Branch, result, nowStr)
+		candidates, matches, localRejects := discoveryPage(task, plan.Branch, result, nowStr)
+		validCount -= localRejects
+		if validCount < 0 {
+			validCount = 0
+		}
+		scanFetched += validCount
 		tx, err := m.server.Store.DB.Begin()
 		if err != nil {
 			return err
@@ -505,6 +510,16 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 		}
 		sl.PageOffset++
 		sl.Processed += len(candidates)
+		// Rejected source entries (bad identity/date/fields) make the page
+		// anomalous: valid candidates stay committed but the slice cannot
+		// claim coverage and keeps a retryable failure.
+		if result.Rejected+localRejects > 0 {
+			sl.Status = sliceFailed
+			sl.FailureClass = "bad-entry"
+			sl.CheckedAt = now()
+			_ = m.persistSlice(sl, run, task, sendToken)
+			return errors.New("来源返回无效条目，未证明覆盖")
+		}
 		if len(result.Entries) < discoveryPageSize {
 			// A premature short page contradicting the declared remainder is
 			// an anomaly, not the end of the result set.

@@ -269,13 +269,17 @@ func snapshotRanges(latest, hot DateWindow) string {
 // discoveryPage converts one search page into candidates and matches at the
 // task's revision. Candidates that fail identity checks skip the page entry
 // without being invented.
-func discoveryPage(task CollectionTask, branch CollectionBranch, page scholar.ArxivSearchPage, nowStr string) ([]CollectionCandidate, []CollectionMatch) {
+func discoveryPage(task CollectionTask, branch CollectionBranch, page scholar.ArxivSearchPage, nowStr string) ([]CollectionCandidate, []CollectionMatch, int) {
 	candidates := []CollectionCandidate{}
 	matches := []CollectionMatch{}
 	seen := map[string]bool{}
+	localRejects := 0
 	for _, e := range page.Entries {
 		id, err := NormalizeArXivID(e.ID)
 		if err != nil || e.Published.IsZero() {
+			// Local identity failures join the parser rejects: neither may
+			// count toward coverage.
+			localRejects++
 			continue
 		}
 		authors := make([]CollectionAuthorJSON, 0, len(e.Authors))
@@ -328,5 +332,5 @@ func discoveryPage(task CollectionTask, branch CollectionBranch, page scholar.Ar
 			LastSeenAt:    nowStr,
 		})
 	}
-	return candidates, matches
+	return candidates, matches, localRejects
 }

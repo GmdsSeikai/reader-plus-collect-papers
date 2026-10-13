@@ -360,3 +360,132 @@ func TestCursorCannotCrossSinceFilter(t *testing.T) {
 	}
 	_ = s
 }
+
+// rawAtomPage builds a feed from raw entry XML fragments.
+func rawAtomPage(total int, entries ...string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"><opensearch:totalResults>%d</opensearch:totalResults>`, total)
+	for _, e := range entries {
+		b.WriteString(e)
+	}
+	b.WriteString("</feed>")
+	return b.String()
+}
+
+func rawEntry(id, title, published string) string {
+	pub := ""
+	if published != "" {
+		pub = "<published>" + published + "</published>"
+	}
+	titleXML := ""
+	if title != "" {
+		titleXML = "<title>" + title + "</title>"
+	}
+	idXML := ""
+	if id != "" {
+		idXML = "<id>http://arxiv.org/abs/" + id + "</id>"
+	}
+	return "<entry>" + idXML + pub + titleXML + "<summary>object detection body</summary><author><name>Ada Lovelace</name></author></entry>"
+}
+
+func runScanOnce(t *testing.T, s *Server, task CollectionTask, feed string) error {
+	t.Helper()
+	coverageFixture(t, s, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(feed))
+	})
+	run, err := s.Store.CreateCollectionRun(task, "manual", "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := SlicePlan{Branch: CollectionBranch{Channel: channelLatest, BranchHash: "b", Body: "x", Query: "q"}, From: time.Now().Add(-time.Hour), To: time.Now()}
+	return s.Collection().scanSlice(context.Background(), run, task, plan)
+}
+
+func sliceStatusByBranch(t *testing.T, s *Server) string {
+	t.Helper()
+	var status string
+	s.Store.DB.QueryRow("SELECT status FROM collection_slices WHERE branch_hash='b'").Scan(&status)
+	return status
+}
+
+// TestInvalidPublishedEntryCannotComplete (U02) — an entry with an invalid
+// first-submission date can never prove coverage.
+func TestInvalidPublishedEntryCannotComplete(t *testing.T) {
+	s := testServer(t)
+	task := newScanFixture(t, s)
+	feed := rawAtomPage(1, rawEntry("2301.00001", "Object Detection", "not-a-date"))
+	if err := runScanOnce(t, s, task, feed); err == nil {
+		t.Fatal("invalid-published page proved coverage")
+	}
+	if sliceStatusByBranch(t, s) == sliceCompleted {
+		t.Fatal("slice completed on invalid entry")
+	}
+	var candidates int
+	s.Store.DB.QueryRow("SELECT count(*) FROM collection_candidates").Scan(&candidates)
+	if candidates != 0 {
+		t.Fatalf("invalid entry created %d candidates", candidates)
+	}
+}
+
+// TestBadIDEntryCannotComplete (U02).
+func TestBadIDEntryCannotComplete(t *testing.T) {
+	s := testServer(t)
+	task := newScanFixture(t, s)
+	feed := rawAtomPage(1, rawEntry("garbage-id", "Object Detection", "2026-03-01T00:00:00Z"))
+	if err := runScanOnce(t, s, task, feed); err == nil {
+		t.Fatal("bad-id page proved coverage")
+	}
+	if sliceStatusByBranch(t, s) == sliceCompleted {
+		t.Fatal("slice completed on bad id")
+	}
+}
+
+// TestMixedPageKeepsValidButNotComplete (U02) — valid candidates stay
+// committed, but a rejected sibling entry blocks the coverage claim.
+func TestMixedPageKeepsValidButNotComplete(t *testing.T) {
+	s := testServer(t)
+	task := newScanFixture(t, s)
+	feed := rawAtomPage(2,
+		rawEntry("2301.00001", "Object Detection", "2026-03-01T00:00:00Z"),
+		rawEntry("2301.00002", "Object Detection", "not-a-date"),
+	)
+	if err := runScanOnce(t, s, task, feed); err == nil {
+		t.Fatal("mixed page proved coverage")
+	}
+	var candidates int
+	s.Store.DB.QueryRow("SELECT count(*) FROM collection_candidates").Scan(&candidates)
+	if candidates != 1 {
+		t.Fatalf("valid candidate lost or invented: %d", candidates)
+	}
+	status := sliceStatusByBranch(t, s)
+	if status == sliceCompleted {
+		t.Fatal("mixed page completed the slice")
+	}
+	var failure string
+	s.Store.DB.QueryRow("SELECT failure_class FROM collection_slices WHERE branch_hash='b'").Scan(&failure)
+	if failure != "bad-entry" {
+		t.Fatalf("failure_class = %q, want bad-entry", failure)
+	}
+}
+
+// TestMissingFieldsEntryRejected (U02) — entries without identity or title
+// are rejected and counted, never silently dropped.
+func TestMissingFieldsEntryRejected(t *testing.T) {
+	s := testServer(t)
+	task := newScanFixture(t, s)
+	feed := rawAtomPage(2,
+		rawEntry("", "Object Detection", "2026-03-01T00:00:00Z"),
+		rawEntry("2301.00003", "", "2026-03-01T00:00:00Z"),
+	)
+	if err := runScanOnce(t, s, task, feed); err == nil {
+		t.Fatal("field-less entries proved coverage")
+	}
+	if sliceStatusByBranch(t, s) == sliceCompleted {
+		t.Fatal("slice completed on field-less entries")
+	}
+	var candidates int
+	s.Store.DB.QueryRow("SELECT count(*) FROM collection_candidates").Scan(&candidates)
+	if candidates != 0 {
+		t.Fatalf("field-less entries created %d candidates", candidates)
+	}
+}

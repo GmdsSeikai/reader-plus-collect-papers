@@ -39,7 +39,11 @@ type ArxivAuthor struct {
 
 // ArxivSearchPage is one page of a search response.
 type ArxivSearchPage struct {
-	Entries      []ArxivSearchEntry
+	Entries []ArxivSearchEntry
+	// Rejected counts feed entries that failed identity, date or required
+	// field checks and were not admitted to Entries. A page with rejects is
+	// never full coverage proof for the caller.
+	Rejected     int
 	TotalResults int
 }
 
@@ -181,7 +185,15 @@ func ParseArxivSearch(data []byte) (ArxivSearchPage, error) {
 			return ArxivSearchPage{}, Error{"arXiv 返回了错误响应"}
 		}
 		id, version := splitArxivRef(e.ID)
+		// Identity, date and required-field checks happen here so a rejected
+		// entry can never count toward a caller's coverage proof.
 		if id == "" || clean(e.Title) == "" {
+			page.Rejected++
+			continue
+		}
+		published, perr := time.Parse(time.RFC3339, e.Published)
+		if perr != nil || published.IsZero() {
+			page.Rejected++
 			continue
 		}
 		entry := ArxivSearchEntry{
@@ -191,6 +203,7 @@ func ParseArxivSearch(data []byte) (ArxivSearchPage, error) {
 			Abstract:   e.Summary,
 			DOI:        clean(e.DOI),
 			JournalRef: clean(e.JournalRef),
+			Published:  published,
 		}
 		entry.Abstract = strings.TrimSpace(entry.Abstract)
 		for _, c := range e.Categories {
@@ -204,9 +217,6 @@ func ParseArxivSearch(data []byte) (ArxivSearchPage, error) {
 				continue
 			}
 			entry.Authors = append(entry.Authors, ArxivAuthor{Name: name, Affiliation: clean(a.Affiliation)})
-		}
-		if t, err := time.Parse(time.RFC3339, e.Published); err == nil {
-			entry.Published = t
 		}
 		if t, err := time.Parse(time.RFC3339, e.Updated); err == nil {
 			entry.Updated = t
