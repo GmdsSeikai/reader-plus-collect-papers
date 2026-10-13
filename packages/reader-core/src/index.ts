@@ -275,6 +275,8 @@ export interface ReaderAnnotationTarget {
 }
 export type Appearance = "light" | "sepia" | "dark" | "system";
 export interface ReaderTheme {
+  /** Opt in to copying text selections and selected annotations. */
+  autoCopySelection?: boolean;
   autoTranslatePDF?: boolean;
   appearance?: Appearance;
   mode: "light" | "sepia" | "dark";
@@ -301,6 +303,7 @@ export interface HighlightColor {
   label: string;
 }
 export const defaultTheme: ReaderTheme = {
+  autoCopySelection: false,
   autoTranslatePDF: true,
   appearance: "system",
   mode: "light",

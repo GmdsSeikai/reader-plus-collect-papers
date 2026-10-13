@@ -107,7 +107,7 @@ import {
   highlightPalette,
 } from "./annotations";
 import { ColorSwatches } from "./ColorSwatches";
-import { copyText } from "./chat/clipboard";
+import { useSelectionClipboard } from "./useSelectionClipboard";
 import { NotesPanel } from "./NotesPanel";
 import { ExportNotesDialog } from "./ExportNotesDialog";
 import { EPUBReadingView } from "./translation/EPUBReadingView";
@@ -269,7 +269,7 @@ export function Workspace({
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const annotationSaving = useRef(false);
   const [noteSaving, setNoteSaving] = useState(false);
-  const lastCopiedSelection = useRef<string | null>(null);
+  const selectionClipboard = useSelectionClipboard(theme.autoCopySelection);
   const [annotationTarget, setAnnotationTarget] =
     useState<ReaderAnnotationTarget | null>(null);
   const { deleting, remove: removeAnnotation } = useAnnotationDeletion(
@@ -538,14 +538,11 @@ export function Workspace({
     const annotation = target
       ? activeAnnotation(annotations, target.ids)
       : undefined;
-    if (annotation?.quote) void copyText(annotation.quote, "已复制");
+    selectionClipboard.annotation(annotation);
   };
   const selectText = (next: ReaderSelection | null) => {
     setSelection(next);
-    const key = next ? JSON.stringify([next.text, next.location]) : null;
-    if (next?.text && key !== lastCopiedSelection.current)
-      void copyText(next.text, "已复制");
-    lastCopiedSelection.current = key;
+    selectionClipboard.selection(next);
   };
   const editAnnotationNote = (annotation: Annotation) => {
     setNoteKind(annotation.kind === "question" ? "question" : "note");

@@ -297,3 +297,33 @@ it("adds and removes a model ID by hand and checks it", async () => {
   expect(config.apiModels).toEqual([]);
   expect(host.textContent).not.toContain("my-model");
 });
+
+it("keeps selection auto-copy opt-in and lets reading settings toggle it", async () => {
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  const previous = useReaderStore.getState().theme;
+  useReaderStore.setState({
+    theme: { ...previous, autoCopySelection: undefined },
+  });
+  try {
+    await act(async () =>
+      root.render(<Settings open onOpenChange={() => {}} />),
+    );
+    const reading = [
+      ...host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent === "阅读")!;
+    await act(async () => reading.click());
+    const label = [...host.querySelectorAll("label")].find((node) =>
+      node.textContent?.includes("自动复制选中文字"),
+    )!;
+    const checkbox =
+      label.querySelector<HTMLButtonElement>('[role="checkbox"]')!;
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    await act(async () => checkbox.click());
+    expect(useReaderStore.getState().theme.autoCopySelection).toBe(true);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await act(async () => checkbox.click());
+    expect(useReaderStore.getState().theme.autoCopySelection).toBe(false);
+  } finally {
+    await act(async () => useReaderStore.setState({ theme: previous }));
+  }
+});
