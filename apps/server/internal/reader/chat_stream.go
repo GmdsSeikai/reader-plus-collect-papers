@@ -107,10 +107,9 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		d, docErr := s.Store.Document(documentID)
 		if docErr == nil {
 			if _, fileErr := os.Stat(s.Store.File(d)); fileErr == nil {
-				if finalErr = out.send("activity", map[string]string{"phase": "indexing", "message": "准备全文原文"}); finalErr != nil {
-					return
-				}
-				corpus, corpusErr := s.documentCorpus(ctx, documentID)
+				corpus, corpusErr := s.documentCorpus(ctx, documentID, func() error {
+					return out.send("activity", map[string]string{"phase": "indexing", "message": "正在建立全文检索索引"})
+				})
 				if corpusErr != nil {
 					if ctx.Err() != nil {
 						return

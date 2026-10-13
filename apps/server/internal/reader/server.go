@@ -451,6 +451,9 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 		_, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
 	}
 	if err == nil {
+		_, err = tx.Exec("INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued')", d.ID)
+	}
+	if err == nil {
 		err = tx.Commit()
 	}
 	if err != nil {

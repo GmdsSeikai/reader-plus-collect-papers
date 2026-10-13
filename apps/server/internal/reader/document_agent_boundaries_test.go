@@ -217,7 +217,7 @@ func TestDocumentReadReturnsTargetWithinResultBudget(t *testing.T) {
 	s, _ := epubRangeFixture(t, nil)
 	text := strings.Repeat("原始中文段落", 1200)
 	os.WriteFile(s.Store.Root+"/cache/doc/a.xhtml", []byte("<html><body><p>"+text+"</p></body></html>"), 0600)
-	corpus, err := s.documentCorpus(t.Context(), "doc")
+	corpus, err := s.documentCorpus(t.Context(), "doc", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

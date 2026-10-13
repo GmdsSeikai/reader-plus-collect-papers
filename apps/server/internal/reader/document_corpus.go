@@ -3,17 +3,22 @@ package reader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 const corpusVersion = "document-text-v3"
+
+var errCorpusBusy = errors.New("全文检索索引正在准备，请稍后重试")
 
 type corpusCoverage struct {
 	Status          string   `json:"status"`
@@ -76,11 +81,10 @@ func (s *Server) corpusFingerprint(d Document) (string, error) {
 	}
 	return sourceKey(corpusVersion + "\n" + strings.Join(parts, "\n")), nil
 }
-func (s *Server) documentCorpus(ctx context.Context, documentID string) (*documentCorpus, error) {
-	if !s.corpusMu.TryLock() {
-		return nil, generationError(ErrorConfiguration, "原文索引正在准备，请稍后重试")
+func (s *Server) documentCorpus(ctx context.Context, documentID string, preparing func() error) (*documentCorpus, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
-	defer s.corpusMu.Unlock()
 	d, err := s.Store.Document(documentID)
 	if err != nil || d.DeletedAt != "" {
 		return nil, generationError(ErrorCanceled, "文档已不可用")
@@ -96,6 +100,15 @@ func (s *Server) documentCorpus(ctx context.Context, documentID string) (*docume
 			c.DocumentID = d.ID
 			c.Fingerprint = fingerprint
 			return &c, nil
+		}
+	}
+	if !s.corpusMu.TryLock() {
+		return nil, errCorpusBusy
+	}
+	defer s.corpusMu.Unlock()
+	if preparing != nil {
+		if err = preparing(); err != nil {
+			return nil, err
 		}
 	}
 	c := &documentCorpus{DocumentID: d.ID, Fingerprint: fingerprint, Coverage: corpusCoverage{Status: "ready", Missing: []string{}, Warnings: []string{}}}
@@ -142,6 +155,60 @@ func (s *Server) documentCorpus(ctx context.Context, documentID string) (*docume
 		return nil, err
 	}
 	return c, nil
+}
+
+func (s *Store) queueDocumentCorpus(documentID string) error {
+	_, err := s.DB.Exec("INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued') ON CONFLICT(document_id) DO UPDATE SET status='queued'", documentID)
+	return err
+}
+
+// Use the existing processing lifetime and document cancellation registry. Jobs
+// survive restart, but failed preparations are retried only on import, parsing
+// or a chat request, rather than spinning once a second.
+func (s *Server) corpusWorker(ctx context.Context) {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		var documentID string
+		// Avoid extracting PDF text while its existing layout pass is queued or
+		// running. Paused/failed layout and manual books can index without it.
+		err := s.Store.DB.QueryRowContext(ctx, `SELECT j.document_id FROM document_corpus_jobs j
+ JOIN documents d ON d.id=j.document_id LEFT JOIN document_processing p ON p.document_id=d.id
+ WHERE j.status='queued' AND d.deleted_at='' AND NOT
+ (d.type='pdf' AND COALESCE(p.phase,'')='learning' AND p.status IN ('queued','running'))
+ ORDER BY j.rowid LIMIT 1`).Scan(&documentID)
+		if err != nil {
+			continue
+		}
+		work, finish, err := s.beginDocumentTask(ctx, documentID)
+		if err != nil {
+			continue
+		}
+		_, err = s.Store.DB.ExecContext(work, "UPDATE document_corpus_jobs SET status='running' WHERE document_id=? AND status='queued'", documentID)
+		if err == nil {
+			child, cancel := context.WithTimeout(work, 3*time.Minute)
+			_, err = s.documentCorpus(child, documentID, nil)
+			cancel()
+		}
+		if err == nil {
+			_, _ = s.Store.DB.Exec("DELETE FROM document_corpus_jobs WHERE document_id=? AND status='running'", documentID)
+		} else {
+			status := "failed"
+			if work.Err() != nil || errors.Is(err, errCorpusBusy) {
+				status = "queued"
+			}
+			_, _ = s.Store.DB.Exec("UPDATE document_corpus_jobs SET status=? WHERE document_id=? AND status='running'", status, documentID)
+			if status == "failed" {
+				s.diagnosticEvent(slog.LevelWarn, "corpus.prepare.failed", "documentId", documentID, "errorCode", errorKind(err))
+			}
+		}
+		finish()
+	}
 }
 func addCorpusPassage(c *documentCorpus, section, label, text string, location any, precision string) {
 	text = strings.TrimSpace(text)

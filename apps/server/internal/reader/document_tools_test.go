@@ -20,7 +20,7 @@ func originalDocumentFixture(t *testing.T) (*Server, *documentAgent) {
 			t.Fatal(e)
 		}
 	}
-	c, e := s.documentCorpus(t.Context(), "doc")
+	c, e := s.documentCorpus(t.Context(), "doc", nil)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -73,7 +73,7 @@ func TestDocumentToolsSearchReadAndNavigate(t *testing.T) {
 	}
 	defer store.DB.Close()
 	reopened := NewServer(store, "test-secret", "")
-	c, e := reopened.documentCorpus(t.Context(), "doc")
+	c, e := reopened.documentCorpus(t.Context(), "doc", nil)
 	if e != nil || c.Revision != a.corpus.Revision {
 		t.Fatal("corpus not reusable", e)
 	}
@@ -142,7 +142,7 @@ func TestDocumentCorpusPartialPDFAndLongPassage(t *testing.T) {
 	m.Blocks[0].Text = strings.Repeat("原文", 3000)
 	raw, _ := json.Marshal(m)
 	os.WriteFile(filepath.Join(s.analysisDir("doc"), "manifest.json"), raw, 0600)
-	c, e := s.documentCorpus(t.Context(), "doc")
+	c, e := s.documentCorpus(t.Context(), "doc", nil)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -168,7 +168,7 @@ func TestDocumentCorpusReusesCompletePDFLayoutWithoutAWorker(t *testing.T) {
 	s, _, layout := bookFixture(t)
 	t.Setenv("READER_NODE", "/nonexistent-node")
 	t.Setenv("READER_CORPUS_PROCESSOR", "/nonexistent-worker")
-	corpus, err := s.documentCorpus(t.Context(), "doc")
+	corpus, err := s.documentCorpus(t.Context(), "doc", nil)
 	if err != nil || corpus.Coverage.SearchableUnits != layout.Pages {
 		t.Fatalf("existing PDF parse was not reused: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDocumentCorpusExtractsOnlyMissingPages(t *testing.T) {
 	t.Setenv("READER_NODE", node)
 	t.Setenv("READER_CORPUS_PROCESSOR", "missing-page-worker")
 	t.Setenv("READER_CORPUS_CAPTURE", capture)
-	corpus, e := s.documentCorpus(t.Context(), "doc")
+	corpus, e := s.documentCorpus(t.Context(), "doc", nil)
 	if e != nil {
 		t.Fatal(e)
 	}
