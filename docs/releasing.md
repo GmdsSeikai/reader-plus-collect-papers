@@ -2,14 +2,16 @@
 
 Reader 使用 GitHub Actions 和 electron-builder，发布 GitHub Release 后自动生成以下文件：
 
-| 文件                             | 运行平台                |
-| -------------------------------- | ----------------------- |
-| `Reader-<version>-mac-arm64.dmg` | Apple Silicon Mac       |
-| `Reader-<version>-mac-arm64.zip` | Mac 应用内原地更新包    |
-| `Reader-<version>-win-x64.exe`   | Windows x64（NSIS）     |
-| `SHA256SUMS.txt`                 | 安装包的 SHA-256 校验值 |
+| 文件                                 | 运行平台                   |
+| ------------------------------------ | -------------------------- |
+| `Reader-<version>-mac-arm64.dmg`     | Apple Silicon Mac          |
+| `Reader-<version>-mac-arm64.zip`     | Mac 应用内原地更新包       |
+| `Reader-<version>-mac-intel-x64.dmg` | Intel Mac 安装包           |
+| `Reader-<version>-mac-intel-x64.zip` | Intel Mac 应用内原地更新包 |
+| `Reader-<version>-win-x64.exe`       | Windows x64（NSIS）        |
+| `SHA256SUMS.txt`                     | 安装包的 SHA-256 校验值    |
 
-当前工作流不构建 Intel Mac、Windows ARM64 或 Linux 安装包。
+当前工作流不构建 Windows ARM64 或 Linux 安装包。Intel Mac 在原生 `macos-15-intel` runner 上构建并验证。
 
 当前没有 Apple 开发者证书。macOS 正式版使用仓库固定的自签名证书签名（见下文“macOS 签名证书”），不做 Apple 公证；Gatekeeper 不信任该证书，表现与 ad-hoc 签名相同。Windows 安装包没有 Authenticode 签名。系统可能阻止首次打开。macOS 可在确认下载来源后，在“系统设置 → 隐私与安全性”中允许该应用；Windows SmartScreen 可选择“更多信息 → 仍要运行”。组织设备策略可能禁止绕过。无需关闭系统整体安全保护。校验值用于检查文件完整性，不能替代开发者身份签名。
 
@@ -34,12 +36,12 @@ gh secret set MAC_SIGN_P12_PASSWORD < ~/reader-mac-sign/password.txt
 1. 在独立 worktree/分支完成修改，将根目录 `package.json` 和 `apps/desktop/package.json` 的版本同步，例如都改为 `0.2.0`。提交后 merge 到 `main`。
 2. 推送 `main`，等待单个 Linux runner 的类型检查和测试通过。首次启用时，可先从 Actions 手动运行 **Release installers**；它只保存安装包与校验值为 Actions artifacts，不创建或修改 Release。
 3. 在所需提交上创建 tag，例如 `v0.2.0`，并发布该 tag 对应的 GitHub Release。Release 所在提交必须包含本工作流。预发布版本可用 `0.2.0-beta.1` / `v0.2.0-beta.1`。
-4. **Release installers** 将 tag 解析为固定提交，核对版本，分别在原生 macOS ARM64 和 Windows x64 runner 上构建。同一源提交已经通过的 `main` CI 会直接复用；没有成功记录时，先调用与日常 CI 相同的检查流程。检查通过后才构建安装包，两个平台都成功后统一上传安装包与校验值到同一个 Release。
+4. **Release installers** 将 tag 解析为固定提交，核对版本，分别在原生 macOS ARM64、macOS Intel x64 和 Windows x64 runner 上构建。同一源提交已经通过的 `main` CI 会直接复用；没有成功记录时，先调用与日常 CI 相同的检查流程。检查通过后才构建安装包，所有平台都成功后统一上传安装包与校验值到同一个 Release。
 5. 下载并做安装后的人工检查：打开应用，导入 EPUB/PDF，确认阅读、笔记保存及重新打开后恢复；退出后检查服务已停止。AI 功能另用已安装并登录的 CLI 检查。
 
 触发事件为 `release: published`，适用于正式版和预发布版。保存草稿、单独推送 tag 或修改 Release 描述不会触发。Release 页面会先发布，安装包稍后上传；任一构建失败时上传任务不会运行。GitHub 资产上传不是事务操作，上传过程中网络失败可能留下部分文件；修复后重新运行工作流会覆盖同名资产。不要移动已发布的 tag；代码修复请发布新版本。
 
-只发布 Apple Silicon Mac 测试版时，在创建 Release 的描述中加入 `<!-- reader:mac-only -->`。工作流只运行 macOS 构建，并要求 Release 恰好包含 DMG、原地更新 ZIP 和两者的校验值；Windows 用户不会收到这个版本的安装包。
+只发布 macOS 测试版时，在创建 Release 的描述中加入 `<!-- reader:mac-only -->`。工作流只运行 macOS 构建，并要求 Release 恰好包含 Apple Silicon 与 Intel 两套 DMG、原地更新 ZIP 和校验值；Windows 用户不会收到这个版本的安装包。
 
 工作流使用仓库自动提供的 `GITHUB_TOKEN` 和上述两个 macOS 签名 secrets，无需 PAT。构建任务只有 `contents: read`，上传任务才有 `contents: write`。若以后由另一个工作流创建 Release，需要注意：默认 `GITHUB_TOKEN` 产生的事件通常不会触发新的工作流；应改为显式调用构建工作流，或调整发布入口。
 
@@ -93,9 +95,9 @@ macOS 和 Windows 桌面版在“设置 → 诊断”提供三种模式，默认
 
 安装后的 Reader 会在启动 15 秒后检查是否已到每日检查时间。应用运行期间也会检查到期时间；应用关闭时不运行后台任务，下次启动会补查。检查时间保存在用户数据目录的 `update-state.json`，重启不会重置每日间隔。失败或 Release 安装包尚未上传完成时，至少间隔一小时再试。开发模式不访问更新 API。
 
-更新来源为 `cynicalight/reader` 的最新正式 GitHub Release。仅提示比当前版本更新的正式版，不提示草稿、预发布版或旧版本。Release 必须同时提供当前平台（Apple Silicon Mac 或 Windows x64）对应的安装包和 `SHA256SUMS.txt`。在“关于 Reader”中可手动检查，手动检查不受每日间隔限制。
+更新来源为 `cynicalight/reader` 的最新正式 GitHub Release。仅提示比当前版本更新的正式版，不提示草稿、预发布版或旧版本。Release 必须同时提供当前平台（Apple Silicon Mac、Intel Mac 或 Windows x64）对应的安装包和 `SHA256SUMS.txt`。在“关于 Reader”中可手动检查，手动检查不受每日间隔限制。
 
-macOS 正式版优先原地更新：若当前应用由固定证书签名、Release 提供 `mac-arm64.zip`，后台检查发现新版本时直接下载 zip，不弹窗、不显示进度条（手动检查时显示进度条）。zip 同样核对 SHA-256，校验后在本机 loopback 上以随机路径临时提供给 Electron `autoUpdater`（Squirrel.Mac）。Squirrel 会再检查新应用的签名是否满足当前应用的指定要求（同一 bundle ID 与同一证书），通过后暂存，暂存完成后删除下载的 zip。随后提示“立即重启 / 稍后”：立即重启会照常保存阅读数据后退出并安装新版本；选择稍后时在下次退出 Reader 时安装。重启前再次检查同一版本不会重复下载。原地更新需要 Reader 所在目录可写；当前应用为 ad-hoc 签名（本地构建、旧版本）、Release 没有 zip，或下载、校验、Squirrel 任一步失败时，回退到下面的 DMG 流程。从 ad-hoc 签名的旧版本升级到首个固定证书版本，需要手动安装一次 DMG。
+macOS 正式版优先原地更新：若当前应用由固定证书签名、Release 提供对应架构的 `mac-arm64.zip` 或 `mac-intel-x64.zip`，后台检查发现新版本时直接下载 zip，不弹窗、不显示进度条（手动检查时显示进度条）。zip 同样核对 SHA-256，校验后在本机 loopback 上以随机路径临时提供给 Electron `autoUpdater`（Squirrel.Mac）。Squirrel 会再检查新应用的签名是否满足当前应用的指定要求（同一 bundle ID 与同一证书），通过后暂存，暂存完成后删除下载的 zip。随后提示“立即重启 / 稍后”：立即重启会照常保存阅读数据后退出并安装新版本；选择稍后时在下次退出 Reader 时安装。重启前再次检查同一版本不会重复下载。原地更新需要 Reader 所在目录可写；当前应用为 ad-hoc 签名（本地构建、旧版本）、Release 没有 zip，或下载、校验、Squirrel 任一步失败时，回退到下面的 DMG 流程。从 ad-hoc 签名的旧版本升级到首个固定证书版本，需要手动安装一次 DMG。
 
 其他情况下发现更新后选择“下载安装包”，应用会通过 Electron 网络栈下载文件，使用已生效的 Reader 代理设置，并在本地核对 SHA-256。校验成功后：macOS 打开 DMG，请先退出 Reader，再将新 Reader 拖入 Applications 完成替换，应用不会自动退出；Windows 运行 NSIS 安装程序并退出 Reader（退出前照常保存阅读数据），由安装程序替换原安装目录，书库在用户数据目录中不受影响。下载文件保存在用户数据目录的 `updates/` 下；失败的下载会清理，进程被强制关闭可能留下 `.part` 文件。校验值确认文件与 Release 一致，不能替代开发者签名。
 
@@ -105,7 +107,7 @@ macOS 正式版优先原地更新：若当前应用由固定证书签名、Relea
 
 ## 自动检查的范围
 
-PR 和 `main` CI 只在 Ubuntu 上运行类型检查与 Go/前端测试，不构建应用或安装包。Release 和手动试跑固定源提交，按完整 SHA 查询本仓库 `ci.yml` 已成功的 push 检查；不复用其他提交、失败、未完成或 PR head 的记录。找不到可复用记录时先补跑同一检查流程，失败则停止发版。之后在原生 macOS ARM64 和 Windows x64 runner 上构建安装包并检查包内运行时，不重复跑整套测试。检查脚本先将整个应用复制到仓库以外的临时目录，再启动包内 Electron 的 Node 模式。这样可以避免漏装依赖时意外使用源码目录中的依赖。检查内容包括 PDF.js 渲染、原生 canvas 和真实 ONNX 推理。随后启动包内 Go 服务，检查 SQLite 初始化、loopback 绑定、API 鉴权和 Web 资源。macOS 还检查签名完整性，正式版要求签名者为固定证书。
+PR 和 `main` CI 只在 Ubuntu 上运行类型检查与 Go/前端测试，不构建应用或安装包。Release 和手动试跑固定源提交，按完整 SHA 查询本仓库 `ci.yml` 已成功的 push 检查；不复用其他提交、失败、未完成或 PR head 的记录。找不到可复用记录时先补跑同一检查流程，失败则停止发版。之后在原生 macOS ARM64、macOS Intel x64 和 Windows x64 runner 上构建安装包并检查包内运行时，不重复跑整套测试。检查脚本先将整个应用复制到仓库以外的临时目录，再启动包内 Electron 的 Node 模式。这样可以避免漏装依赖时意外使用源码目录中的依赖。检查内容包括 PDF.js 渲染、原生 canvas 和真实 ONNX 推理。随后启动包内 Go 服务，检查 SQLite 初始化、loopback 绑定、API 鉴权和 Web 资源。macOS 还检查签名完整性，正式版要求签名者为固定证书。
 
 这些检查不启动 GUI，也不代替 DMG 挂载、Gatekeeper、Windows 安装/卸载、SmartScreen 以及真实用户文档的人工验收。校验生成脚本检查 DMG、zip 与 EXE 产物的命名、数量、文件头/尾和大小，再计算哈希。
 
