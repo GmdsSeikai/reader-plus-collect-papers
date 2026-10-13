@@ -1,4 +1,4 @@
-// Full-document text extraction for chat, independent of layout/translation.
+// Fill only pages missing from Reader's existing parsed original text.
 import { DOMMatrix, ImageData, Path2D } from "@napi-rs/canvas";
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
@@ -7,7 +7,11 @@ import { dirname, join } from "node:path";
 import { extractTextSpans } from "./text";
 Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
 const { values } = parseArgs({
-  options: { input: { type: "string" }, output: { type: "string" } },
+  options: {
+    input: { type: "string" },
+    output: { type: "string" },
+    pages: { type: "string" },
+  },
 });
 if (!values.input || !values.output)
   throw new Error("Usage: --input PDF --output JSON");
@@ -27,8 +31,20 @@ const task = getDocument({
 try {
   const pdf = await task.promise;
   if (pdf.numPages > 1000) throw new Error("PDF exceeds 1000 pages");
+  const selected =
+    values.pages === undefined
+      ? undefined
+      : new Set(values.pages.split(",").map(Number));
+  if (
+    selected &&
+    [...selected].some(
+      (page) => !Number.isInteger(page) || page < 1 || page > pdf.numPages,
+    )
+  )
+    throw new Error("Invalid missing-page range");
   const pages = [];
   for (let number = 1; number <= pdf.numPages; number++) {
+    if (selected && !selected.has(number)) continue;
     const page = await pdf.getPage(number);
     const spans = await extractTextSpans(page);
     // Keep extraction order and geometry; do not invent semantic layout.
@@ -57,7 +73,7 @@ try {
     }
   };
   await walk(await pdf.getOutline());
-  const body = JSON.stringify({ pages, outline });
+  const body = JSON.stringify({ totalPages: pdf.numPages, pages, outline });
   if (Buffer.byteLength(body) > 32 * 1024 * 1024)
     throw new Error("Text corpus exceeds 32 MB");
   await writeFile(values.output, body, { flag: "wx", mode: 0o600 });

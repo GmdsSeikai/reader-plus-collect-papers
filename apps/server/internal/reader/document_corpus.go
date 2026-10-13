@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-const corpusVersion = "document-text-v1"
+const corpusVersion = "document-text-v3"
 
 type corpusCoverage struct {
 	Status          string   `json:"status"`
@@ -77,7 +77,9 @@ func (s *Server) corpusFingerprint(d Document) (string, error) {
 	return sourceKey(corpusVersion + "\n" + strings.Join(parts, "\n")), nil
 }
 func (s *Server) documentCorpus(ctx context.Context, documentID string) (*documentCorpus, error) {
-	s.corpusMu.Lock()
+	if !s.corpusMu.TryLock() {
+		return nil, generationError(ErrorConfiguration, "原文索引正在准备，请稍后重试")
+	}
 	defer s.corpusMu.Unlock()
 	d, err := s.Store.Document(documentID)
 	if err != nil || d.DeletedAt != "" {
@@ -147,13 +149,38 @@ func addCorpusPassage(c *documentCorpus, section, label, text string, location a
 		return
 	}
 	raw, _ := json.Marshal(location)
+	offset := 0
 	// Bounded slices preserve reachability for long paragraphs.
 	for text != "" {
 		n := min(len(text), 2400)
 		for n > 0 && !utf8.ValidString(text[:n]) {
 			n--
 		}
-		c.Passages = append(c.Passages, documentPassage{Section: section, Label: label, Text: text[:n], Location: raw, Precision: precision})
+		for n > 1 {
+			encoded, _ := json.Marshal(text[:n])
+			if len(encoded) <= 4000 {
+				break
+			}
+			n /= 2
+			for n > 0 && !utf8.ValidString(text[:n]) {
+				n--
+			}
+		}
+		piece := text[:n]
+		pieceLocation := raw
+		if loc, ok := location.(EPUBReadingLocation); ok {
+			loc.Quote = piece
+			loc.Start, loc.End = offset, offset+utf16Length(piece)
+			var locator map[string]any
+			if json.Unmarshal([]byte(loc.Locator), &locator) == nil {
+				locator["text"] = map[string]string{"highlight": piece}
+				encoded, _ := json.Marshal(locator)
+				loc.Locator = string(encoded)
+			}
+			pieceLocation, _ = json.Marshal(loc)
+		}
+		c.Passages = append(c.Passages, documentPassage{Section: section, Label: label, Text: piece, Location: pieceLocation, Precision: precision})
+		offset += utf16Length(piece)
 		text = text[n:]
 	}
 }
@@ -179,16 +206,41 @@ func (s *Server) epubCorpus(ctx context.Context, d Document, c *documentCorpus) 
 	if e != nil {
 		return e
 	}
-	var m struct {
-		ReadingOrder []struct {
-			Href string `json:"href"`
-		} `json:"readingOrder"`
-	}
+	var m epubReaderManifest
 	if json.Unmarshal(data, &m) != nil {
 		return fmt.Errorf("EPUB manifest invalid")
 	}
 	for _, r := range m.ReadingOrder {
 		seen[r.Href] = true
+	}
+	titles := map[string]string{}
+	for _, r := range m.ReadingOrder {
+		if r.Title != "" {
+			titles[r.Href] = r.Title
+		}
+	}
+	var visit func([]epubReaderLink)
+	visit = func(links []epubReaderLink) {
+		for _, link := range links {
+			href := strings.Split(link.Href, "#")[0]
+			if titles[href] == "" && link.Title != "" {
+				titles[href] = link.Title
+			}
+			visit(link.Children)
+		}
+	}
+	visit(m.TOC)
+	for _, b := range blocks {
+		if b.Label == "paragraph_title" && titles[b.Location.Href] == "" {
+			titles[b.Location.Href] = truncateChatText(b.Text, 200)
+		}
+	}
+	for i := range c.Passages {
+		if title := titles[c.Passages[i].Section]; title != "" {
+			c.Passages[i].Label = title
+		} else {
+			c.Passages[i].Label = c.Passages[i].Section
+		}
 	}
 	c.Coverage.TotalUnits = len(seen)
 	c.Coverage.SearchableUnits = len(readable)
@@ -206,7 +258,8 @@ func (s *Server) epubCorpus(ctx context.Context, d Document, c *documentCorpus) 
 }
 
 type extractedPDF struct {
-	Pages []struct {
+	TotalPages int `json:"totalPages"`
+	Pages      []struct {
 		Page  int `json:"page"`
 		Spans []struct {
 			Text   string                                `json:"text"`
@@ -221,12 +274,25 @@ type extractedPDF struct {
 
 func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) error {
 	var extracted extractedPDF
+	layout, layoutErr := s.readLayout(d.ID)
+	if layoutErr == nil && layout.Pages > 1000 {
+		return generationError(ErrorProtocol, "已有解析的页数超过支持范围")
+	}
+	missingPages := []string{}
+	if layoutErr == nil {
+		for page := 1; page <= layout.Pages; page++ {
+			if !parsedPage(&layout, page) {
+				missingPages = append(missingPages, fmt.Sprint(page))
+			}
+		}
+	}
+	needsExtraction := layoutErr != nil || len(missingPages) > 0
 	worker := os.Getenv("READER_CORPUS_PROCESSOR")
 	if worker == "" && os.Getenv("READER_PROCESSOR") != "" {
 		worker = filepath.Join(filepath.Dir(os.Getenv("READER_PROCESSOR")), "corpus.mjs")
 	}
 	node := os.Getenv("READER_NODE")
-	if worker != "" && node != "" {
+	if needsExtraction && worker != "" && node != "" {
 		work, err := os.MkdirTemp(filepath.Join(s.Store.Root, "ai-work"), "corpus-")
 		if err != nil {
 			return err
@@ -234,6 +300,9 @@ func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) e
 		defer os.RemoveAll(work)
 		out := filepath.Join(work, "text.json")
 		cmd := exec.CommandContext(ctx, node, worker, "--input", s.Store.File(d), "--output", out)
+		if layoutErr == nil {
+			cmd.Args = append(cmd.Args, "--pages", strings.Join(missingPages, ","))
+		}
 		cmd.Dir = work
 		cmd.Env = append(os.Environ(), "ELECTRON_RUN_AS_NODE=1")
 		cmd.Stderr = io.Discard
@@ -252,19 +321,34 @@ func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) e
 		if err != nil {
 			return err
 		}
-		if json.Unmarshal(data, &extracted) != nil || len(extracted.Pages) < 1 {
+		if json.Unmarshal(data, &extracted) != nil || len(extracted.Pages) < 1 || extracted.TotalPages < 1 || extracted.TotalPages > 1000 {
 			return fmt.Errorf("PDF corpus invalid")
 		}
 	}
-	layout, layoutErr := s.readLayout(d.ID)
 	if len(extracted.Pages) == 0 && layoutErr != nil {
 		return generationError(ErrorConfiguration, "全文检索需要本地 PDF 文字提取程序，请重新构建 Reader")
 	}
-	if len(extracted.Pages) > 0 {
-		c.Coverage.TotalUnits = len(extracted.Pages)
-	} else {
+	if layoutErr == nil {
 		c.Coverage.TotalUnits = layout.Pages
+		if extracted.TotalPages > 0 && extracted.TotalPages != layout.Pages {
+			return generationError(ErrorProtocol, "已有解析与 PDF 页数不符，请重新解析")
+		}
+	} else {
+		c.Coverage.TotalUnits = extracted.TotalPages
+	}
+	if needsExtraction && len(extracted.Pages) == 0 {
 		c.Coverage.Warnings = append(c.Coverage.Warnings, "当前仅可读取已解析页面，全文文字提取程序尚未就绪")
+	}
+	extractedPages := map[int]int{}
+	complexText := false
+	for i, page := range extracted.Pages {
+		if page.Page < 1 || page.Page > c.Coverage.TotalUnits {
+			return fmt.Errorf("PDF page invalid")
+		}
+		if _, duplicate := extractedPages[page.Page]; duplicate {
+			return fmt.Errorf("PDF page duplicated")
+		}
+		extractedPages[page.Page] = i
 	}
 	for number := 1; number <= c.Coverage.TotalUnits; number++ {
 		if ctx.Err() != nil {
@@ -278,19 +362,19 @@ func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) e
 			}
 		}
 		start := len(c.Passages)
-		// Full text extraction preserves spans omitted by a partial layout pass.
-		if len(extracted.Pages) == 0 && layoutErr == nil && parsedPage(&layout, number) {
+		// Already parsed pages use existing blocks and their exact geometry.
+		if layoutErr == nil && parsedPage(&layout, number) {
 			for _, b := range layout.Blocks {
-				if b.Page == number && !isPDFPageDecoration(b) && b.Image == "" {
+				if b.Page == number && !isPDFPageDecoration(b) && strings.TrimSpace(b.Text) != "" {
+					if b.Image != "" {
+						complexText = true
+					}
 					addCorpusPassage(c, section, label, b.Text, map[string]any{"type": "pdf", "page": number, "rects": []any{b.Bounds}}, "block")
 				}
 			}
 		}
-		if len(c.Passages) == start && len(extracted.Pages) >= number {
-			page := extracted.Pages[number-1]
-			if page.Page != number {
-				return fmt.Errorf("PDF page order invalid")
-			}
+		if extractedIndex, available := extractedPages[number]; available && (layoutErr != nil || !parsedPage(&layout, number)) {
+			page := extracted.Pages[extractedIndex]
 			var text strings.Builder
 			flush := func() {
 				addCorpusPassage(c, section, label, text.String(), map[string]any{"type": "pdf", "page": number}, "page")
@@ -314,6 +398,9 @@ func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) e
 	if len(c.Coverage.Missing) > 0 {
 		c.Coverage.Status = "partial"
 		c.Coverage.Warnings = append(c.Coverage.Warnings, "缺失页可能为扫描或无文字页；当前未接入 OCR")
+	}
+	if complexText {
+		c.Coverage.Warnings = append(c.Coverage.Warnings, "表格、图表和公式只索引已有原文文字；二维结构需对照原文")
 	}
 	return nil
 }

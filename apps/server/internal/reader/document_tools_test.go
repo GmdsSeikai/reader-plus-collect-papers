@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -159,5 +161,89 @@ func TestDocumentCorpusPartialPDFAndLongPassage(t *testing.T) {
 	}
 	if text.String() != m.Blocks[0].Text {
 		t.Fatal("paragraph truncated")
+	}
+}
+
+func TestDocumentCorpusReusesCompletePDFLayoutWithoutAWorker(t *testing.T) {
+	s, _, layout := bookFixture(t)
+	t.Setenv("READER_NODE", "/nonexistent-node")
+	t.Setenv("READER_CORPUS_PROCESSOR", "/nonexistent-worker")
+	corpus, err := s.documentCorpus(t.Context(), "doc")
+	if err != nil || corpus.Coverage.SearchableUnits != layout.Pages {
+		t.Fatalf("existing PDF parse was not reused: %v", err)
+	}
+	for _, passage := range corpus.Passages {
+		if passage.Precision != "block" || !strings.Contains(string(passage.Location), "rects") {
+			t.Fatal("existing PDF block geometry was lost")
+		}
+	}
+	foundFormula := false
+	for _, passage := range corpus.Passages {
+		if passage.Text == "E=mc^2" {
+			foundFormula = true
+		}
+	}
+	if !foundFormula {
+		t.Fatal("already parsed formula text was dropped because the block has an image")
+	}
+}
+
+func runMissingPageCorpusProcess() {
+	var output, pages string
+	for i, arg := range os.Args {
+		if i+1 < len(os.Args) {
+			if arg == "--output" {
+				output = os.Args[i+1]
+			}
+			if arg == "--pages" {
+				pages = os.Args[i+1]
+			}
+		}
+	}
+	if output == "" || pages == "" {
+		os.Exit(7)
+	}
+	var extracted []any
+	for _, value := range strings.Split(pages, ",") {
+		page, _ := strconv.Atoi(value)
+		extracted = append(extracted, map[string]any{"page": page, "spans": []any{map[string]string{"text": "Original missing page " + value}}})
+	}
+	data, _ := json.Marshal(map[string]any{"totalPages": 10, "pages": extracted})
+	if os.WriteFile(output, data, 0600) != nil {
+		os.Exit(8)
+	}
+	_ = os.WriteFile(os.Getenv("READER_CORPUS_CAPTURE"), []byte(pages), 0600)
+}
+func TestDocumentCorpusExtractsOnlyMissingPages(t *testing.T) {
+	s, _, layout := bookFixture(t)
+	layout.ParsedPages = []int{1, 3}
+	data, _ := json.Marshal(layout)
+	path := filepath.Join(s.analysisDir("doc"), "manifest.json")
+	if e := os.WriteFile(path, data, 0600); e != nil {
+		t.Fatal(e)
+	}
+	fakeAgent(t, "node", "corpus-worker")
+	node, e := exec.LookPath("node")
+	if e != nil {
+		t.Fatal(e)
+	}
+	capture := filepath.Join(t.TempDir(), "pages.txt")
+	t.Setenv("READER_NODE", node)
+	t.Setenv("READER_CORPUS_PROCESSOR", "missing-page-worker")
+	t.Setenv("READER_CORPUS_CAPTURE", capture)
+	corpus, e := s.documentCorpus(t.Context(), "doc")
+	if e != nil {
+		t.Fatal(e)
+	}
+	selected, e := os.ReadFile(capture)
+	if e != nil || string(selected) != "2,4,5,6,7,8,9,10" {
+		t.Fatalf("re-extracted parsed pages: %s %v", selected, e)
+	}
+	if corpus.Coverage.SearchableUnits != 10 {
+		t.Fatal("missing pages not combined with existing parse")
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != string(data) {
+		t.Fatal("existing layout was changed")
 	}
 }
