@@ -12,7 +12,7 @@ import (
 
 // Collection schema version owned by collection_meta, independent of the
 // library's global schema. Writes are refused for rows from a newer module.
-const collectionSchemaVersion = 1
+const collectionSchemaVersion = 2
 
 // Canonical content version 1: fixed field order UTF-8 JSON of title, abstract,
 // ordered author names and categories, with whitespace-normalized values.
@@ -70,6 +70,7 @@ var (
 	errInvalidTaskConfig      = errors.New("任务配置无效")
 	errInvalidArxivID         = errors.New("arXiv ID 无效")
 	errCollectionPaused       = errors.New("采集已暂停")
+	errCollectionSourceLimit  = errors.New("来源上限，未覆盖")
 	errImportBusy             = errors.New("同一篇论文已有进行中的导入")
 )
 
@@ -117,8 +118,8 @@ type CollectionTask struct {
 
 // CollectionAuthorJSON is the stored source order of one candidate author.
 type CollectionAuthorJSON struct {
-	Name         string `json:"name"`
-	Affiliation  string `json:"affiliation,omitempty"`
+	Name        string `json:"name"`
+	Affiliation string `json:"affiliation,omitempty"`
 }
 
 // CollectionEvidence is a phrase verified to occur in the original title or
@@ -130,35 +131,35 @@ type CollectionEvidence struct {
 
 // CollectionCandidate is one paper discovered from arXiv, keyed by stable ID.
 type CollectionCandidate struct {
-	Authors        []CollectionAuthorJSON `json:"authors"`
-	Categories     []string              `json:"categories"`
-	Title          string                `json:"title"`
-	Abstract       string                `json:"abstract"`
-	ArXivID        string                `json:"arxivId"`
-	LatestVersion  int                   `json:"latestVersion"`
-	DOI            string                `json:"doi,omitempty"`
-	JournalRef     string                `json:"journalRef,omitempty"`
-	PublishedAt    string                `json:"publishedAt"`
-	UpdatedAt      string                `json:"updatedAt"`
-	FirstSeenAt    string                `json:"firstSeenAt"`
-	LastSeenAt     string                `json:"lastSeenAt"`
-	ContentHash    string                `json:"contentHash"`
-	CanonicalVer   int                   `json:"canonicalVersion"`
-	Ignored        bool                  `json:"ignored"`
+	Authors       []CollectionAuthorJSON `json:"authors"`
+	Categories    []string               `json:"categories"`
+	Title         string                 `json:"title"`
+	Abstract      string                 `json:"abstract"`
+	ArXivID       string                 `json:"arxivId"`
+	LatestVersion int                    `json:"latestVersion"`
+	DOI           string                 `json:"doi,omitempty"`
+	JournalRef    string                 `json:"journalRef,omitempty"`
+	PublishedAt   string                 `json:"publishedAt"`
+	UpdatedAt     string                 `json:"updatedAt"`
+	FirstSeenAt   string                 `json:"firstSeenAt"`
+	LastSeenAt    string                 `json:"lastSeenAt"`
+	ContentHash   string                 `json:"contentHash"`
+	CanonicalVer  int                    `json:"canonicalVersion"`
+	Ignored       bool                   `json:"ignored"`
 }
 
 // CollectionMatch records one discovery relationship between a task revision
 // and a candidate on a channel/branch, keeping every evidence phrase.
 type CollectionMatch struct {
-	Evidence     []CollectionEvidence `json:"evidence"`
-	TaskID       string               `json:"taskId"`
-	ArXivID      string               `json:"arxivId"`
-	BranchHash   string               `json:"branchHash"`
-	Channel      string               `json:"channel"`
-	FirstSeenAt  string               `json:"firstSeenAt"`
-	LastSeenAt   string               `json:"lastSeenAt"`
-	RuleScore    int                  `json:"ruleScore"`
-	QueryRevision int                 `json:"queryRevision"`
+	Evidence      []CollectionEvidence `json:"evidence"`
+	TaskID        string               `json:"taskId"`
+	ArXivID       string               `json:"arxivId"`
+	BranchHash    string               `json:"branchHash"`
+	Channel       string               `json:"channel"`
+	FirstSeenAt   string               `json:"firstSeenAt"`
+	LastSeenAt    string               `json:"lastSeenAt"`
+	RuleScore     int                  `json:"ruleScore"`
+	QueryRevision int                  `json:"queryRevision"`
 }
 
 // CollectionRun is one discovery execution for a task with a fixed range.
@@ -179,22 +180,22 @@ type CollectionRun struct {
 
 // CollectionSlice is one coverage unit of a run's discovery range.
 type CollectionSlice struct {
-	Query        string          `json:"query"`
-	ParentID     string          `json:"parentId,omitempty"`
-	ID           string          `json:"id"`
-	TaskID       string          `json:"taskId"`
-	Channel      string          `json:"channel"`
-	BranchHash   string          `json:"branchHash"`
-	FromUTC      string          `json:"fromUtc"`
-	ToUTC        string          `json:"toUtc"`
-	PageOffset   int             `json:"pageOffset"`
-	TotalResults int             `json:"totalResults"`
-	Processed    int             `json:"processed"`
-	Status       string          `json:"status"`
-	FailureClass string          `json:"failureClass,omitempty"`
-	SourceLimit  bool            `json:"sourceLimit"`
-	RetryAt      string          `json:"retryAt,omitempty"`
-	CheckedAt    string          `json:"checkedAt,omitempty"`
+	Query        string `json:"query"`
+	ParentID     string `json:"parentId,omitempty"`
+	ID           string `json:"id"`
+	TaskID       string `json:"taskId"`
+	Channel      string `json:"channel"`
+	BranchHash   string `json:"branchHash"`
+	FromUTC      string `json:"fromUtc"`
+	ToUTC        string `json:"toUtc"`
+	PageOffset   int    `json:"pageOffset"`
+	TotalResults int    `json:"totalResults"`
+	Processed    int    `json:"processed"`
+	Status       string `json:"status"`
+	FailureClass string `json:"failureClass,omitempty"`
+	SourceLimit  bool   `json:"sourceLimit"`
+	RetryAt      string `json:"retryAt,omitempty"`
+	CheckedAt    string `json:"checkedAt,omitempty"`
 }
 
 // CollectionCitation is the Semantic Scholar cumulative count for a candidate.
@@ -212,58 +213,58 @@ type CollectionCitation struct {
 
 // CollectionAnalysisTask is one task judgment inside a stored analysis result.
 type CollectionAnalysisTask struct {
-	Evidence      []CollectionEvidence `json:"evidence"`
-	TaskID        string               `json:"taskId"`
-	ProfileHash   string               `json:"profileHash"`
-	ReasonZH      string               `json:"reason_zh"`
-	RelevanceScore int                `json:"relevance_score"`
+	Evidence       []CollectionEvidence `json:"evidence"`
+	TaskID         string               `json:"taskId"`
+	ProfileHash    string               `json:"profileHash"`
+	ReasonZH       string               `json:"reason_zh"`
+	RelevanceScore int                  `json:"relevance_score"`
 }
 
 // CollectionAnalysisResult is the strict schema v1 model output.
 type CollectionAnalysisResult struct {
-	Assessments []CollectionAnalysisTask `json:"assessments"`
-	SchemaVersion int                   `json:"schema_version"`
-	TitleZH     string                  `json:"title_zh"`
-	AbstractZH  string                  `json:"abstract_zh"`
+	Assessments   []CollectionAnalysisTask `json:"assessments"`
+	SchemaVersion int                      `json:"schema_version"`
+	TitleZH       string                   `json:"title_zh"`
+	AbstractZH    string                   `json:"abstract_zh"`
 }
 
 // CollectionAnalysis is one cached analysis keyed by material identity.
 type CollectionAnalysis struct {
-	ModelFingerprint string                  `json:"modelFingerprint"`
+	ModelFingerprint string                    `json:"modelFingerprint"`
 	Result           *CollectionAnalysisResult `json:"result,omitempty"`
-	CacheKey         string                  `json:"cacheKey"`
-	ArXivID          string                  `json:"arxivId"`
-	ContentHash      string                  `json:"contentHash"`
-	ProfileHash      string                  `json:"profileHash"`
-	PromptVersion    int                     `json:"promptVersion"`
-	ResultVersion    int                     `json:"resultVersion"`
-	Status           string                  `json:"status"`
-	Error            string                  `json:"error,omitempty"`
-	Attempt          int                     `json:"attempt"`
-	RetryAt          string                  `json:"retryAt,omitempty"`
-	CreatedAt        string                  `json:"createdAt"`
-	UpdatedAt        string                  `json:"updatedAt"`
+	CacheKey         string                    `json:"cacheKey"`
+	ArXivID          string                    `json:"arxivId"`
+	ContentHash      string                    `json:"contentHash"`
+	ProfileHash      string                    `json:"profileHash"`
+	PromptVersion    int                       `json:"promptVersion"`
+	ResultVersion    int                       `json:"resultVersion"`
+	Status           string                    `json:"status"`
+	Error            string                    `json:"error,omitempty"`
+	Attempt          int                       `json:"attempt"`
+	RetryAt          string                    `json:"retryAt,omitempty"`
+	CreatedAt        string                    `json:"createdAt"`
+	UpdatedAt        string                    `json:"updatedAt"`
 }
 
 // CollectionQuotaDay meters analysis requests actually sent on a UTC day.
 type CollectionQuotaDay struct {
-	UTCDate    string `json:"utcDate"`
-	Sent       int    `json:"sent"`
-	Reserved   int    `json:"reserved"`
-	Uncertain  int    `json:"uncertain"`
+	UTCDate   string `json:"utcDate"`
+	Sent      int    `json:"sent"`
+	Reserved  int    `json:"reserved"`
+	Uncertain int    `json:"uncertain"`
 }
 
 // CollectionAttempt is one metered analysis send identity.
 type CollectionAttempt struct {
-	ID           string `json:"id"`
-	RequestKey   string `json:"requestKey"`
-	CacheKey     string `json:"cacheKey"`
-	ReservedDay  string `json:"reservedDay"`
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
-	CreatedAt    string `json:"createdAt"`
-	SentAt       string `json:"sentAt,omitempty"`
-	FinishedAt   string `json:"finishedAt,omitempty"`
+	ID          string `json:"id"`
+	RequestKey  string `json:"requestKey"`
+	CacheKey    string `json:"cacheKey"`
+	ReservedDay string `json:"reservedDay"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	SentAt      string `json:"sentAt,omitempty"`
+	FinishedAt  string `json:"finishedAt,omitempty"`
 }
 
 // CollectionImportRequest is one user-confirmed fixed-version download.

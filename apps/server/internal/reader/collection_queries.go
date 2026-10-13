@@ -54,15 +54,36 @@ func (s *Store) FinishCollectionRun(runID, status, failureClass string) error {
 	if !validRunStatus(status) {
 		return fmt.Errorf("未知运行状态 %q", status)
 	}
-	_, err := s.DB.Exec("UPDATE collection_runs SET status=?,failure_class=?,finished_at=? WHERE run_id=? AND status IN ('queued','running')",
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := collectionWritableTx(tx); err != nil {
+		return err
+	}
+	_, err = tx.Exec("UPDATE collection_runs SET status=?,failure_class=?,finished_at=? WHERE run_id=? AND status IN ('queued','running')",
 		status, failureClass, now(), runID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // BumpCollectionExecToken invalidates late responses from cancelled runs.
 func (s *Store) BumpCollectionExecToken(taskID string) error {
-	_, err := s.DB.Exec("UPDATE collection_runs SET exec_token=exec_token+1 WHERE task_id=? AND status IN ('queued','running')", taskID)
-	return err
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := collectionWritableTx(tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE collection_runs SET exec_token=exec_token+1 WHERE task_id=? AND status IN ('queued','running')", taskID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CollectionRunToken reads the current token for a run.
@@ -99,20 +120,8 @@ func (s *Store) UpsertSlice(tx *sql.Tx, sl CollectionSlice, runID string, revisi
 // when the request was sent, never a refreshed one; the transaction re-checks
 // the run is still open at the same token and the task revision is current.
 func (s *Store) CommitScanPage(tx *sql.Tx, sl CollectionSlice, revision int, runToken int64, runID string, candidates []CollectionCandidate, matches []CollectionMatch) error {
-	var token int64
-	var status string
-	if err := tx.QueryRow("SELECT exec_token,status FROM collection_runs WHERE run_id=?", runID).Scan(&token, &status); err != nil {
+	if err := validateCollectionRunTx(tx, runID, runToken, revision); err != nil {
 		return err
-	}
-	if token != runToken || (status != runRunning && status != runQueued) {
-		return errors.New("运行已被取消或替换，响应不再有效")
-	}
-	var currentRevision int
-	if err := tx.QueryRow("SELECT query_revision FROM collection_tasks WHERE task_id=?", sl.TaskID).Scan(&currentRevision); err != nil {
-		return err
-	}
-	if currentRevision != revision {
-		return errors.New("任务已修改，响应不再有效")
 	}
 	for _, c := range candidates {
 		if err := s.UpsertCandidate(tx, c); err != nil {
@@ -127,6 +136,42 @@ func (s *Store) CommitScanPage(tx *sql.Tx, sl CollectionSlice, revision int, run
 	sl.PageOffset++
 	sl.Processed += len(candidates)
 	return s.UpsertSlice(tx, sl, runID, revision)
+}
+
+func validateCollectionRunTx(tx *sql.Tx, runID string, runToken int64, revision int) error {
+	if err := collectionWritableTx(tx); err != nil {
+		return err
+	}
+	var token int64
+	var status, trigger, snapshot, taskID string
+	if err := tx.QueryRow("SELECT exec_token,status,trigger_kind,config_snapshot,task_id FROM collection_runs WHERE run_id=?", runID).Scan(&token, &status, &trigger, &snapshot, &taskID); err != nil {
+		return err
+	}
+	if token != runToken || (status != runRunning && status != runQueued) {
+		return errors.New("运行已被取消或替换，响应不再有效")
+	}
+	var currentRevision int
+	var enabled int
+	var config string
+	if err := tx.QueryRow("SELECT query_revision,enabled,config_json FROM collection_tasks WHERE task_id=?", taskID).Scan(&currentRevision, &enabled, &config); err != nil {
+		return err
+	}
+	if currentRevision != revision {
+		return errors.New("任务已修改，响应不再有效")
+	}
+	if trigger == "hot-history" {
+		var current, original CollectionTaskConfig
+		if err := json.Unmarshal([]byte(config), &current); err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(snapshot), &original); err != nil {
+			return err
+		}
+		if enabled == 0 || current.LatestWindowDays != original.LatestWindowDays || current.HotWindowMonths != original.HotWindowMonths {
+			return errors.New("历史复核任务或窗口已改变")
+		}
+	}
+	return nil
 }
 
 // CandidateFilter selects candidate list pages.

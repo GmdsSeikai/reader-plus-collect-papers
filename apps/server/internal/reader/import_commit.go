@@ -211,10 +211,11 @@ func (s *Store) documentExists(docID string) (bool, error) {
 	return err == nil, err
 }
 
-// testCrashPoint exits the process at a named install boundary when the test
-// harness sets READER_TEST_CRASH_AT. Production never sets the variable.
+// Only subprocess fixtures built with an explicit linker flag enable crashes.
+var testCrashEnabled string
+
 func testCrashPoint(name string) {
-	if os.Getenv("READER_TEST_CRASH_AT") == name {
+	if testCrashEnabled == "true" && os.Getenv("READER_TEST_CRASH_AT") == name {
 		os.Exit(1)
 	}
 }

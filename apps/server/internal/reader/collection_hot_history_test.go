@@ -81,6 +81,9 @@ func TestHotHistoryCycleRoundBudgetAndResume(t *testing.T) {
 	// persisted cycle instead of rebuilding it.
 	mgr2 := NewCollectionManager(s)
 	mgr2.gate = mgr.gate
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	stop2 := mgr2.StartCollection(ctx2)
+	defer func() { cancel2(); stop2() }()
 	mgr2.tickOnce(context.Background())
 	cycle2, _, err := loadHotHistoryCycle(s.Store)
 	if err != nil {
@@ -133,10 +136,9 @@ func TestHotHistoryRoundBudgetCap(t *testing.T) {
 	if len(cycle.Pending) == 0 {
 		t.Fatal("queue unexpectedly drained in one round")
 	}
-	// 12-month window buckets minus recent zone ≈ 350+ day buckets; after a
-	// 10-slice round the queue must still hold the large remainder.
-	if len(cycle.Pending) < 100 {
-		t.Fatalf("queue drained too far: %d", len(cycle.Pending))
+	expected := len(weeklyHistoryRanges(mustParseRFC3339(cycle.WindowFrom), mustParseRFC3339(cycle.WindowTo))) - hotHistoryRoundBudget
+	if len(cycle.Pending) != expected {
+		t.Fatalf("remaining weekly slices = %d, want %d", len(cycle.Pending), expected)
 	}
 }
 

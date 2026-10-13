@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,11 +32,22 @@ func coverageFixture(t *testing.T, s *Server, feed func(w http.ResponseWriter, r
 	mux.HandleFunc("/pdf/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write(sample(t, "reading-notes.pdf"))
 	})
+	mux.HandleFunc("/s2/batch", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		respond(w, 200, make([]any, len(body.IDs)))
+	})
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 	c := scholar.New(maxPaperBytes)
 	c.ArXivAPI = srv.URL + "/api/query"
 	c.ArXivPDF = srv.URL + "/pdf/"
+	c.SemanticScholar = srv.URL + "/s2/"
 	c.HTTP = srv.Client()
 	c.AllowPrivateHosts = true
 	s.scholarMu.Lock()

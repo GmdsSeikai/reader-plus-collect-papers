@@ -31,6 +31,7 @@ type CollectionManager struct {
 	draining bool
 	queue    chan collectionJob
 	baseCtx  context.Context
+	clock    func() time.Time
 }
 
 type collectionJob struct {
@@ -119,7 +120,7 @@ func (m *CollectionManager) stopOwnedWork(gen *collectionGeneration) {
 func (m *CollectionManager) registerWork(id string) (context.Context, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.stopped || m.draining {
+	if m.stopped || m.draining || m.paused {
 		return nil, false
 	}
 	if _, exists := m.running[id]; exists {
@@ -205,11 +206,35 @@ func (m *CollectionManager) importWorker(ctx context.Context, gen *collectionGen
 // scheduleTick drives the periodic scheduler; tickOnce holds the per-tick
 // production sequence so tests can drive the same path deterministically.
 func (m *CollectionManager) tickOnce(ctx context.Context) {
+	if !m.schedulingAllowed() || ctx.Err() != nil {
+		return
+	}
 	m.startDueTasks(ctx)
 	m.runHotHistoryCycle(ctx)
 	if _, err := m.RefreshCitations(ctx, m.citationKey()); err != nil {
 		log.Printf("citation refresh: %v", err)
 	}
+}
+
+func (m *CollectionManager) schedulingAllowed() bool {
+	m.mu.Lock()
+	allowed := !m.paused && !m.stopped && !m.draining
+	m.mu.Unlock()
+	if !allowed {
+		return false
+	}
+	cfg, err := m.server.Store.CollectionSettings()
+	return err == nil && !cfg.Paused
+}
+
+func (m *CollectionManager) clockNow() time.Time {
+	m.mu.Lock()
+	clock := m.clock
+	m.mu.Unlock()
+	if clock == nil {
+		return time.Now().UTC().Truncate(time.Second)
+	}
+	return clock().UTC().Truncate(time.Second)
 }
 
 // scheduleTick starts due automatic runs and refreshes due citations. The
@@ -307,22 +332,48 @@ func (m *CollectionManager) EnqueueRun(taskID, trigger string) (CollectionRun, e
 	return run, nil
 }
 
-// CancelRun bumps the task's exec token and cancels owned work. Committed
+// CancelRun invalidates this run and cancels owned work. Committed
 // pages stay; late responses cannot advance checkpoints.
 func (m *CollectionManager) CancelRun(runID string) error {
-	var taskID string
-	if err := m.server.Store.DB.QueryRow("SELECT task_id FROM collection_runs WHERE run_id=?", runID).Scan(&taskID); err != nil {
+	tx, err := m.server.Store.DB.Begin()
+	if err != nil {
 		return err
 	}
-	if err := m.server.Store.BumpCollectionExecToken(taskID); err != nil {
+	defer tx.Rollback()
+	if err = collectionWritableTx(tx); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE collection_runs SET exec_token=exec_token+1,status=?,finished_at=? WHERE run_id=? AND status IN ('queued','running')", runCancelled, now(), runID); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	m.cancelWork(runID)
-	return m.server.Store.FinishCollectionRun(runID, runCancelled, "")
+	return nil
 }
 
 // SetPaused stops new work and cancels active runs; committed pages remain.
 func (m *CollectionManager) SetPaused(paused bool) error {
+	m.mu.Lock()
+	m.paused = paused
+	m.mu.Unlock()
+	if paused {
+		tx, err := m.server.Store.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err = collectionWritableTx(tx); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("UPDATE collection_runs SET exec_token=exec_token+1,status=?,failure_class='paused',finished_at=? WHERE status IN ('queued','running')", runInterrupted, now()); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	m.paused = paused
 	cancels := make([]context.CancelFunc, 0, len(m.running))
@@ -417,7 +468,7 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 	}
 	if sl.SourceLimit {
 		// A proven source limit is terminal for coverage; never claim success.
-		return errors.New("来源上限，未覆盖")
+		return errCollectionSourceLimit
 	}
 	if sl.FailureClass == "split" {
 		// A split parent is proven only through its expected children. A
@@ -432,7 +483,7 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			}
 		}
 		return m.subdivideSlice(ctx, run, task, plan, sl)
-		}
+	}
 	if sl.Status == sliceCompleted && !plan.ForceRescan {
 		return nil
 	}
@@ -452,16 +503,16 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			return errors.New("切片执行预算耗尽，保留待办")
 		}
 		var err error
-		sendToken, err = m.server.Store.CollectionRunToken(run.ID)
-		if err != nil {
-			return err
-		}
+		sendToken = run.ExecToken
 		release, err := m.gate.Acquire(ctx)
 		if err != nil {
 			return err
 		}
 		result, err := client.ArxivSearch(ctx, sl.Query, page*discoveryPageSize, discoveryPageSize)
 		release()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return err
 		}
@@ -493,7 +544,10 @@ func (m *CollectionManager) scanSlice(ctx context.Context, run CollectionRun, ta
 			sl.SourceLimit = true
 			sl.Status = sliceCompleted
 			sl.FailureClass = "source_limit"
-			return m.finishSlice(sl, run, task, sendToken)
+			if err := m.finishSlice(sl, run, task, sendToken); err != nil {
+				return err
+			}
+			return errCollectionSourceLimit
 		}
 		validCount := len(result.Entries)
 		nowStr := now()
@@ -567,6 +621,7 @@ func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRu
 		parent.Status = sliceRunning
 	}
 	failed := 0
+	sourceLimited := false
 	for _, child := range children {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -580,6 +635,9 @@ func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRu
 		}
 		if err := m.scanSlice(ctx, run, task, childPlan); err != nil {
 			failed++
+			if errors.Is(err, errCollectionSourceLimit) {
+				sourceLimited = true
+			}
 		}
 	}
 	done, err := m.childrenCovered(task, parent)
@@ -587,6 +645,9 @@ func (m *CollectionManager) subdivideSlice(ctx context.Context, run CollectionRu
 		return err
 	}
 	if !done || failed > 0 {
+		if sourceLimited {
+			return errCollectionSourceLimit
+		}
 		return errors.New("子切片未完全覆盖")
 	}
 	// Every expected child covered: the parent may now claim completion.
@@ -649,13 +710,8 @@ func (m *CollectionManager) persistSlice(sl CollectionSlice, run CollectionRun, 
 		return err
 	}
 	defer tx.Rollback()
-	var token int64
-	var status string
-	if err := tx.QueryRow("SELECT exec_token,status FROM collection_runs WHERE run_id=?", run.ID).Scan(&token, &status); err != nil {
+	if err := validateCollectionRunTx(tx, run.ID, sendToken, task.QueryRevision); err != nil {
 		return err
-	}
-	if token != sendToken || (status != runRunning && status != runQueued) {
-		return errors.New("运行已被取消或替换，响应不再有效")
 	}
 	if err := m.server.Store.UpsertSlice(tx, sl, run.ID, task.QueryRevision); err != nil {
 		return err
@@ -673,13 +729,8 @@ func (m *CollectionManager) finishSlice(sl CollectionSlice, run CollectionRun, t
 		return err
 	}
 	defer tx.Rollback()
-	var token int64
-	var status string
-	if err := tx.QueryRow("SELECT exec_token,status FROM collection_runs WHERE run_id=?", run.ID).Scan(&token, &status); err != nil {
+	if err := validateCollectionRunTx(tx, run.ID, sendToken, task.QueryRevision); err != nil {
 		return err
-	}
-	if token != sendToken || (status != runRunning && status != runQueued) {
-		return errors.New("运行已被取消或替换，响应不再有效")
 	}
 	if err := m.server.Store.UpsertSlice(tx, sl, run.ID, task.QueryRevision); err != nil {
 		return err

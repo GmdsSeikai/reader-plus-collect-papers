@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -40,7 +41,7 @@ func readerServerBinary(t *testing.T) string {
 			name += ".exe"
 		}
 		binPath = filepath.Join(dir, name)
-		cmd := exec.Command("go", "build", "-o", binPath, "./cmd/reader-server")
+		cmd := exec.Command("go", "build", "-ldflags", "-X reader.local/server/internal/reader.testCrashEnabled=true", "-o", binPath, "./cmd/reader-server")
 		cmd.Dir = filepath.Join("..", "..")
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -74,23 +75,21 @@ func startReaderServer(t *testing.T, dataRoot string, extraEnv ...string) *reade
 		t.Fatal(err)
 	}
 	p := &readerProc{cmd: cmd, done: make(chan error, 1)}
+	readyURL := make(chan string, 1)
 	go func() {
-		line := make([]byte, 4096)
-		n, _ := stdout.Read(line)
-		first := string(line[:n])
-		if i := strings.IndexByte(first, 10); i >= 0 {
-			first = first[:i]
-		}
+		first, _ := bufio.NewReader(stdout).ReadString('\n')
 		var ready struct {
 			URL string `json:"url"`
 		}
 		_ = json.Unmarshal([]byte(first), &ready)
-		p.url = strings.TrimSpace(ready.URL)
+		readyURL <- strings.TrimSpace(ready.URL)
 		p.done <- cmd.Wait()
 	}()
-	deadline := time.Now().Add(20 * time.Second)
-	for p.url == "" && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
+	select {
+	case p.url = <-readyURL:
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("reader-server did not report ready")
 	}
 	if p.url == "" {
 		_ = cmd.Process.Kill()
