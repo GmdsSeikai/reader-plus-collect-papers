@@ -164,9 +164,11 @@ export async function startUpdateService(window: BrowserWindow) {
         const selected = await dialog.showMessageBox(window, {
           type: "info",
           message: `Reader ${result.update.version} 可用`,
-          detail: windows
-            ? `当前版本：${app.getVersion()}。下载并校验后，Reader 会保存阅读数据并退出，自动安装后重新打开。`
-            : `当前版本：${app.getVersion()}。下载并校验后将打开 DMG，请将 Reader 拖入 Applications 完成更新。安装前请退出当前 Reader。`,
+          detail: `${
+            windows
+              ? `当前版本：${app.getVersion()}。下载并校验后，Reader 会保存阅读数据并退出，自动安装后重新打开。`
+              : `当前版本：${app.getVersion()}。下载并校验后将打开 DMG，请将 Reader 拖入 Applications 完成更新。安装前请退出当前 Reader。`
+          }\n\n安装包从 GitHub 下载，速度较慢时可开启代理加速。`,
           buttons: [windows ? "下载并安装" : "下载安装包", "稍后"],
           defaultId: 0,
           cancelId: 1,
