@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ProxySettings } from "../../../packages/reader-core/src/proxy-settings";
+import type { UpdateProgress } from "../../../packages/reader-core/src/update-progress";
 async function proxyRequest(channel: string, ...args: unknown[]) {
   try {
     return await ipcRenderer.invoke(channel, ...args);
@@ -22,6 +23,12 @@ contextBridge.exposeInMainWorld("readerDesktop", {
   diagnosticSettings: (settings: unknown) =>
     ipcRenderer.send("reader:diagnostic-settings", settings),
   checkForUpdates: () => ipcRenderer.invoke("reader:check-updates"),
+  onUpdateProgress: (callback: (progress: UpdateProgress | null) => void) => {
+    const listener = (_event: unknown, progress: UpdateProgress | null) =>
+      callback(progress);
+    ipcRenderer.on("reader:update-progress", listener);
+    return () => ipcRenderer.removeListener("reader:update-progress", listener);
+  },
   proxySettings: () => proxyRequest("reader:proxy-settings"),
   saveProxySettings: (settings: ProxySettings) =>
     proxyRequest("reader:save-proxy-settings", settings),
