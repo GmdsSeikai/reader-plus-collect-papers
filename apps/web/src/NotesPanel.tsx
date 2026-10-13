@@ -287,7 +287,7 @@ function NoteCard({
               if (e.key === "Escape") setEditing(false);
             }}
           />
-          <div className="flex justify-end gap-1">
+          <div className="grid grid-cols-2 gap-1">
             <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>
               取消
             </Button>
