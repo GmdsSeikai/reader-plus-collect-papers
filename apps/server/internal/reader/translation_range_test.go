@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -91,26 +92,25 @@ func fakeLayout(t *testing.T) (log string) {
 	t.Helper()
 	dir := t.TempDir()
 	log = filepath.Join(dir, "calls.log")
-	script := filepath.Join(dir, "layout.sh")
-	body := `while [ $# -gt 0 ]; do case "$1" in --output) out="$2"; shift;; --from-page) from="$2"; shift;; --to-page) to="$2"; shift;; esac; shift; done
-echo "$from-$to" >> "$FAKE_LAYOUT_LOG"
-mkdir -p "$out/assets"
-text=""; i=0; while [ $i -lt 60 ]; do text="${text}Sentence number. "; i=$((i+1)); done
-blocks=""; pages=""; p=$from
-while [ $p -le $to ]; do
-  [ -n "$blocks" ] && blocks="$blocks," && pages="$pages,"
-  blocks="$blocks{\"id\":\"p$p-b1\",\"page\":$p,\"label\":\"text\",\"bounds\":{\"x\":0.1,\"y\":0.1,\"width\":0.5,\"height\":0.3},\"text\":\"$text\"}"
-  pages="$pages$p"
-  echo "{\"event\":\"page\",\"page\":$p,\"total\":80}"
-  p=$((p+1))
-done
-printf '{"pages":80,"model":"fake","parsedPages":[%s],"blocks":[%s],"warnings":[],"incompletePages":[]}' "$pages" "$blocks" > "$out/manifest.json"
-`
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+	binary, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("READER_NODE", "/bin/sh")
-	t.Setenv("READER_PROCESSOR", script)
+	name := "layout-fixture"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	processor := filepath.Join(dir, name)
+	bytes, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(processor, bytes, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("READER_NODE", processor)
+	t.Setenv("READER_PROCESSOR", processor)
+	t.Setenv("READER_LAYOUT_HELPER", "1")
 	t.Setenv("FAKE_LAYOUT_LOG", log)
 	return log
 }

@@ -13,6 +13,10 @@ import (
 // Dispatch before testing parses CLI arguments. A copy/link of this native test
 // executable acts as each provider on Windows as well as Unix, without a shell.
 func TestMain(m *testing.M) {
+	if os.Getenv("READER_LAYOUT_HELPER") == "1" {
+		runLayoutFixtureProcess()
+		os.Exit(0)
+	}
 	if os.Getenv("READER_AGENT_HELPER") != "" {
 		switch os.Getenv("READER_AGENT_MODE") {
 		case "translation-session":
