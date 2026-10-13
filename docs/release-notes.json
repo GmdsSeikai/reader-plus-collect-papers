@@ -58,8 +58,8 @@
       "body": "改善 PDF 文字选择与页面文字的对齐，避免把未知语言误判为英语，并修复部分 Windows 环境下界面资源无法正常加载的问题。"
     },
     {
-      "title": "新增 Intel Mac 安装包",
-      "body": "macOS 现提供 Apple Silicon 和 Intel 两种安装包。Intel 版文件名标有 intel，请按 Mac 的芯片类型下载；两种版本均支持应用内更新。"
+      "title": "Windows 自动安装更新",
+      "body": "Windows 版下载并校验更新后，会保存阅读数据并退出，自动完成安装后重新打开 Reader，不再显示安装向导。从 0.6.0 升级到之后的版本时生效。"
     },
     {
       "title": "完善首次使用与弹窗显示",

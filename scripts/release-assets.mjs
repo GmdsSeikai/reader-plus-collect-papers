@@ -9,8 +9,6 @@ const { version } = JSON.parse(
 const expected = [
   `Reader-${version}-mac-arm64.dmg`,
   `Reader-${version}-mac-arm64.zip`,
-  `Reader-${version}-mac-intel-x64.dmg`,
-  `Reader-${version}-mac-intel-x64.zip`,
   ...(process.env.MAC_ONLY === "true" ? [] : [`Reader-${version}-win-x64.exe`]),
 ].sort();
 const actual = (await readdir("release"))
