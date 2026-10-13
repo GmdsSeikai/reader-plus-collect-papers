@@ -112,5 +112,5 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer finish()
 	r = r.WithContext(ctx)
-	s.chatDocument(w, r, d.ID, d.Title, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments)
+	s.chatDocument(w, r, d, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments)
 }

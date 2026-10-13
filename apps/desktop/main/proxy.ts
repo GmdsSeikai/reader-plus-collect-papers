@@ -74,16 +74,36 @@ export async function childProxyEnvironment(
   inherited: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
 ): Promise<NodeJS.ProcessEnv> {
-  if (platform === "win32")
-    return systemProxyEnvironment(
-      inherited,
-      await readWindowsProxySettings(inherited),
+  return (await resolveSystemProxyEnvironment(inherited, platform)).env;
+}
+
+export async function resolveSystemProxyEnvironment(
+  inherited: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): Promise<{ env: NodeJS.ProcessEnv; warning?: string }> {
+  if (platform !== "win32" && platform !== "darwin")
+    return { env: { ...inherited } };
+  try {
+    if (platform === "win32")
+      return {
+        env: systemProxyEnvironment(
+          inherited,
+          await readWindowsProxySettings(inherited),
+        ),
+      };
+    const { stdout } = await execFileAsync(
+      "/usr/bin/osascript",
+      ["-l", "JavaScript", "-e", proxyScript],
+      { timeout: 5000, maxBuffer: 256 * 1024 },
     );
-  if (platform !== "darwin") return { ...inherited };
-  const { stdout } = await execFileAsync(
-    "/usr/bin/osascript",
-    ["-l", "JavaScript", "-e", proxyScript],
-    { timeout: 5000, maxBuffer: 256 * 1024 },
-  );
-  return systemProxyEnvironment(inherited, JSON.parse(stdout));
+    return { env: systemProxyEnvironment(inherited, JSON.parse(stdout)) };
+  } catch {
+    // Proxy conversion is optional at startup. Native command failures may
+    // contain private configuration, so keep the diagnostic free of raw output.
+    console.warn("无法应用系统代理，Reader 将沿用启动环境。");
+    return {
+      env: { ...inherited },
+      warning: "无法读取或转换系统代理，当前沿用启动环境。可改用手动代理。",
+    };
+  }
 }

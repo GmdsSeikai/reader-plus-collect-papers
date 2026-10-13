@@ -306,3 +306,29 @@ func TestCodexChatMissingUsageRebuildsBeforeNextTurn(t *testing.T) {
 		t.Fatal("missing usage must rebuild and rehydrate instead of attributing two turns to one call")
 	}
 }
+
+func TestCodexFollowupKeepsTitleAndSummary(t *testing.T) {
+	s, path := chatFixture(t)
+	r := request(t, s, "PATCH", "/api/documents/doc", strings.NewReader(`{"title":"标题复用测试","metadata":{"abstract":"摘要复用测试"}}`))
+	if r.Code != 200 {
+		t.Fatal(r.Body)
+	}
+	for _, question := range []string{"普通问题", "继续追问"} {
+		if body := sendChat(t, s, "doc", question, ""); !strings.Contains(body, "event: done") {
+			t.Fatal(body)
+		}
+	}
+	_, texts := capturedTurns(t, path)
+	if len(texts) != 2 {
+		t.Fatal(texts)
+	}
+	summaryID := sourceKey("[文章摘要]\n摘要复用测试")
+	for _, prompt := range texts {
+		if !strings.Contains(prompt, "标题复用测试") || !strings.Contains(prompt, "Document summary: "+summaryID) {
+			t.Fatal(prompt)
+		}
+	}
+	if !strings.Contains(texts[0], "摘要复用测试") {
+		t.Fatal("summary never reached the session")
+	}
+}

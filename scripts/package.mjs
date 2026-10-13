@@ -53,6 +53,10 @@ run(process.execPath, [
   processor,
 ]);
 await cp(join(processor, "dist/main.mjs"), join(processor, "main.mjs"));
+await cp(join(processor, "dist/model.mjs"), join(processor, "model.mjs"));
+await cp(join(processor, "dist/models"), join(processor, "models"), {
+  recursive: true,
+});
 await rm(join(processor, "dist"), { recursive: true });
 await cp(
   join(root, "scripts/processor-smoke.mjs"),
@@ -96,7 +100,7 @@ if (process.platform === "darwin" && !process.argv.includes("--dir")) {
   const dmg = join(
     root,
     "release",
-    `Reader-${app.version}-mac-${process.arch}.dmg`,
+    `Reader-${app.version}-mac-${process.arch === "x64" ? "intel-x64" : process.arch}.dmg`,
   );
   const compressed = `${dmg}.ulmo.dmg`;
   await rm(compressed, { force: true });

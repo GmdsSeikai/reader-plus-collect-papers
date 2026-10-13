@@ -121,6 +121,25 @@ export type PaperSort =
 /** Optional columns of the paper table; the title is always shown. */
 export type PaperColumn =
   "authors" | "year" | "venue" | "added" | "opened" | "notes" | "status";
+export interface JournalRankBadge {
+  key: string;
+  name: string;
+  value: string;
+  subject?: string;
+  year?: string;
+}
+export interface JournalRankResult {
+  status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+  badges: JournalRankBadge[];
+  checkedAt?: string;
+}
+export interface JournalRankConfig {
+  enabled: boolean;
+  hasKey: boolean;
+  filterMode: "include" | "exclude";
+  selected: string[];
+  available: { key: string; name: string }[];
+}
 export interface PaperLibraryPreferences {
   /** Category (folder) order, including categories without papers. */
   categories?: string[];
@@ -330,6 +349,8 @@ export interface ReaderEvents {
   epubReadingAnchor?: (blockId: string) => void;
   blockHover?: (block: PDFBlock | null) => void;
   annotation?: (target: ReaderAnnotationTarget | null) => void;
+  /** Hover preview only; never select or copy annotation text. */
+  annotationHover?: (target: ReaderAnnotationTarget | null) => void;
   zoom?: (zoom: ReaderTheme["zoom"]) => void;
   readingAnchor?: (anchor: PDFReadingAnchor) => void;
   blockFocus?: (block: PDFBlock) => void;
@@ -353,6 +374,8 @@ export interface ReaderAdapter {
   /** Layout choices that must apply before the first page is shown. */
   preferTheme?(theme: ReaderTheme): void;
   getContext(): Promise<string>;
+  /** Complete chapter text at the requested location; callers enforce request limits. */
+  getChapterContext?(location: DocumentLocation): Promise<ReaderSelection[]>;
   /** Whether most of a remembered viewport position is on screen again. */
   isNear?(location: DocumentLocation): boolean;
   setBlocks?(blocks: PDFBlock[]): void;
@@ -499,6 +522,8 @@ export interface AICapability {
   error?: string;
 }
 export interface APIConnection {
+  /** Auto detects official endpoints; other addresses use OpenAI Chat Completions. */
+  protocol?: "auto" | "openai" | "anthropic";
   url: string;
   model: string;
   key?: string;
@@ -507,6 +532,8 @@ export interface APIConnection {
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export interface AIConfig {
+  /** Automatically attach current chapter text to ordinary chat; defaults to false. */
+  chatIncludeChapter?: boolean;
   primary: string;
   models: Record<string, string>;
   efforts?: Record<string, Record<string, ReasoningEffort>>;
@@ -524,6 +551,11 @@ export interface AIConfig {
   capabilities: Record<string, AICapability>;
 }
 export interface AgentModel {
+  effortInfo?: {
+    mode: "levels" | "budget" | "fixed" | "unknown";
+    note: string;
+    mappings?: Partial<Record<ReasoningEffort, string>>;
+  };
   id: string;
   name: string;
   description: string;
@@ -600,3 +632,8 @@ export interface EPUBChapters {
   chapters: EPUBChapter[];
   toc: EPUBChapterLink[] | null;
 }
+export type {
+  ProxySettings,
+  ProxySettingsState,
+  ProxyCheckResult,
+} from "./proxy-settings";

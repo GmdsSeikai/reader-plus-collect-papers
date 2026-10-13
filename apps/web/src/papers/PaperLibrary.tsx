@@ -34,6 +34,7 @@ import {
 import { api } from "@reader/api";
 import type {
   Document,
+  JournalRankConfig,
   PaperColumn,
   PaperSort,
   Processing,
@@ -127,6 +128,7 @@ import { MergeDialog } from "./MergeDialog";
 import { SmartCategoryDialog } from "./SmartCategoryDialog";
 import { copyCitations, exportCitations } from "./CitationMenu";
 import { PAPER_DRAG_TYPE } from "./PaperSidebar";
+import { JournalRankBadges } from "./JournalRankBadges";
 import {
   clampDetailWidth,
   detailWidthRange,
@@ -190,6 +192,28 @@ export function PaperLibrary({
   );
   const [merging, setMerging] = useState<Document[] | null>(null);
   const [tagging, setTagging] = useState<string[] | null>(null);
+  const [journalRankConfig, setJournalRankConfig] =
+    useState<JournalRankConfig | null>(null);
+  const [journalRankRefresh, setJournalRankRefresh] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    const load = () =>
+      void api
+        .journalRankConfig()
+        .then((value) => {
+          if (mounted) setJournalRankConfig(value);
+        })
+        .catch(() => {});
+    const refresh = () => setJournalRankRefresh((value) => value + 1);
+    load();
+    window.addEventListener("reader:journal-rank-config", load);
+    window.addEventListener("reader:journal-rank-refresh", refresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener("reader:journal-rank-config", load);
+      window.removeEventListener("reader:journal-rank-refresh", refresh);
+    };
+  }, []);
   const tags = paperTags(documents);
   const table = prefs.layout === "table" && view !== "duplicates";
   const sortBy = (next: PaperSort) =>
@@ -464,6 +488,8 @@ export function PaperLibrary({
       picking={picking}
       picked={picked.has(doc.id)}
       colors={paperColors(doc, prefs.colorCategories)}
+      journalRankConfig={journalRankConfig}
+      journalRankRefresh={journalRankRefresh}
       dragIds={() => (picked.has(doc.id) ? [...picked] : [doc.id])}
       onActivate={(e) => {
         if (picking || e.metaKey || e.ctrlKey || e.shiftKey)
@@ -1097,6 +1123,8 @@ function PaperRow({
   picking,
   picked,
   colors,
+  journalRankConfig,
+  journalRankRefresh,
   columns,
   dragIds,
   onActivate,
@@ -1110,6 +1138,8 @@ function PaperRow({
   picking: boolean;
   picked: boolean;
   colors: { name: string; color: string }[];
+  journalRankConfig: JournalRankConfig | null;
+  journalRankRefresh: number;
   /** Table columns; the row renders as a list card without them. */
   columns?: PaperColumn[];
   dragIds: () => string[];
@@ -1263,9 +1293,17 @@ function PaperRow({
           <>
             {picking && <TableCell className="w-8">{check}</TableCell>}
             <TableCell className="paper-table-title">
-              <div className="paper-table-title-content">
-                {title}
-                <PaperProcessing job={job} />
+              <div className="paper-table-title-stack">
+                <div className="paper-table-title-content">
+                  {title}
+                  <PaperProcessing job={job} />
+                </div>
+                <JournalRankBadges
+                  id={doc.id}
+                  venue={doc.metadata.venue || ""}
+                  config={journalRankConfig}
+                  refreshRevision={journalRankRefresh}
+                />
               </div>
             </TableCell>
             {columns.map((column) => (
@@ -1285,6 +1323,12 @@ function PaperRow({
                   {byline}
                 </p>
               )}
+              <JournalRankBadges
+                id={doc.id}
+                venue={doc.metadata.venue || ""}
+                config={journalRankConfig}
+                refreshRevision={journalRankRefresh}
+              />
             </div>
             <div className="paper-row-meta">
               {counts}

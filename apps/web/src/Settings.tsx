@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
+  FileText,
   Bot,
   Check,
   CircleCheck,
@@ -13,6 +14,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { DiagnosticExport } from "./DiagnosticExport";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
@@ -23,9 +25,11 @@ import type {
   AgentModel,
   APIConnection,
   LibraryMode,
+  JournalRankConfig,
   Provider,
 } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
+import { Input } from "@reader/ui/components/input";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +57,7 @@ import {
   TabsTrigger,
 } from "@reader/ui/components/tabs";
 import { HighlightColorsEditor } from "./HighlightColorsEditor";
+import { ProxySettings } from "./ProxySettings";
 import {
   primaryLibraryMode,
   updateLibraryPreferences,
@@ -85,6 +90,48 @@ export function Settings({
   const [connector, setConnector] = useState<Awaited<
     ReturnType<typeof api.connectorStatus>
   > | null>(null);
+  const [journalRank, setJournalRank] = useState<JournalRankConfig | null>(
+    null,
+  );
+  const [journalKey, setJournalKey] = useState("");
+  const [journalSaving, setJournalSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let mounted = true;
+    void api
+      .journalRankConfig()
+      .then((config) => {
+        if (mounted) setJournalRank(config);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [open]);
+  const saveJournalRank = async (
+    patch: Partial<
+      Pick<JournalRankConfig, "enabled" | "filterMode" | "selected">
+    >,
+    key?: string,
+  ) => {
+    if (!journalRank) return;
+    setJournalSaving(true);
+    try {
+      const saved = await api.saveJournalRankConfig({
+        enabled: patch.enabled ?? journalRank.enabled,
+        filterMode: patch.filterMode ?? journalRank.filterMode,
+        selected: patch.selected ?? journalRank.selected,
+        ...(key !== undefined ? { key } : {}),
+      });
+      setJournalRank(saved);
+      setJournalKey("");
+      window.dispatchEvent(new Event("reader:journal-rank-config"));
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setJournalSaving(false);
+    }
+  };
   useEffect(() => {
     if (!open) setAPIDetails(false);
   }, [open]);
@@ -409,7 +456,7 @@ export function Settings({
             )}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Agent 连接、显示、阅读与论文库
+            Agent 连接、显示、阅读、诊断与论文库
           </DialogDescription>
         </DialogHeader>
         {apiDetails && (
@@ -510,11 +557,34 @@ export function Settings({
               <Highlighter />
               阅读
             </TabsTrigger>
+            <TabsTrigger value="diagnostics">
+              <FileText />
+              诊断
+            </TabsTrigger>
             <TabsTrigger value="papers">
               <Library />
               论文库
             </TabsTrigger>
           </TabsList>
+          <TabsContent
+            value="diagnostics"
+            className="settings-panel"
+            keepMounted
+          >
+            {window.readerDesktop?.proxySettings && (
+              <div className="mb-6">
+                <ProxySettings open={open} />
+              </div>
+            )}
+            <section>
+              <h3 className="mb-3 text-sm font-medium">本地日志</h3>
+              <p className="mb-4 text-xs leading-5 text-muted-foreground">
+                导出全部已保留日志和运行环境供开发者排查。凭据、用户路径和翻译诊断中的正文会脱敏；不包含文档、聊天或批注。日志最多保留
+                7 天、100 MiB，仅在本机保存。
+              </p>
+              <DiagnosticExport />
+            </section>
+          </TabsContent>
           <TabsContent value="display" className="settings-panel" keepMounted>
             <section className="mb-6">
               <h3
@@ -659,8 +729,176 @@ export function Settings({
                 </span>
               </label>
             </section>
+            <section className="mt-7 border-t pt-5">
+              <h3 className="mb-3 text-sm font-medium">期刊指标</h3>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={journalRank?.enabled ?? true}
+                  disabled={!journalRank || journalSaving}
+                  onCheckedChange={(checked) =>
+                    void saveJournalRank({ enabled: !!checked })
+                  }
+                />
+                <span>
+                  在论文库显示 easyScholar 期刊指标
+                  <span className="block text-xs text-muted-foreground">
+                    默认开启；配置 SecretKey 后按论文出处查询。
+                  </span>
+                </span>
+              </label>
+              {journalRank?.enabled && (
+                <>
+                  <div className="mt-4 flex items-center gap-2">
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      aria-label="easyScholar SecretKey"
+                      placeholder={
+                        journalRank.hasKey
+                          ? "已保存 SecretKey；输入新密钥可替换"
+                          : "输入 easyScholar SecretKey"
+                      }
+                      value={journalKey}
+                      onChange={(event) => setJournalKey(event.target.value)}
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={!journalKey.trim() || journalSaving}
+                      onClick={() =>
+                        void saveJournalRank({}, journalKey.trim())
+                      }
+                    >
+                      保存
+                    </Button>
+                  </div>
+                  {journalRank.hasKey && (
+                    <Button
+                      className="mt-2"
+                      size="xs"
+                      variant="ghost"
+                      disabled={journalSaving}
+                      onClick={() => void saveJournalRank({}, "")}
+                    >
+                      移除 SecretKey
+                    </Button>
+                  )}
+                  <div className="mt-4 flex items-center gap-2 text-xs">
+                    <span id="journal-rank-filter-label">指标筛选</span>
+                    <Select
+                      value={journalRank.filterMode}
+                      onValueChange={(value) => {
+                        if (value !== "include" && value !== "exclude") return;
+                        void saveJournalRank({
+                          filterMode: value,
+                          selected:
+                            value === "include"
+                              ? journalRank.available.map((field) => field.key)
+                              : [],
+                        });
+                      }}
+                      disabled={journalSaving}
+                    >
+                      <SelectTrigger
+                        aria-labelledby="journal-rank-filter-label"
+                        className="w-48"
+                      >
+                        <SelectValue>
+                          {journalRank.filterMode === "include"
+                            ? "只显示选中的指标"
+                            : "隐藏选中的指标"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="include">
+                          只显示选中的指标
+                        </SelectItem>
+                        <SelectItem value="exclude">隐藏选中的指标</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {journalRank.filterMode === "include"
+                      ? "勾选要显示的指标。"
+                      : "勾选不想显示的指标。"}
+                    无数据或超出标题列宽度的标签会省略。
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
+                    {journalRank.available.map((field) => (
+                      <label
+                        key={field.key}
+                        className="flex min-w-0 items-center gap-2 text-xs"
+                      >
+                        <Checkbox
+                          checked={journalRank.selected.includes(field.key)}
+                          disabled={journalSaving}
+                          onCheckedChange={(checked) =>
+                            void saveJournalRank({
+                              selected: checked
+                                ? [...journalRank.selected, field.key]
+                                : journalRank.selected.filter(
+                                    (value) => value !== field.key,
+                                  ),
+                            })
+                          }
+                        />
+                        <span className="truncate" title={field.name}>
+                          {field.name}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {journalRank.hasKey && (
+                    <Button
+                      className="mt-4"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new Event("reader:journal-rank-refresh"),
+                        )
+                      }
+                    >
+                      <RefreshCw />
+                      刷新当前列表的期刊指标
+                    </Button>
+                  )}
+                </>
+              )}
+            </section>
           </TabsContent>
           <TabsContent value="agent" className="settings-panel" keepMounted>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  aria-label="提问时附带本章原文"
+                  checked={config?.chatIncludeChapter === true}
+                  disabled={!config || saving || aiModelSaving || loading}
+                  onCheckedChange={async (checked) => {
+                    setSaving(true);
+                    try {
+                      const latest = await api.aiConfig();
+                      setAIConfig(
+                        await api.saveAIConfig({
+                          ...latest,
+                          chatIncludeChapter: !!checked,
+                        }),
+                      );
+                    } catch (error) {
+                      toast.error((error as Error).message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                />
+                <span>
+                  提问时附带本章原文
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    普通提问默认附带标题和已有摘要。引用或解释选区时，同时附带选区所在的完整章节。历史对话仍会保留。
+                  </span>
+                </span>
+              </label>
+            </section>
             <section>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-sm font-medium">Agent 连接</h3>
