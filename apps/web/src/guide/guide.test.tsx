@@ -188,10 +188,29 @@ describe("guide host", () => {
     vi.mocked(api.guidePreferences).mockResolvedValue({});
     await render(false);
     expect(document.querySelector('[data-slot="dialog-close"]')).toBeNull();
+    expect(button("跳过")).toBeUndefined();
+    await act(async () => {
+      button("下一步").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      const backdrop = document.querySelector('[data-slot="dialog-overlay"]')!;
+      backdrop.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true, button: 0 }),
+      );
+      backdrop.dispatchEvent(
+        new MouseEvent("pointerup", { bubbles: true, button: 0 }),
+      );
+      backdrop.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, button: 0 }),
+      );
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(api.saveGuidePreferences).not.toHaveBeenCalled();
     const pages = onboardingPages();
     for (const page of pages.slice(0, -1)) {
       expect(document.body.textContent).toContain(page.step.title);
       await act(async () => button("下一步").click());
+      expect(api.saveGuidePreferences).not.toHaveBeenCalled();
     }
     expect(document.body.textContent).toContain(pages.at(-1)!.step.title);
     await act(async () => button("开始使用").click());
