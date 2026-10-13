@@ -62,24 +62,15 @@ export const matchesFilter = (a: Annotation, filter: NotesFilter) =>
     ? a.kind === "highlight" || a.kind === "underline"
     : a.kind === filter);
 
-/** Tags typed as "a b, c" or "#a #b". */
-export const parseTags = (text: string) => [
-  ...new Set(text.split(/[\s,，、#]+/).filter(Boolean)),
-];
-
 /** Colors used by more than one kind of mark are worth filtering by. */
 export function annotationFacets(annotations: Annotation[]) {
   const colors = new Map<string, string>();
-  const tags = new Map<string, string>();
   for (const a of annotations) {
     if (a.kind !== "bookmark" && a.color)
       colors.set(a.color.toLowerCase(), a.color);
-    for (const tag of a.tags || [])
-      if (!tags.has(tag.toLowerCase())) tags.set(tag.toLowerCase(), tag);
   }
   return {
     colors: colors.size > 1 ? [...colors.values()] : [],
-    tags: [...tags.values()].sort((a, b) => a.localeCompare(b, "zh")),
   };
 }
 
@@ -216,7 +207,6 @@ function NoteCard({
   onAnswer,
   onResolve,
   onShowAnswer,
-  onTag,
 }: {
   annotation: Annotation;
   answer?: Message;
@@ -224,15 +214,13 @@ function NoteCard({
   answering: boolean;
   onGo: () => void;
   onDelete: () => void;
-  onSave: (note: string, tags: string[]) => Promise<boolean>;
+  onSave: (note: string) => Promise<boolean>;
   onAnswer: () => void;
   onResolve: (resolved: boolean) => void;
   onShowAnswer: (id: string) => void;
-  onTag: (tag: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(a.note);
-  const [draftTags, setDraftTags] = useState("");
   const [saving, setSaving] = useState(false);
   const question = a.kind === "question";
   return (
@@ -251,7 +239,6 @@ function NoteCard({
               aria-label={question ? "编辑问题" : "编辑批注"}
               onClick={() => {
                 setDraft(a.note);
-                setDraftTags((a.tags || []).join(" "));
                 setEditing(true);
               }}
             >
@@ -300,16 +287,6 @@ function NoteCard({
               if (e.key === "Escape") setEditing(false);
             }}
           />
-          <Input
-            aria-label="标签"
-            placeholder="标签，用空格分隔"
-            value={draftTags}
-            onChange={(e) => setDraftTags(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setEditing(false);
-            }}
-            className="h-7 text-xs"
-          />
           <div className="flex justify-end gap-1">
             <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>
               取消
@@ -319,7 +296,7 @@ function NoteCard({
               disabled={saving || (question && !draft.trim())}
               onClick={() => {
                 setSaving(true);
-                void onSave(draft, parseTags(draftTags))
+                void onSave(draft)
                   .then((ok) => ok && setEditing(false))
                   .finally(() => setSaving(false));
               }}
@@ -330,24 +307,7 @@ function NoteCard({
           </div>
         </div>
       ) : (
-        <>
-          {a.note && <p>{a.note}</p>}
-          {!!a.tags?.length && (
-            <div className="note-tags">
-              {a.tags.map((tag) => (
-                <Button
-                  key={tag}
-                  size="xs"
-                  variant="ghost"
-                  aria-label={`只看标签 ${tag}`}
-                  onClick={() => onTag(tag)}
-                >
-                  #{tag}
-                </Button>
-              ))}
-            </div>
-          )}
-        </>
+        a.note && <p>{a.note}</p>
       )}
       {question && !editing && (
         <div className="note-question">
@@ -425,22 +385,16 @@ export function NotesPanel({
   const [filter, setFilter] = useState<NotesFilter>("all");
   const [openOnly, setOpenOnly] = useState(false);
   const [color, setColor] = useState("");
-  const [tag, setTag] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => setSearch(""), [doc.id]);
   const query = search.trim().toLocaleLowerCase();
   const facets = annotationFacets(annotations);
   const palette = highlightPalette(useReaderStore((s) => s.theme));
-  // A facet that no longer exists (deleted, retagged) stops filtering.
+  // A color that no longer exists stops filtering.
   const activeColor = facets.colors.some(
     (c) => c.toLowerCase() === color.toLowerCase(),
   )
     ? color
-    : "";
-  const activeTag = facets.tags.some(
-    (t) => t.toLowerCase() === tag.toLowerCase(),
-  )
-    ? tag
     : "";
   const counts = Object.fromEntries(
     (Object.keys(filterLabels) as NotesFilter[]).map((key) => [
@@ -457,8 +411,6 @@ export function NotesPanel({
         (!activeColor ||
           (a.kind !== "bookmark" &&
             a.color.toLowerCase() === activeColor.toLowerCase())) &&
-        (!activeTag ||
-          !!a.tags?.some((t) => t.toLowerCase() === activeTag.toLowerCase())) &&
         (!query || `${a.quote} ${a.note}`.toLocaleLowerCase().includes(query)),
     )
     .sort(documentOrder);
@@ -499,44 +451,27 @@ export function NotesPanel({
               ))}
             </TabsList>
           </Tabs>
-          {(facets.colors.length > 0 || facets.tags.length > 0) && (
+          {facets.colors.length > 0 && (
             <div className="notes-facets">
-              {facets.colors.length > 0 && (
-                <ToggleGroup
-                  aria-label="按颜色筛选"
-                  size="sm"
-                  spacing={0}
-                  value={activeColor ? [activeColor] : []}
-                  onValueChange={(value: string[]) => setColor(value[0] || "")}
-                >
-                  {facets.colors.map((c) => (
-                    <ToggleGroupItem
-                      key={c}
-                      value={c}
-                      aria-label={`只看${colorLabel(c, palette)}`}
-                      title={colorLabel(c, palette)}
-                      className="size-7 min-w-7 px-0"
-                    >
-                      <span className="color-dot" style={{ background: c }} />
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
-              {facets.tags.length > 0 && (
-                <ToggleGroup
-                  aria-label="按标签筛选"
-                  size="sm"
-                  spacing={0}
-                  value={activeTag ? [activeTag] : []}
-                  onValueChange={(value: string[]) => setTag(value[0] || "")}
-                >
-                  {facets.tags.map((t) => (
-                    <ToggleGroupItem key={t} value={t} className="px-2 text-xs">
-                      #{t}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
+              <ToggleGroup
+                aria-label="按颜色筛选"
+                size="sm"
+                spacing={0}
+                value={activeColor ? [activeColor] : []}
+                onValueChange={(value: string[]) => setColor(value[0] || "")}
+              >
+                {facets.colors.map((c) => (
+                  <ToggleGroupItem
+                    key={c}
+                    value={c}
+                    aria-label={`只看${colorLabel(c, palette)}`}
+                    title={colorLabel(c, palette)}
+                    className="size-7 min-w-7 px-0"
+                  >
+                    <span className="color-dot" style={{ background: c }} />
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </div>
           )}
           {filter === "question" && open > 0 && (
@@ -575,8 +510,7 @@ export function NotesPanel({
               answering={answering.has(a.id)}
               onGo={() => onGo(a)}
               onDelete={() => onDelete(a.id)}
-              onSave={(note, tags) => onSave(a, { note, tags })}
-              onTag={setTag}
+              onSave={(note) => onSave(a, { note, tags: a.tags || [] })}
               onAnswer={() => onAnswer(a)}
               onResolve={(resolved) => onResolve(a, resolved)}
               onShowAnswer={onShowAnswer}
