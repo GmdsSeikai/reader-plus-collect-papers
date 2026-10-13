@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ type CollectionManager struct {
 	clock            func() time.Time
 	analysisSerial   chan struct{}
 	analysisSchedule sync.Mutex
+	analysisReady    chan struct{}
 }
 
 type collectionJob struct {
@@ -51,6 +53,7 @@ func NewCollectionManager(s *Server) *CollectionManager {
 		running:        map[string]context.CancelFunc{},
 		queue:          make(chan collectionJob, 64),
 		analysisSerial: make(chan struct{}, 1),
+		analysisReady:  make(chan struct{}, 1),
 	}
 }
 
@@ -66,8 +69,8 @@ func (m *CollectionManager) Draining() bool {
 // including a resume after a cancelled drain — gets fresh wait groups so one
 // generation's stop never waits on the next generation's workers.
 type collectionGeneration struct {
-	work, queue, ticker sync.WaitGroup
-	cancel              context.CancelFunc
+	work, queue, ticker, analysis sync.WaitGroup
+	cancel                        context.CancelFunc
 }
 
 // StartCollection launches the manager under the service context. The
@@ -79,6 +82,9 @@ func (m *CollectionManager) StartCollection(ctx context.Context) func() {
 	genCtx, cancel := context.WithCancel(ctx)
 	gen.cancel = cancel
 	m.mu.Lock()
+	if cfg, err := m.server.Store.CollectionSettings(); err == nil {
+		m.paused = cfg.Paused
+	}
 	m.stopped, m.draining = false, false
 	m.baseCtx = genCtx
 	m.gen = gen
@@ -87,6 +93,8 @@ func (m *CollectionManager) StartCollection(ctx context.Context) func() {
 	go m.importWorker(genCtx, gen)
 	gen.ticker.Add(1)
 	go m.scheduleTick(genCtx, gen)
+	gen.analysis.Add(1)
+	go m.analysisWorker(genCtx, gen)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -101,6 +109,7 @@ func (m *CollectionManager) StartCollection(ctx context.Context) func() {
 		<-done
 		gen.queue.Wait()
 		gen.ticker.Wait()
+		gen.analysis.Wait()
 	}
 }
 
@@ -360,23 +369,37 @@ func (m *CollectionManager) CancelRun(runID string) error {
 // SetPaused stops new work and cancels active runs; committed pages remain.
 func (m *CollectionManager) SetPaused(paused bool) error {
 	m.mu.Lock()
-	m.paused = paused
-	m.mu.Unlock()
 	if paused {
-		tx, err := m.server.Store.DB.Begin()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		if err = collectionWritableTx(tx); err != nil {
+		m.paused = true
+	}
+	m.mu.Unlock()
+	tx, err := m.server.Store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := collectionWritableTx(tx); err != nil {
+		return err
+	}
+	cfg, err := collectionSettingsTx(tx)
+	if err != nil {
+		return err
+	}
+	cfg.Paused = paused
+	cfg.ConfigVersion++
+	if _, err := tx.Exec("INSERT INTO collection_settings(id,body,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,updated_at=excluded.updated_at", mustJSONText(cfg), now()); err != nil {
+		return err
+	}
+	if paused {
+		if err := cancelOpenAnalysisJobsTx(tx, "采集已暂停"); err != nil {
 			return err
 		}
 		if _, err = tx.Exec("UPDATE collection_runs SET exec_token=exec_token+1,status=?,failure_class='paused',finished_at=? WHERE status IN ('queued','running')", runInterrupted, now()); err != nil {
 			return err
 		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	m.mu.Lock()
 	m.paused = paused
@@ -391,6 +414,16 @@ func (m *CollectionManager) SetPaused(paused bool) error {
 		}
 	}
 	return nil
+}
+
+func (m *CollectionManager) cancelAnalysisWork() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for owner, cancel := range m.running {
+		if strings.HasPrefix(owner, "analysis-") {
+			cancel()
+		}
+	}
 }
 
 // executeRun scans every slice of the run. Each page commits atomically; a

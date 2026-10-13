@@ -62,6 +62,9 @@ var collectionSchemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS collection_slices_retry ON collection_slices(status,retry_at)`,
 	`CREATE INDEX IF NOT EXISTS collection_analyses_candidate ON collection_analyses(arxiv_id,status)`,
 	`CREATE INDEX IF NOT EXISTS collection_attempts_day ON collection_attempts(reserved_day,status)`,
+	`CREATE TABLE IF NOT EXISTS collection_analysis_jobs(job_id TEXT PRIMARY KEY,arxiv_id TEXT NOT NULL REFERENCES collection_candidates(arxiv_id) ON DELETE CASCADE,expected_content_hash TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS collection_analysis_jobs_open ON collection_analysis_jobs(arxiv_id) WHERE status IN ('queued','running')`,
+	`CREATE INDEX IF NOT EXISTS collection_analysis_jobs_candidate ON collection_analysis_jobs(arxiv_id,created_at)`,
 	`CREATE INDEX IF NOT EXISTS import_commits_stage ON import_commits(stage)`,
 }
 
@@ -200,6 +203,11 @@ func (s *Store) SaveCollectionSettings(cfg CollectionSettings) error {
 	current, err := collectionSettingsTx(tx)
 	if err != nil {
 		return err
+	}
+	if cfg.Paused || !cfg.AnalysisEnabled || current.AnalysisProvider != cfg.AnalysisProvider || current.AnalysisModel != cfg.AnalysisModel || current.AnalysisEffort != cfg.AnalysisEffort {
+		if err := cancelOpenAnalysisJobsTx(tx, "分析配置已改变或关闭"); err != nil {
+			return err
+		}
 	}
 	cfg.ConfigVersion = current.ConfigVersion + 1
 	b, err := json.Marshal(cfg)

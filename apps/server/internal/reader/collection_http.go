@@ -280,7 +280,12 @@ func (s *Server) collectionCandidateGet(w http.ResponseWriter, r *http.Request) 
 		collectionFail(w, 500, "analysis-unavailable", "分析缓存无效")
 		return
 	}
-	respond(w, 200, map[string]any{"candidate": c, "citation": cit, "analyses": analyses})
+	job, err := s.Store.latestAnalysisJob(c.ArXivID)
+	if err != nil {
+		collectionFail(w, 500, "analysis-unavailable", "无法读取分析命令")
+		return
+	}
+	respond(w, 200, map[string]any{"candidate": c, "citation": cit, "analyses": analyses, "analysisJob": job})
 }
 
 func (s *Server) collectionCandidatePatch(w http.ResponseWriter, r *http.Request) {
@@ -323,9 +328,23 @@ func (s *Server) collectionSettingsPut(w http.ResponseWriter, r *http.Request) {
 	// Secrets are written through the protected AI configuration owner only;
 	// this endpoint never accepts key material.
 	body.CitationsAPIKey = ""
+	previous, err := s.Store.CollectionSettings()
+	if err != nil {
+		collectionFail(w, 500, "query-invalid", "无法读取采集设置")
+		return
+	}
 	if err := s.Store.SaveCollectionSettings(body); err != nil {
 		collectionFail(w, 500, "query-invalid", "设置保存失败")
 		return
+	}
+	if previous.Paused != body.Paused {
+		if err := s.collection().SetPaused(body.Paused); err != nil {
+			collectionFail(w, 500, "query-invalid", "无法调整暂停状态")
+			return
+		}
+	}
+	if !body.AnalysisEnabled || previous.AnalysisProvider != body.AnalysisProvider || previous.AnalysisModel != body.AnalysisModel || previous.AnalysisEffort != body.AnalysisEffort {
+		s.collection().cancelAnalysisWork()
 	}
 	cfg, err := s.Store.CollectionSettings()
 	if err != nil {
@@ -340,9 +359,6 @@ func (s *Server) collectionPause(w http.ResponseWriter, r *http.Request) {
 		collectionFail(w, 500, "query-invalid", "暂停失败")
 		return
 	}
-	cfg, _ := s.Store.CollectionSettings()
-	cfg.Paused = true
-	_ = s.Store.SaveCollectionSettings(cfg)
 	respond(w, 200, map[string]bool{"paused": true})
 }
 
@@ -351,9 +367,6 @@ func (s *Server) collectionResume(w http.ResponseWriter, r *http.Request) {
 		collectionFail(w, 500, "query-invalid", "恢复失败")
 		return
 	}
-	cfg, _ := s.Store.CollectionSettings()
-	cfg.Paused = false
-	_ = s.Store.SaveCollectionSettings(cfg)
 	respond(w, 200, map[string]bool{"paused": false})
 }
 
@@ -370,6 +383,8 @@ func (s *Server) registerCollectionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/collection/candidates/{id}", s.collectionCandidateGet)
 	mux.HandleFunc("PATCH /api/collection/candidates/{id}", s.collectionCandidatePatch)
 	mux.HandleFunc("POST /api/collection/candidates/{id}/analysis", s.collectionAnalyze)
+	mux.HandleFunc("GET /api/collection/analysis/{id}", s.collectionAnalysisJobGet)
+	mux.HandleFunc("POST /api/collection/analysis/{id}/cancel", s.collectionAnalysisJobCancel)
 	mux.HandleFunc("GET /api/collection/settings", s.collectionSettingsGet)
 	mux.HandleFunc("PUT /api/collection/settings", s.collectionSettingsPut)
 	mux.HandleFunc("POST /api/collection/pause", s.collectionPause)

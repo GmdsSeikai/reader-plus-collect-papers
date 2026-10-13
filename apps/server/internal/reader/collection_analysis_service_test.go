@@ -97,10 +97,11 @@ func TestPaperAnalysisProductionAPIAndCache(t *testing.T) {
 	candidate := seedAnalysisCandidate(t, s)
 	calls := analysisAPIFixture(t, s, func(input AnalysisInput) string { return mustJSONText(fixtureAnalysisResult(input)) })
 	for i := 0; i < 2; i++ {
-		response := request(t, s, "POST", "/api/collection/candidates/"+candidate.ArXivID+"/analysis", strings.NewReader(`{}`))
-		if response.Code != 200 {
-			t.Fatalf("analysis HTTP: %d %s", response.Code, response.Body.String())
+		job := submitAnalysisHTTP(t, s, candidate.ArXivID)
+		if job := waitAnalysisJobHTTP(t, s, job.ID); job.Status != runSucceeded {
+			t.Fatalf("analysis HTTP job: %+v", job)
 		}
+		response := request(t, s, "GET", "/api/collection/candidates/"+candidate.ArXivID, nil)
 		var body struct {
 			Analyses []CollectionAnalysis `json:"analyses"`
 		}

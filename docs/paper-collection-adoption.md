@@ -167,6 +167,7 @@ arXiv 用 HTTPS Atom API，按 `submittedDate` 降序；查询通过参数编码
 | `collection_slices` | 任务/修订/通道/分支/范围唯一 | 父子关系、查询、页断点、总量、覆盖状态、重试时间与来源上限 |
 | `collection_citations` | `arxiv_id` | 可空累计数、服务论文 ID、成功/尝试时间、刷新期限与失败 |
 | `collection_analyses` | `cache_key` | 正文/profile/model/prompt/schema 身份、完整译文/判断 JSON、结果状态与失败退避 |
+| `collection_analysis_jobs` | `job_id`；同论文仅一开放命令 | 固定正文身份、queued/running/succeeded/failed/cancelled/interrupted、错误及完成时间 |
 | `collection_quota_days` | `utc_day` | 当日已发与预占数；额度读最新设置，不通过旧快照回写计数 |
 | `collection_attempts` | `attempt_id` | 分析请求身份、预占 UTC 日、reserved/dispatching/sent/released/settled、发送/完成时间与失败 |
 | `collection_cursors` | `owner_key` | 公平队列、候选 keyset 与热门复核周期；每 owner 独立条件更新 |
@@ -175,7 +176,7 @@ arXiv 用 HTTPS Atom API，按 `submittedDate` 降序；查询通过参数编码
 
 关联的 `document_id` 可空；彻底删除文档时用 `ON DELETE SET NULL` 保留候选与历史入库身份。合并保留历史版本关联，若目标文件不同则不得仅靠摘要推断替换关系；打开行为见第 9 节。索引覆盖发布时间、当前任务关系、待重试切片、到期引用、有效分析分数、活跃导入和队列游标。
 
-新表使用普通可索引字段及版本化 JSON，不把所有状态塞入大 JSON。枚举、JSON 和模块版本严格校验，未知值停止对应操作并报错。采用增量迁移事务与集成测试；首次版本为 1，当前模块版本为 2，不挪用主库全局 `user_version` 控制全部既有表。版本 2 的历史复核游标保存任务、分支和固定 UTC 周桶身份；版本 1 游标缺少分支身份，升级后重建待办，保留候选与已保存片段。升级事务提交版本号后旧版本拒绝采集写入，不能直接用旧程序推进新游标；降级保留模块表并禁用采集，不恢复旧待办或删除资料。
+新表使用普通可索引字段及版本化 JSON，不把所有状态塞入大 JSON。枚举、JSON 和模块版本严格校验，未知值停止对应操作并报错。采用增量迁移事务与集成测试；首次版本为 1，当前模块版本为 3，不挪用主库全局 `user_version` 控制全部既有表。版本 2 的历史复核游标保存任务、分支和固定 UTC 周桶身份；版本 1 游标缺少分支身份，升级后重建待办，保留候选与已保存片段。版本 3 增加持久分析命令，升级仅新增表与索引。升级事务提交版本号后旧版本拒绝采集写入，不能直接用旧程序推进新游标或绕过命令取消；降级保留模块表并禁用采集，不恢复旧待办或删除资料。
 
 ### 6.2 必须成组提交的事实
 
@@ -206,7 +207,9 @@ arXiv 用 HTTPS Atom API，按 `submittedDate` 降序；查询通过参数编码
 
 增加实际消费的 `taskPaperAnalysis`；给 `AIInput` 增加内部系统提示词选择及请求所有者，CLI/API adapter 都使用该选择。采集使用固定结构化提示词，聊天/全文翻译继续原提示词；HTTP 请求不能任意覆盖系统提示词。Codex 创建独立 session/工作目录，不访问 `codexChatCache`；Claude/Kimi 独立进程或会话；API 不复用阅读上下文。
 
-分析入口为 `POST /api/collection/candidates/{id}/analysis`，后台由既有 scheduler 推进。Codex 分析会话只从 `config/read` 解析供应商标识，在本次 `thread/start.config` 覆盖该供应商的 HTTP/流重试次数为 0，不修改 CLI 用户配置。字段依据 [官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) 和安装版本生成的 App Server schema；配置响应及密钥不写日志。该路径的受控协议测试不代替实际安装版本和账号验证。
+手动分析入口为 `POST /api/collection/candidates/{id}/analysis`，返回 `202` 与已提交的持久命令；重复提交同一论文的开放命令返回同一 ID。服务拥有执行生命周期，关闭页面不取消命令。`GET /api/collection/analysis/{id}` 与候选详情返回状态；显式取消使用 `POST /api/collection/analysis/{id}/cancel`，只针对该 ID，已关闭命令不覆盖终态或取消后续命令。配置关闭、模型切换与暂停在设置事务中关闭开放命令，再取消运行句柄；保存结果事务再次核对命令、正文、任务语义与分析配置。启动对账将 queued/running 标为 interrupted，不自动重发；发送前预占可释放，已发送与发送不确定请求保守计费。
+
+后台自动分析由既有 scheduler 推进。Codex 分析会话只从 `config/read` 解析供应商标识，在本次 `thread/start.config` 覆盖该供应商的 HTTP/流重试次数为 0，不修改 CLI 用户配置。字段依据 [官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) 和安装版本生成的 App Server schema；配置响应及密钥不写日志。该路径的受控协议测试不代替实际安装版本和账号验证。
 
 采集路径禁用 `GenerationService` 的自动 `text-api`/`image-api` 备用和 `configuredCLIAdapter` 的未显式计量模型重试。重试由采集 owner 安排，每次解析发送身份、取得额度与门禁；模型不悄悄更换。失败不修改聊天模型的能力状态。请求取消、部分输出和超时不保存成功 JSON，也不写聊天消息；现有聊天 SSE 合同不变。
 

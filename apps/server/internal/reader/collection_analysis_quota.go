@@ -137,5 +137,8 @@ func (s *Store) RecoverAnalysisAttempts() error {
 			return err
 		}
 	}
+	if _, err := tx.Exec("UPDATE collection_analysis_jobs SET status='interrupted',error='服务退出，分析中断',finished_at=? WHERE status IN ('queued','running')", now()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }

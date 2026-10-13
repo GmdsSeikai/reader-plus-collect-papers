@@ -368,7 +368,7 @@ func TestCollectionM1UpgradeRebuildsBranchlessQueue(t *testing.T) {
 		t.Fatalf("upgrade changed reading settings: %q %v", value, err)
 	}
 	var version int
-	if err := s.StoreVersionQuery(&version); err != nil || version != 2 {
+	if err := s.StoreVersionQuery(&version); err != nil || version != collectionSchemaVersion {
 		t.Fatalf("version guard did not advance: %d %v", version, err)
 	}
 }

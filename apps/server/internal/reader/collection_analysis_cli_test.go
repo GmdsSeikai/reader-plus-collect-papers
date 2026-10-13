@@ -121,9 +121,9 @@ func TestPaperAnalysisNativeCLIAdapters(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i := 0; i < 2; i++ {
-				response := request(t, s, "POST", "/api/collection/candidates/"+candidate.ArXivID+"/analysis", strings.NewReader(`{}`))
-				if response.Code != 200 {
-					t.Fatalf("native analysis: %d %s", response.Code, response.Body.String())
+				job := submitAnalysisHTTP(t, s, candidate.ArXivID)
+				if job := waitAnalysisJobHTTP(t, s, job.ID); job.Status != runSucceeded {
+					t.Fatalf("native analysis: %+v", job)
 				}
 			}
 			var sent int

@@ -3171,6 +3171,7 @@
                                       "candidate": { "$ref": "#/components/schemas/CollectionCandidate" },
                                       "citation": { "$ref": "#/components/schemas/CollectionCitation" },
                                       "analyses": { "type": "array", "items": { "$ref": "#/components/schemas/CollectionAnalysis" } },
+                                      "analysisJob": { "oneOf": [{ "$ref": "#/components/schemas/CollectionAnalysisJob" }, { "type": "null" }] },
                                     },
                                 },
                             },
@@ -3423,11 +3424,29 @@
           "post": {
             "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
             "responses": {
-              "200": { "description": "Validated and persisted analysis or cache hit", "content": { "application/json": { "schema": { "type": "object", "required": ["analyses"], "properties": { "analyses": { "type": "array", "items": { "$ref": "#/components/schemas/CollectionAnalysis" } } } } } } },
-              "409": { "description": "Analysis disabled, unavailable, cancelled, invalid, or quota exhausted" }
+              "202": { "description": "Persistent analysis job accepted; duplicate active requests return the same job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CollectionAnalysisJob" } } } },
+              "409": { "description": "Analysis disabled, paused, unavailable, or candidate changed" }
             }
           }
         },
+      "/api/collection/analysis/{id}": {
+        "get": {
+          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": {
+            "200": { "description": "Persistent job state", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CollectionAnalysisJob" } } } },
+            "404": { "description": "Analysis job does not exist" }
+          }
+        }
+      },
+      "/api/collection/analysis/{id}/cancel": {
+        "post": {
+          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": {
+            "202": { "description": "Job cancellation recorded; terminal jobs remain unchanged", "content": { "application/json": { "schema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } } } } },
+            "404": { "description": "Analysis job does not exist" }
+          }
+        }
+      },
       "/api/collection/resume":
         {
           "post":
@@ -4064,6 +4083,19 @@
                   "hasCitationsKey": { "type": "boolean" },
                 },
             },
+          "CollectionAnalysisJob": {
+            "type": "object",
+            "required": ["id", "arxivId", "expectedContentHash", "status", "createdAt"],
+            "properties": {
+              "id": { "type": "string" },
+              "arxivId": { "type": "string" },
+              "expectedContentHash": { "type": "string" },
+              "status": { "type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"] },
+              "error": { "type": "string" },
+              "createdAt": { "type": "string" },
+              "finishedAt": { "type": "string" }
+            }
+          },
           "CollectionAnalysis": {
             "type": "object",
             "required": ["cacheKey", "arxivId", "contentHash", "profileHash", "modelFingerprint", "promptVersion", "resultVersion", "status", "attempt", "createdAt", "updatedAt"],

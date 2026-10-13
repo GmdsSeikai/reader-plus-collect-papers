@@ -12,7 +12,7 @@ import (
 
 // Collection schema version owned by collection_meta, independent of the
 // library's global schema. Writes are refused for rows from a newer module.
-const collectionSchemaVersion = 2
+const collectionSchemaVersion = 3
 
 // Canonical content version 1: fixed field order UTF-8 JSON of title, abstract,
 // ordered author names and categories, with whitespace-normalized values.

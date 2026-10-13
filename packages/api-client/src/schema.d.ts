@@ -2868,6 +2868,7 @@ export interface paths {
                             candidate?: components["schemas"]["CollectionCandidate"];
                             citation?: components["schemas"]["CollectionCitation"];
                             analyses?: components["schemas"]["CollectionAnalysis"][];
+                            analysisJob?: components["schemas"]["CollectionAnalysisJob"] | null;
                         };
                     };
                 };
@@ -3199,19 +3200,107 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Validated and persisted analysis or cache hit */
+                /** @description Persistent analysis job accepted; duplicate active requests return the same job */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionAnalysisJob"];
+                    };
+                };
+                /** @description Analysis disabled, paused, unavailable, or candidate changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collection/analysis/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Persistent job state */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["CollectionAnalysisJob"];
+                    };
+                };
+                /** @description Analysis job does not exist */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collection/analysis/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Job cancellation recorded; terminal jobs remain unchanged */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
                         "application/json": {
-                            analyses: components["schemas"]["CollectionAnalysis"][];
+                            id: string;
                         };
                     };
                 };
-                /** @description Analysis disabled, unavailable, cancelled, invalid, or quota exhausted */
-                409: {
+                /** @description Analysis job does not exist */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3735,6 +3824,16 @@ export interface components {
             paused?: boolean;
             configVersion?: number;
             hasCitationsKey?: boolean;
+        };
+        CollectionAnalysisJob: {
+            id: string;
+            arxivId: string;
+            expectedContentHash: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            error?: string;
+            createdAt: string;
+            finishedAt?: string;
         };
         CollectionAnalysis: {
             cacheKey: string;

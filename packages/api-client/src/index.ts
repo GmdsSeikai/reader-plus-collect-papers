@@ -486,6 +486,8 @@ export type CollectionCitation = components["schemas"]["CollectionCitation"];
 export type CollectionImportRequest =
   components["schemas"]["CollectionImportRequest"];
 export type CollectionSettings = components["schemas"]["CollectionSettings"];
+export type CollectionAnalysis = components["schemas"]["CollectionAnalysis"];
+export type CollectionAnalysisJob = components["schemas"]["CollectionAnalysisJob"];
 
 export const collectionApi = {
   tasks: () => request<CollectionTask[]>("/api/collection/tasks"),
@@ -536,7 +538,20 @@ export const collectionApi = {
     request<{
       candidate: CollectionCandidate;
       citation: CollectionCitation;
+      analyses: CollectionAnalysis[];
+      analysisJob: CollectionAnalysisJob | null;
     }>(`/api/collection/candidates/${encodeURIComponent(id)}`),
+  analyze: (id: string) =>
+    request<CollectionAnalysisJob>(`/api/collection/candidates/${encodeURIComponent(id)}/analysis`, {
+      method: "POST",
+      body: "{}",
+    }),
+  analysisJob: (id: string) =>
+    request<CollectionAnalysisJob>(`/api/collection/analysis/${encodeURIComponent(id)}`),
+  cancelAnalysis: (id: string) =>
+    request<{ id: string }>(`/api/collection/analysis/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    }),
   setIgnored: (id: string, ignored: boolean) =>
     request<{
       candidate: CollectionCandidate;

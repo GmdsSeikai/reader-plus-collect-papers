@@ -150,10 +150,13 @@ func (m *CollectionManager) analyzeCandidate(ctx context.Context, candidateID st
 		return nil, errCollectionPaused
 	}
 	defer m.releaseWork(owner)
-	stop := context.AfterFunc(ctx, func() { m.cancelWork(owner) })
-	defer stop()
 	workCtx, cancel := context.WithTimeout(workCtx, 5*time.Minute)
 	defer cancel()
+	stop := context.AfterFunc(ctx, cancel)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	select {
 	case m.analysisSerial <- struct{}{}:
 	case <-workCtx.Done():
@@ -177,6 +180,10 @@ func (m *CollectionManager) analyzeCandidate(ctx context.Context, candidateID st
 	}
 	if candidate.Ignored {
 		return nil, errors.New("候选已忽略")
+	}
+	job, hasJob := ctx.Value(analysisJobContextKey{}).(CollectionAnalysisJob)
+	if hasJob && (job.ArXivID != candidateID || job.ExpectedContentHash != candidate.ContentHash) {
+		return nil, errors.New("论文正文已改变，请重新分析")
 	}
 	materials, err := analysisMaterials(s, candidateID)
 	if err != nil {
@@ -264,9 +271,19 @@ func (m *CollectionManager) analyzeCandidate(ctx context.Context, candidateID st
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				return s.BeginAnalysisDispatch(attemptID, m.clockNow())
+				if err := s.BeginAnalysisDispatch(attemptID, m.clockNow()); err != nil {
+					return err
+				}
+				testCrashPoint("analysis-dispatching")
+				return nil
 			},
-			Sent:         func() error { return s.MarkAttemptSent(attemptID) },
+			Sent: func() error {
+				if err := s.MarkAttemptSent(attemptID); err != nil {
+					return err
+				}
+				testCrashPoint("analysis-sent")
+				return nil
+			},
 			NotDelivered: func() error { return s.releaseUndeliveredAnalysis(attemptID) },
 		}
 		generated, generateErr := runAttempt(workCtx, connection.adapter, AIInput{System: analysisSystemPrompt, Prompt: analysisPrompt(input), Effort: connection.effort, Dispatch: hook, NoRetry: true}, nil)
@@ -300,7 +317,7 @@ func (m *CollectionManager) analyzeCandidate(ctx context.Context, candidateID st
 		if generateErr != nil {
 			row.Status, row.Error = analysisFailed, generateErr.Error()
 		}
-		if err := s.savePaperAnalysis(row, result, input, m.clockNow()); err != nil {
+		if err := s.savePaperAnalysis(workCtx, job, cfg, row, result, input, m.clockNow()); err != nil {
 			return results, err
 		}
 		if generateErr != nil {
@@ -334,7 +351,7 @@ func (s *Store) cachedPaperAnalysis(key string, input AnalysisInput) (Collection
 	return a, nil
 }
 
-func (s *Store) savePaperAnalysis(a CollectionAnalysis, result AnalysisResult, input AnalysisInput, at time.Time) error {
+func (s *Store) savePaperAnalysis(ctx context.Context, job CollectionAnalysisJob, expected CollectionSettings, a CollectionAnalysis, result AnalysisResult, input AnalysisInput, at time.Time) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
@@ -342,6 +359,25 @@ func (s *Store) savePaperAnalysis(a CollectionAnalysis, result AnalysisResult, i
 	defer tx.Rollback()
 	if err := collectionWritableTx(tx); err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	current, err := collectionSettingsTx(tx)
+	if err != nil {
+		return err
+	}
+	if current.Paused || !current.AnalysisEnabled || current.AnalysisProvider != expected.AnalysisProvider || current.AnalysisModel != expected.AnalysisModel || current.AnalysisEffort != expected.AnalysisEffort {
+		return errors.New("摘要分析配置已改变")
+	}
+	if job.ID != "" {
+		var status, contentHash string
+		if err := tx.QueryRow("SELECT status,expected_content_hash FROM collection_analysis_jobs WHERE job_id=? AND arxiv_id=?", job.ID, a.ArXivID).Scan(&status, &contentHash); err != nil {
+			return err
+		}
+		if status != runRunning || contentHash != a.ContentHash {
+			return errors.New("分析命令已关闭或正文已改变")
+		}
 	}
 	var currentHash string
 	if err := tx.QueryRow("SELECT content_hash FROM collection_candidates WHERE arxiv_id=?", a.ArXivID).Scan(&currentHash); err != nil {
@@ -391,10 +427,10 @@ func (s *Store) savePaperAnalysis(a CollectionAnalysis, result AnalysisResult, i
 }
 
 func (s *Server) collectionAnalyze(w http.ResponseWriter, r *http.Request) {
-	results, err := s.collection().AnalyzeCandidate(r.Context(), r.PathValue("id"), true)
+	job, err := s.collection().submitAnalysis(r.PathValue("id"))
 	if err != nil {
 		collectionFail(w, 409, "analysis-unavailable", err.Error())
 		return
 	}
-	respond(w, 200, map[string]any{"analyses": results})
+	respond(w, 202, job)
 }
