@@ -48,6 +48,8 @@
 
 ## 验证执行顺序
 
+2026-10-13 的阶段检查：`go test ./... -count=1 -timeout=180s` 通过（reader 109.360s）；全 Vitest 108 文件、566 测试通过，原有 2 文件/4 测试跳过；`pnpm typecheck`、`pnpm build` 通过。后续详情请求时序保护已追加，11 项采集 React 测试及 typecheck 再次通过。AnalysisPanel 覆盖提交/状态/有效译文与依据、页面退出不取消服务命令、指定取消及额度拒绝；CollectionSettingsDialog 覆盖付费启用确认、清除密钥时读最新配置、派生额度/独立全文翻译状态、保存失败及退出取消模型目录加载。该记录不是 A01–A39 全部通过，不代替人工 UI、实际来源/模型账号、安装包或 macOS 验收。
+
 先验证 A27–A32 的导入/数据/关闭边界，再验证无 AI 闭环 A01–A08、A14、A23–A26；接着验证引用、完整恢复、AI/额度/公平；最后真实来源/模型、人工 UI、正式构建与安装。每阶段复用仍有效证据，新修改触及 owner 时重跑相关条目。
 
 项目检查为 `pnpm typecheck`、`pnpm test`、`pnpm build`；API 变更后执行 `pnpm api:generate` 并检查生成结果。测试不访问正式 `.reader` 或已安装书库，不读取 CLI 凭据；真实模型验证仅使用已登录 CLI 的正常调用且单独记下实际请求数量。

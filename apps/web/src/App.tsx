@@ -514,6 +514,7 @@ export function App() {
             {papers ? (
               collection ? (
                 <CollectionPage
+                  onOpenReaderSettings={() => setSettings(true)}
                   navOpen={nav}
                   onToggleNav={() => setNav(!nav)}
                   onOpenDocument={(id) => {

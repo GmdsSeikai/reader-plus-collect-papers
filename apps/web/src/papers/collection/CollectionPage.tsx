@@ -6,6 +6,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Settings2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -17,14 +18,25 @@ import { Tabs, TabsList, TabsTrigger } from "@reader/ui/components/tabs";
 import { ScrollArea } from "@reader/ui/components/scroll-area";
 import { Separator } from "@reader/ui/components/separator";
 import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@reader/ui/components/select";
+import {
   collectionApi,
   type CollectionCandidate,
   type CollectionCitation,
   type CollectionRun,
   type CollectionTask,
   type CollectionTaskConfig,
+  type CollectionAnalysis,
+  type CollectionAnalysisJob,
 } from "@reader/api";
 import { TaskForm } from "./TaskForm";
+import { AnalysisPanel } from "./AnalysisPanel";
+import { CollectionSettingsDialog } from "./CollectionSettingsDialog";
 
 type CandidateRow = { candidate: CollectionCandidate; score: number };
 
@@ -63,11 +75,17 @@ function CandidateDetail({
   candidate,
   citation,
   score,
+  analyses,
+  analysisJob,
+  taskNames,
   onClose,
 }: {
   candidate: CollectionCandidate;
   citation: CollectionCitation | null;
   score: number;
+  analyses: CollectionAnalysis[];
+  analysisJob: CollectionAnalysisJob | null;
+  taskNames: Record<string, string>;
   onClose: () => void;
 }) {
   return (
@@ -81,7 +99,12 @@ function CandidateDetail({
             {(candidate.authors ?? []).map((a) => a.name).join(", ")}
           </p>
         </div>
-        <Button size="icon-sm" variant="ghost" aria-label="关闭详情" onClick={onClose}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="关闭详情"
+          onClick={onClose}
+        >
           <X className="size-4" />
         </Button>
       </div>
@@ -116,21 +139,33 @@ function CandidateDetail({
                 ? citation?.stale
                   ? "未知（刷新失败，保留旧值）"
                   : "未知"
-                : String(citation.count)}
+                : `${citation.count}${citation.stale ? "（过期）" : ""}`}
             </dd>
+            {citation?.successAt ? (
+              <>
+                <dt>引用更新</dt>
+                <dd>{citation.successAt.slice(0, 10)}</dd>
+              </>
+            ) : null}
             {candidate.doi ? (
               <>
                 <dt>DOI</dt>
                 <dd>{candidate.doi}</dd>
               </>
             ) : null}
-            <dt>相关分</dt>
+            <dt>相关排序分</dt>
             <dd>{score >= 0 ? String(score) : "待分析"}</dd>
           </dl>
           <Separator />
           <p className="whitespace-pre-wrap leading-relaxed">
             {candidate.abstract}
           </p>
+          <AnalysisPanel
+            candidateId={candidate.arxivId}
+            analyses={analyses}
+            job={analysisJob}
+            taskNames={taskNames}
+          />
         </div>
       </ScrollArea>
     </div>
@@ -141,10 +176,12 @@ export function CollectionPage({
   navOpen,
   onToggleNav,
   onOpenDocument,
+  onOpenReaderSettings,
 }: {
   navOpen: boolean;
   onToggleNav: () => void;
   onOpenDocument: (id: string) => void;
+  onOpenReaderSettings?: () => void;
 }) {
   const [tab, setTab] = useState<"latest" | "hot" | "tasks">("latest");
   const [tasks, setTasks] = useState<CollectionTask[]>([]);
@@ -155,12 +192,19 @@ export function CollectionPage({
     candidate: CollectionCandidate;
     citation: CollectionCitation | null;
     score: number;
+    analyses: CollectionAnalysis[];
+    analysisJob: CollectionAnalysisJob | null;
   } | null>(null);
   const [taskForm, setTaskForm] = useState<CollectionTask | "new" | null>(null);
   const [runStates, setRunStates] = useState<Record<string, CollectionRun>>({});
   const [query, setQuery] = useState("");
+  const [taskFilter, setTaskFilter] = useState("");
+  const [citationFilter, setCitationFilter] = useState("");
+  const [ignoredFilter, setIgnoredFilter] = useState("0");
+  const [listError, setListError] = useState("");
   const [sort, setSort] = useState<"date" | "citations" | "relevance">("date");
   const [busy, setBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [imports, setImports] = useState<
     Record<
       string,
@@ -168,11 +212,14 @@ export function CollectionPage({
     >
   >({});
   const requestSeq = useRef(0);
+  const detailSeq = useRef(0);
 
   const loadTasks = useCallback(() => {
     collectionApi
       .tasks()
-      .then(setTasks)
+      .then((items) => {
+        if (aliveRef.current) setTasks(items);
+      })
       .catch((e) => toast.error((e as Error).message));
   }, []);
 
@@ -183,6 +230,10 @@ export function CollectionPage({
         sort,
         channel: tab === "hot" ? "hot" : tab === "latest" ? "latest" : "",
       };
+      if (taskFilter) params.task = taskFilter;
+      if (citationFilter) params.citation = citationFilter;
+      params.ignored = ignoredFilter;
+      setListError("");
       if (query.trim()) params.q = query.trim();
       if (cursor) params.cursor = cursor;
       collectionApi
@@ -193,15 +244,18 @@ export function CollectionPage({
           setRows((old) => (cursor ? [...old, ...page.items] : page.items));
           setNextCursor(page.nextCursor);
         })
-        .catch((e) => toast.error((e as Error).message));
+        .catch((e) => {
+          if (seq === requestSeq.current) setListError((e as Error).message);
+        });
     },
-    [query, sort, tab],
+    [query, sort, tab, taskFilter, citationFilter, ignoredFilter],
   );
 
   useEffect(() => {
     loadTasks();
   }, [loadTasks]);
   useEffect(() => {
+    setSelected(new Set());
     if (tab !== "tasks") loadCandidates();
   }, [tab, loadCandidates]);
 
@@ -214,6 +268,50 @@ export function CollectionPage({
       })
       .catch((e) => toast.error((e as Error).message));
   };
+
+  const activeRuns = Object.values(runStates).filter(
+    (run) => run.status === "queued" || run.status === "running",
+  );
+  const activeRunIDs = activeRuns
+    .map((run) => run.id)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!activeRunIDs) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      const results = await Promise.allSettled(
+        activeRuns.map((run) => collectionApi.run(run.id)),
+      );
+      if (disposed) return;
+      let finished = false;
+      for (const result of results) {
+        if (result.status === "rejected") {
+          toast.error((result.reason as Error).message);
+          return;
+        }
+        const run = result.value;
+        setRunStates((states) => {
+          const current = states[run.taskId];
+          if (
+            current?.id !== run.id ||
+            (current.status !== "queued" && current.status !== "running")
+          )
+            return states;
+          return { ...states, [run.taskId]: run };
+        });
+        finished ||= run.status !== "queued" && run.status !== "running";
+      }
+      if (finished) loadCandidates();
+      timer = setTimeout(poll, 800);
+    };
+    timer = setTimeout(poll, 800);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [activeRunIDs, loadCandidates]);
 
   const startImport = () => {
     const items = rows
@@ -276,6 +374,8 @@ export function CollectionPage({
       .catch(() => {});
     return () => {
       aliveRef.current = false;
+      requestSeq.current++;
+      detailSeq.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -344,15 +444,29 @@ export function CollectionPage({
   };
 
   const openDetail = (row: CandidateRow) => {
+    const seq = ++detailSeq.current;
     collectionApi
       .candidate(row.candidate.arxivId)
-      .then((res) =>
+      .then((res) => {
+        if (!aliveRef.current || seq !== detailSeq.current) return;
         setDetail({
           candidate: res.candidate,
           citation: res.citation,
           score: row.score,
-        }),
-      )
+          analyses: res.analyses,
+          analysisJob: res.analysisJob,
+        });
+      })
+      .catch((e) => toast.error((e as Error).message));
+  };
+
+  const ignoreCandidate = (row: CandidateRow) => {
+    collectionApi
+      .setIgnored(row.candidate.arxivId, !row.candidate.ignored)
+      .then(() => {
+        setDetail(null);
+        loadCandidates();
+      })
       .catch((e) => toast.error((e as Error).message));
   };
 
@@ -366,11 +480,19 @@ export function CollectionPage({
             aria-label="切换侧栏"
             onClick={onToggleNav}
           >
-            {navOpen ? <X className="size-4" /> : <CirclePlus className="size-4" />}
+            {navOpen ? (
+              <X className="size-4" />
+            ) : (
+              <CirclePlus className="size-4" />
+            )}
           </Button>
           <Tabs
             value={tab}
-            onValueChange={(v) => setTab(v as typeof tab)}
+            onValueChange={(v) => {
+              setTab(v as typeof tab);
+              if (v === "hot") setSort("citations");
+              else if (v === "latest") setSort("date");
+            }}
           >
             <TabsList>
               <TabsTrigger value="latest">最新相关</TabsTrigger>
@@ -393,9 +515,22 @@ export function CollectionPage({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setSort(sort === "date" ? "citations" : sort === "citations" ? "relevance" : "date")}
+              onClick={() =>
+                setSort(
+                  sort === "date"
+                    ? "citations"
+                    : sort === "citations"
+                      ? "relevance"
+                      : "date",
+                )
+              }
             >
-              排序：{sort === "date" ? "日期" : sort === "citations" ? "引用" : "相关性"}
+              排序：
+              {sort === "date"
+                ? "日期"
+                : sort === "citations"
+                  ? "引用"
+                  : "相关性"}
             </Button>
             <Button
               size="sm"
@@ -424,7 +559,70 @@ export function CollectionPage({
             新建任务
           </Button>
         )}
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="采集设置"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings2 className="size-4" />
+        </Button>
       </header>
+      {tab !== "tasks" ? (
+        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+          <Select
+            value={taskFilter || "all"}
+            onValueChange={(value) =>
+              setTaskFilter(value === "all" ? "" : value || "")
+            }
+          >
+            <SelectTrigger aria-label="任务筛选" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部任务</SelectItem>
+              {tasks.map((task) => (
+                <SelectItem key={task.id} value={task.id}>
+                  {task.name}
+                  {task.enabled ? "" : "（已关闭）"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={citationFilter || "all"}
+            onValueChange={(value) =>
+              setCitationFilter(value === "all" ? "" : value || "")
+            }
+          >
+            <SelectTrigger aria-label="引用状态筛选" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部引用状态</SelectItem>
+              <SelectItem value="known">引用已知</SelectItem>
+              <SelectItem value="unknown">引用未知</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={ignoredFilter}
+            onValueChange={(value) => setIgnoredFilter(value || "0")}
+          >
+            <SelectTrigger aria-label="忽略状态筛选" size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">未忽略</SelectItem>
+              <SelectItem value="1">已忽略</SelectItem>
+            </SelectContent>
+          </Select>
+          {listError ? (
+            <p role="alert" className="text-xs text-destructive">
+              {listError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           {tab === "tasks" ? (
@@ -456,19 +654,48 @@ export function CollectionPage({
                             {(task.config?.categories ?? []).length
                               ? ` · 分类 ${(task.config?.categories ?? []).length}`
                               : ""}{" "}
-                            · 每 {(task.config?.frequency_hours ?? 24)} 小时
+                            · 每 {task.config?.frequency_hours ?? 24} 小时
                             {!task.enabled ? " · 已关闭" : ""}
-                            {run ? ` · ${statusLabel[run.status] || run.status}` : ""}
+                            {run
+                              ? ` · ${statusLabel[run.status] || run.status}`
+                              : ""}
                           </p>
                         </div>
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => runTask(task)}
+                          disabled={
+                            !task.enabled ||
+                            run?.status === "queued" ||
+                            run?.status === "running"
+                          }
                         >
                           <Play className="size-3.5" />
                           运行
                         </Button>
+                        {run?.status === "queued" ||
+                        run?.status === "running" ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              collectionApi
+                                .cancelRun(run.id)
+                                .then(() =>
+                                  setRunStates((states) => ({
+                                    ...states,
+                                    [task.id]: { ...run, status: "cancelled" },
+                                  })),
+                                )
+                                .catch((e) =>
+                                  toast.error((e as Error).message),
+                                );
+                            }}
+                          >
+                            取消运行
+                          </Button>
+                        ) : null}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -500,6 +727,7 @@ export function CollectionPage({
                       >
                         <Checkbox
                           className="mt-1"
+                          aria-label={`选择 ${c.title}`}
                           checked={selected.has(c.arxivId)}
                           onCheckedChange={(checked) => {
                             const next = new Set(selected);
@@ -521,8 +749,18 @@ export function CollectionPage({
                               : ""}
                           </p>
                         </button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => ignoreCandidate(row)}
+                        >
+                          {c.ignored ? "取消忽略" : "忽略"}
+                        </Button>
                         {state?.status === "awaiting_confirmation" ? (
-                          <Button size="sm" onClick={() => confirmImport(c.arxivId)}>
+                          <Button
+                            size="sm"
+                            onClick={() => confirmImport(c.arxivId)}
+                          >
                             确认入库
                           </Button>
                         ) : null}
@@ -540,7 +778,9 @@ export function CollectionPage({
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() => onOpenDocument(state.documentId || "")}
+                            onClick={() =>
+                              onOpenDocument(state.documentId || "")
+                            }
                           >
                             已入库 · 打开
                           </Button>
@@ -572,10 +812,19 @@ export function CollectionPage({
         {detail ? (
           <div className="w-96 border-l">
             <CandidateDetail
+              key={detail.candidate.arxivId}
               candidate={detail.candidate}
               citation={detail.citation}
               score={detail.score}
-              onClose={() => setDetail(null)}
+              analyses={detail.analyses}
+              analysisJob={detail.analysisJob}
+              taskNames={Object.fromEntries(
+                tasks.map((task) => [task.id, task.name]),
+              )}
+              onClose={() => {
+                detailSeq.current++;
+                setDetail(null);
+              }}
             />
           </div>
         ) : null}
@@ -586,6 +835,22 @@ export function CollectionPage({
           onClose={() => setTaskForm(null)}
           onSaved={() => {
             setTaskForm(null);
+            detailSeq.current++;
+            setDetail(null);
+            loadCandidates();
+            loadTasks();
+          }}
+        />
+      ) : null}
+      {settingsOpen ? (
+        <CollectionSettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onOpenReaderSettings={onOpenReaderSettings}
+          onSaved={() => {
+            setSettingsOpen(false);
+            detailSeq.current++;
+            setDetail(null);
+            loadCandidates();
             loadTasks();
           }}
         />
