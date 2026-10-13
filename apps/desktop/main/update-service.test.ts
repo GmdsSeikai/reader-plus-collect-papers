@@ -186,6 +186,58 @@ it("shows download progress in the taskbar and the app, then clears it", async (
   ]);
   expect(window.setProgressBar).toHaveBeenLastCalledWith(-1);
 });
+it("clears download progress before showing a download error", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
+  mocks.download.mockImplementationOnce(
+    async (
+      _update: unknown,
+      _directory: string,
+      _request: unknown,
+      onProgress?: (received: number, total?: number) => void,
+    ) => {
+      onProgress?.(1024 * 1024, 2 * 1024 * 1024);
+      throw new Error("connection lost");
+    },
+  );
+  let clearedBeforeError = false;
+  mocks.dialog.mockImplementation(async (_window, options) => {
+    if (options.type === "error")
+      clearedBeforeError = send.mock.calls.some(
+        ([channel, progress]) =>
+          channel === "reader:update-progress" && progress === null,
+      );
+    return { response: 0 };
+  });
+  const service = await startUpdateService(window);
+  stop = service.stop;
+  await service.check();
+  expect(mocks.dialog).toHaveBeenLastCalledWith(
+    window,
+    expect.objectContaining({ type: "error", detail: "connection lost" }),
+  );
+  expect(clearedBeforeError).toBe(true);
+});
+it("caps the taskbar progress when more bytes arrive than announced", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
+  mocks.spawn.mockReturnValue({ on: vi.fn().mockReturnThis(), unref: vi.fn() });
+  mocks.dialog.mockResolvedValue({ response: 0 });
+  mocks.download.mockImplementationOnce(
+    async (
+      _update: unknown,
+      _directory: string,
+      _request: unknown,
+      onProgress?: (received: number, total?: number) => void,
+    ) => {
+      onProgress?.(3 * 1024 * 1024, 2 * 1024 * 1024);
+      return "C:\\test\\Reader-0.2.0-win-x64.exe";
+    },
+  );
+  const service = await startUpdateService(window);
+  stop = service.stop;
+  await service.check();
+  expect(window.setProgressBar).toHaveBeenCalledWith(1);
+  expect(window.setProgressBar).not.toHaveBeenCalledWith(1.5);
+});
 it("installs the verified Windows update silently after Reader quits", async () => {
   vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
   const child = { on: vi.fn(), unref: vi.fn() };

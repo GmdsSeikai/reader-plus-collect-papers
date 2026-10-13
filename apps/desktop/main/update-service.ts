@@ -76,7 +76,8 @@ export async function startUpdateService(window: BrowserWindow) {
       !progress
         ? -1
         : progress.phase === "download" && progress.total
-          ? progress.received / progress.total
+          ? // A mismatched Content-Length must not overflow the bar.
+            Math.min(1, progress.received / progress.total)
           : 2,
     );
     window.webContents.send("reader:update-progress", progress);
@@ -223,6 +224,8 @@ export async function startUpdateService(window: BrowserWindow) {
         const error = await shell.openPath(path);
         if (error) throw new Error(`无法打开安装包：${error}`);
       } catch (error) {
+        // Clear the progress before the error dialog so it does not linger.
+        report(null);
         if (alive()) {
           if (wantsFeedback || downloading)
             await dialog.showMessageBox(window, {

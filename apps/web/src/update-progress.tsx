@@ -30,7 +30,7 @@ export function useUpdateProgress() {
               {total && (
                 <Progress
                   aria-label="更新下载进度"
-                  value={(received / total) * 100}
+                  value={Math.min(100, (received / total) * 100)}
                 />
               )}
               <span className="tabular-nums">
