@@ -6,6 +6,8 @@
 
 建议保留 Codex / Claude Code 自己的 Agent 循环，由 Reader 的 Go 服务实现所有文档工具、授权与执行限额，再通过进程或会话范围的 MCP 暴露给 CLI。普通模型 API 则由 Reader 驱动工具调用循环。两条路径共享工具实现与证据记录，不必共享循环控制代码，也不必修改用户的全局 MCP 配置。
 
+登录约束（2026-10-13 用户确认）：复用已有 CLI 登录，采用原设计的配置探测、逐项禁用和重启复核流程；不为文档 Agent 增加独立登录步骤，不新建需要单独认证的 CLI 环境。Reader 不读取、复制或链接用户凭证。该选择确定接入方向，不代表隔离与真实工具调用已通过验证。
+
 这条架构在协议层面成立，但本次不能宣称三种 CLI 都已满足“只暴露当前文档的只读工具”。必须先通过隔离发布门禁：
 
 | 适配器           | 可用接入路径                                                 | 当前证据与限制                                                                                                  | 建议                                                    |
@@ -67,11 +69,9 @@ codex app-server --listen stdio://
 
 据此，当前代码的 `mcp_servers={}` **不能用作“没有继承用户 MCP”的证据**。同理，在 table 下加 `reader` 也不会自动删除其他服务器；`--profile` 的本机 help 说明它叠加在基础用户配置之上，不能当作全新空白环境。`--strict-config` 仅针对未知配置键，不等于 MCP allowlist。
 
-需要区分的隔离路线如下；本轮建议先执行下节的枚举 spike，若不能满足严格边界，再评估独立官方环境：
+采用下节的枚举和进程覆盖流程，复用原有认证环境。通过受支持配置接口提取继承服务器名称，为每项设置 `enabled=false`，再注入 Reader MCP。须验证禁用在首次连接和执行任何无关 hook/MCP **之前**生效，并检查管理配置、插件来源及配置变化时机。当前资料未证明本机版本存在一键严格 MCP 开关，也不能仅靠一次列表检查宣称完全隔离。
 
-1. 固定一个实际支持严格工具/配置隔离的官方 CLI 版本，使用其已证实的进程范围开关；须证实在首次连接和执行任何外部 hook/MCP **之前**已生效。当前资料未证明存在适用于本机版本的一键严格 MCP 开关。
-2. 为 Reader 使用独立的官方 CLI 配置/认证环境，由用户通过官方登录完成一次授权；Reader 不读取、复制或链接原有认证文件。此方案有登录和配置维护成本，需要产品决定，不能以后台搬运用户凭证实现“无感隔离”。
-3. 在允许读取配置元信息的未来实现中，通过受支持接口只获得服务器名称，为每个继承项设置 `enabled=false`，并验证管理配置、插件来源和变化时机；这仍需解决“枚举前已启动”和检查到使用之间变更的问题，不能仅靠一次列表检查宣称完全隔离。
+独立配置／认证环境及额外登录不作为本功能的备选。若某个版本／环境无法在既有登录下满足边界，应报告具体不兼容原因，暂不开放其文档 Agent；不能自动切换到新的登录流程或悄悄扩大工具权限。
 
 `mcpServerStatus/list` 能提供服务器及工具清单，可用作验证证据；但“连接后发现多了一个服务器，再停止”只能阻止继续推理，不能撤销那个服务器启动时的副作用。实现应拒绝不符合能力档案的版本/环境，并保留普通聊天入口，不能悄悄放开整个 Codex。[MCP 状态接口](https://learn.chatgpt.com/docs/app-server)
 
@@ -90,7 +90,7 @@ codex app-server --listen stdio://
 
 这条路线保留官方认证：Reader 不改配置文件、不改变认证存储路径，App Server 仍通过自己的 AuthManager 获取登录状态。但 [`run_main_with_transport_options`](https://github.com/openai/codex/blob/73bbb654b3b9796b11624914b3be908ab8a0551f/codex-rs/app-server/src/lib.rs) 会加载认证/云配置、初始化状态数据库与后台服务，所以“没有建 thread”不代表整个启动过程零网络、零本地状态副作用。这里仅得到配置探测路径不主动创建 MCP runtime 的源码证据，仍需用隔离夹具验证本机对应版本的实际启动行为。
 
-尚未解决的严格边界是配置变更竞态：`config/read` 与 `thread/start` 使用的配置并非同一个可锁定 snapshot，工作进程可能在两者之间或后续重载时看到新服务器。有限次复核能检测普通漂移，不能数学上消除该窗口。因此可以据此制作可运行 spike、验证保留登录与进程级注入，但严格发布仍需证明配置快照/持续allowlist约束，或明确采用独立官方认证环境。
+尚未解决的严格边界是配置变更竞态：`config/read` 与 `thread/start` 使用的配置并非同一个可锁定 snapshot，工作进程可能在两者之间或后续重载时看到新服务器。有限次复核能检测普通漂移，不能数学上消除该窗口。因此可以据此制作可运行 spike、验证保留登录与进程级注入，但严格发布仍需证明配置快照/持续 allowlist 约束。验证不通过时按具体版本／环境限制文档 Agent 支持，不以额外登录替代该验证。
 
 没有找到可作为替代的公开开关：所查 CLI 的 [app-server 分派](https://github.com/openai/codex/blob/73bbb654b3b9796b11624914b3be908ab8a0551f/codex-rs/cli/src/main.rs) 向运行入口传入 `LoaderOverrides::default()`；[`ignore_user_config` / `ignore_project_config`](https://github.com/openai/codex/blob/73bbb654b3b9796b11624914b3be908ab8a0551f/codex-rs/config/src/state.rs) 存在于内部 Rust loader options，未在这个命令的公开参数暴露。测试专用环境变量或内部嵌入接口不能当成生产 CLI 合约。所查[配置 schema](https://github.com/openai/codex/blob/73bbb654b3b9796b11624914b3be908ab8a0551f/codex-rs/core/config.schema.json)也未证明存在一个能同时覆盖所有内置/插件/MCP工具的稳定全局工具 allowlist；每服务器 `enabled_tools` 只约束对应服务器。
 
