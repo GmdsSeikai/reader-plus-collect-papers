@@ -1,3 +1,4 @@
+import { AnnotationHoverCard } from "./AnnotationHoverCard";
 import { AnnotationQuote } from "./AnnotationQuote";
 import {
   useEffect,
@@ -529,10 +530,13 @@ export function Workspace({
     () => !annotationsLoaded || annotationSaving.current || noteOpen,
   );
 
+  const [hoveredAnnotation, setHoveredAnnotation] =
+    useState<ReaderAnnotationTarget | null>(null);
   const selectedAnnotation = annotationTarget
     ? activeAnnotation(annotations, annotationTarget.ids)
     : undefined;
   const selectAnnotation = (target: ReaderAnnotationTarget | null) => {
+    setHoveredAnnotation(null);
     setAnnotationTarget(target);
     const annotation = target
       ? activeAnnotation(annotations, target.ids)
@@ -540,6 +544,7 @@ export function Workspace({
     if (annotation?.quote) void copyText(annotation.quote, "已复制");
   };
   const selectText = (next: ReaderSelection | null) => {
+    if (next) setHoveredAnnotation(null);
     setSelection(next);
     const key = next ? JSON.stringify([next.text, next.location]) : null;
     if (next?.text && key !== lastCopiedSelection.current)
@@ -547,6 +552,7 @@ export function Workspace({
     lastCopiedSelection.current = key;
   };
   const editAnnotationNote = (annotation: Annotation) => {
+    setHoveredAnnotation(null);
     setNoteKind(annotation.kind === "question" ? "question" : "note");
     setEditingAnnotation(annotation);
     setNoteSelection({ text: annotation.quote, location: annotation.location });
@@ -1218,6 +1224,14 @@ export function Workspace({
                     location: saveLocation,
                     selection: selectText,
                     annotation: selectAnnotation,
+                    annotationHover: (target) =>
+                      setHoveredAnnotation((current) =>
+                        current &&
+                        target &&
+                        current.ids.join(",") === target.ids.join(",")
+                          ? current
+                          : target,
+                      ),
                     linkPreview: setLinkPreview,
                     internalLink: (origin) => {
                       navigationRef.current?.remember(origin);
@@ -1503,6 +1517,11 @@ export function Workspace({
         </ResizablePanel>
       </ResizablePanelGroup>
 
+      <AnnotationHoverCard
+        target={!selection && !noteOpen ? hoveredAnnotation : null}
+        annotations={annotations}
+        onEdit={editAnnotationNote}
+      />
       <Popover
         open={!!linkPreview}
         onOpenChange={(open) => !open && setLinkPreview(null)}
