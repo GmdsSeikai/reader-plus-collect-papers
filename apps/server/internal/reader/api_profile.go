@@ -10,7 +10,7 @@ import (
 // Rules apply only to exact official HTTPS origins and their documented API
 // paths. A model name at a relay never selects a vendor or changes protocol.
 // Sources and review date: docs/api-provider-compatibility.md.
-const apiRulesVersion = "2026-10-13"
+const apiRulesVersion = "2026-10-13.1"
 
 type apiEndpoint struct{ Vendor, Protocol, Base string }
 
@@ -130,7 +130,7 @@ func reasoningRule(e apiEndpoint, model string, advertised []string) apiReasonin
 		case "claude-opus-4-6", "claude-sonnet-4-6":
 			levels("low", "medium", "high", "max")
 			r.Thinking = "adaptive"
-		case "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5":
+		case "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5":
 			levels("low", "medium", "high", "xhigh", "max")
 			r.Thinking = "adaptive"
 		case "claude-opus-4-5", "claude-opus-4-5-20251101":

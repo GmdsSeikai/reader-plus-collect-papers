@@ -208,3 +208,20 @@ func TestKimiTranslationRetainsReasoningOnlyAfterCompletion(t *testing.T) {
 		t.Fatal("history not released")
 	}
 }
+
+func TestClaudeFableAndMythosEffort(t *testing.T) {
+	for _, model := range []string{"claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"} {
+		for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+			r := reasoningRule(resolveAPIEndpoint(APIConnection{URL: "https://api.anthropic.com"}), model, nil)
+			p := map[string]any{}
+			r.apply(p, "anthropic", level, r.resolve(level))
+			if r.Mode != "levels" || r.info().Mappings["medium"] != "medium" || p["output_config"].(map[string]string)["effort"] != level || p["thinking"].(map[string]any)["type"] != "adaptive" || p["max_tokens"] != 32768 {
+				t.Fatalf("%s %s: %+v", model, level, p)
+			}
+			relay := reasoningRule(resolveAPIEndpoint(APIConnection{URL: "https://relay.test/v1"}), model, nil)
+			if relay.Source == "official" || relay.Thinking != "" || relay.resolve("max") != "high" {
+				t.Fatal(relay)
+			}
+		}
+	}
+}

@@ -18,6 +18,8 @@
 | DeepSeek    | `api.deepseek.com`，根路径或 `/v1`                                         | [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)：已登记 V4 模型 thinking enabled + reasoning_effort low/high/max；旧 chat/reasoner 别名使用默认模式。                                                                                                                                                                                          |
 | MiniMax     | `api.minimax.io` / `api.minimaxi.com`，根路径或 `/v1`                      | [官方 OpenAI 接口](https://platform.minimax.io/docs/api-reference/text-openai-api)：M3.1 Flash Preview 可调 low/medium/high/xhigh/max；M3/M2.x 不宣称强度可调。设置 reasoning_split，避免思考内容混入回答正文。                                                                                                                                                     |
 
+依据 [Claude effort 文档](https://platform.claude.com/docs/en/build-with-claude/effort)，Fable 5/5.1 与 Mythos 5/5.1 已登记 low/medium/high/xhigh/max，使用 adaptive thinking；遵循 Reader 已登记模型的 32768 输出上限。
+
 每家的具体模型名单以 `reasoningRule` 为准。未知官方模型保留默认强度并显示“尚无规则”，不将整个新模型系列自动归为已支持。其他厂商的 Anthropic 专用根路径暂不在自动识别表内；可以手动选择 Messages 协议，但不应用未经核对的厂商模型规则。
 
 ## 用户选择与实际参数
