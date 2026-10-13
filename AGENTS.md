@@ -1,6 +1,6 @@
 # Reader
 
-Local-first EPUB/PDF reader. Use Chinese for user-facing communication. Keep changes and limitations specific. User specifications take precedence over this file.
+Local-first EPUB/PDF reader. Use Chinese for user-facing communication. Keep changes and limitations specific. User specifications take precedence over this file. If `AGENTS.local.md` exists, read it and follow it; it overrides this file.
 
 ## Architecture
 - `apps/web`: React + Vite renderer. Reader engines behind `ReaderAdapter`.

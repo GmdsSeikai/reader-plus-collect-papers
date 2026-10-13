@@ -87,10 +87,13 @@ export function OnboardingDialog({
   const back = () => setIndex((i) => Math.max(0, i - 1));
   const next = () => (last ? onFinish() : setIndex(index + 1));
   return (
-    <Dialog open={open} onOpenChange={(value) => !value && onFinish()}>
+    <Dialog
+      open={open}
+      disablePointerDismissal
+      onOpenChange={(_, details) => details.cancel()}
+    >
       <DialogContent
         className="guide-dialog sm:max-w-2xl"
-        // The footer offers Skip; a corner close would read as dismissing.
         showCloseButton={false}
         onKeyDown={arrowKeys(back, () => !last && next())}
       >
@@ -100,11 +103,6 @@ export function OnboardingDialog({
           <span className="sr-only" aria-live="polite">
             第 {index + 1} 步，共 {pages.length} 步
           </span>
-          {!last && (
-            <Button variant="ghost" onClick={onFinish}>
-              跳过
-            </Button>
-          )}
           {index > 0 && (
             <Button variant="outline" onClick={back}>
               上一步

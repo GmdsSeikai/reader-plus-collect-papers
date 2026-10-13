@@ -4076,6 +4076,12 @@
               "type": "object",
               "properties":
                 {
+                  "protocol":
+                    {
+                      "type": "string",
+                      "enum": ["auto", "openai", "anthropic"],
+                      "default": "auto",
+                    },
                   "url": { "type": "string" },
                   "model": { "type": "string" },
                   "key": { "type": "string", "writeOnly": true },
@@ -4089,6 +4095,25 @@
               "required": ["id", "name", "description", "isDefault"],
               "properties":
                 {
+                  "effortInfo":
+                    {
+                      "type": "object",
+                      "required": ["mode", "note"],
+                      "properties":
+                        {
+                          "mode":
+                            {
+                              "type": "string",
+                              "enum": ["levels", "budget", "fixed", "unknown"],
+                            },
+                          "note": { "type": "string" },
+                          "mappings":
+                            {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" },
+                            },
+                        },
+                    },
                   "id": { "type": "string" },
                   "name": { "type": "string" },
                   "description": { "type": "string" },
@@ -4123,6 +4148,11 @@
               "type": "object",
               "properties":
                 {
+                  "chatIncludeChapter":
+                    {
+                      "type": "boolean",
+                      "description": "Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value.",
+                    },
                   "primary": { "type": "string" },
                   "models":
                     {

@@ -1,4 +1,5 @@
 import { selectionAnchor, isSelectionToolbar } from "./selection-anchor";
+import { chapterRange } from "../translation/chapters";
 import { pdfQuotePoint } from "./pdf-reference-location";
 import { PDFBlockOverlay, referenceBlock } from "./pdf-blocks";
 import { PDFReadingNavigation } from "./pdf-navigation";
@@ -497,6 +498,22 @@ export class PDFReaderAdapter implements ReaderAdapter {
   }
   async getContext() {
     return this.pageText(this.location.page);
+  }
+  async getChapterContext(
+    location: DocumentLocation,
+  ): Promise<ReaderSelection[]> {
+    if (!this.pdf || location.type !== "pdf") return [];
+    const range = chapterRange(
+      await this.getTOC(),
+      location.page,
+      this.pdf.numPages,
+    );
+    const excerpts: ReaderSelection[] = [];
+    for (let page = range.fromPage; page <= range.toPage; page++) {
+      const text = await this.pageText(page);
+      if (text.trim()) excerpts.push({ text, location: { type: "pdf", page } });
+    }
+    return excerpts;
   }
   setBlocks(blocks: PDFBlock[]) {
     this.blockData = blocks;
