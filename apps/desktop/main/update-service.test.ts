@@ -11,8 +11,10 @@ const mocks = vi.hoisted(() => ({
   inPlace: vi.fn(),
   stage: vi.fn(),
   quitAndInstall: vi.fn(),
+  spawn: vi.fn(),
   app: {
     quit: vi.fn(),
+    once: vi.fn(),
     isPackaged: true,
     getPath: (name: string) =>
       name === "exe"
@@ -35,6 +37,7 @@ vi.mock("node:fs/promises", () => ({
   rename: vi.fn(),
   rm: mocks.rm,
 }));
+vi.mock("node:child_process", () => ({ spawn: mocks.spawn }));
 vi.mock("./update-download", () => ({ downloadUpdate: mocks.download }));
 vi.mock("./mac-squirrel", () => ({
   canUpdateInPlace: mocks.inPlace,
@@ -131,11 +134,13 @@ it("keeps a Mac running after opening the DMG", async () => {
   expect(mocks.open).toHaveBeenCalledWith("/test/verified.dmg");
   expect(mocks.app.quit).not.toHaveBeenCalled();
 });
-it("runs the verified Windows installer and then quits so files can be replaced", async () => {
+it("installs the verified Windows update silently after Reader quits", async () => {
   vi.stubGlobal("process", { ...process, platform: "win32", arch: "x64" });
+  const child = { on: vi.fn(), unref: vi.fn() };
+  child.on.mockReturnValue(child);
+  mocks.spawn.mockReturnValue(child);
   mocks.dialog.mockResolvedValue({ response: 0 });
   mocks.download.mockResolvedValue("C:\\test\\Reader-0.2.0-win-x64.exe");
-  mocks.open.mockResolvedValue("");
   const service = await startUpdateService(window);
   stop = service.stop;
   await service.check();
@@ -144,11 +149,21 @@ it("runs the verified Windows installer and then quits so files can be replaced"
     expect.any(String),
     expect.any(Function),
   );
-  expect(mocks.open).toHaveBeenCalledWith("C:\\test\\Reader-0.2.0-win-x64.exe");
+  expect(mocks.open).not.toHaveBeenCalled();
   expect(mocks.app.quit).toHaveBeenCalledTimes(1);
-  mocks.open.mockResolvedValue("Access denied");
+  // The installer waits for the reading flush and server shutdown.
+  expect(mocks.spawn).not.toHaveBeenCalled();
+  expect(mocks.app.once).toHaveBeenCalledWith("quit", expect.any(Function));
+  // A quit cancelled to keep reading arms the same installer only once.
   await service.check();
-  expect(mocks.app.quit).toHaveBeenCalledTimes(1);
+  expect(mocks.app.once).toHaveBeenCalledTimes(1);
+  mocks.app.once.mock.calls[0][1]();
+  expect(mocks.spawn).toHaveBeenCalledWith(
+    "C:\\test\\Reader-0.2.0-win-x64.exe",
+    ["--updated", "/S", "--force-run"],
+    { detached: true, stdio: "ignore" },
+  );
+  expect(child.unref).toHaveBeenCalled();
 });
 it("stages a signed Mac update silently and installs it on restart", async () => {
   assets.push("Reader-0.2.0-mac-arm64.zip");
