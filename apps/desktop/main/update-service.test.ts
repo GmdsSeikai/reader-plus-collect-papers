@@ -35,6 +35,17 @@ vi.mock("node:fs/promises", () => ({
   rename: vi.fn(),
   rm: mocks.rm,
 }));
+// A simulated OS must also supply its path rules, independent of the test host.
+vi.mock("node:path", async (importOriginal) => {
+  const path = await importOriginal<typeof import("node:path")>();
+  const target = () =>
+    process.platform === "darwin" ? path.posix : path.win32;
+  return {
+    ...path,
+    join: (...parts: string[]) => target().join(...parts),
+    dirname: (value: string) => target().dirname(value),
+  };
+});
 vi.mock("./update-download", () => ({ downloadUpdate: mocks.download }));
 vi.mock("./mac-squirrel", () => ({
   canUpdateInPlace: mocks.inPlace,

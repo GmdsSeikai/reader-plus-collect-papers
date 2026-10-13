@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { TranslationText } from "./TranslationText";
 
 let root: Root, host: HTMLDivElement;
+// These assertions cover fenced content; preload modules before timing DOM readiness.
+beforeAll(async () => {
+  await import("../chat/MessageMarkdown");
+  await import("../chat/CodeBlock");
+});
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("matchMedia", () => ({
