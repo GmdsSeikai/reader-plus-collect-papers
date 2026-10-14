@@ -34,7 +34,6 @@ type CollectionManager struct {
 	baseCtx          context.Context
 	clock            func() time.Time
 	analysisSerial   chan struct{}
-	analysisSchedule sync.Mutex
 	analysisReady    chan struct{}
 }
 
@@ -223,7 +222,6 @@ func (m *CollectionManager) tickOnce(ctx context.Context) {
 	}
 	m.startDueTasks(ctx)
 	m.runHotHistoryCycle(ctx)
-	m.runAnalysisRound(ctx)
 	if _, err := m.RefreshCitations(ctx, m.citationKey()); err != nil {
 		log.Printf("citation refresh: %v", err)
 	}

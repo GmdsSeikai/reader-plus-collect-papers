@@ -83,7 +83,7 @@ it("requires confirmation before enabling paid analysis and saving settings", as
     (document.querySelector('[role="checkbox"]') as HTMLElement).click(),
   );
   expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-    "启用摘要分析？",
+    "启用手动摘要分析？",
   );
   expect(saveSettings).not.toHaveBeenCalled();
   await act(async () => button("启用").click());

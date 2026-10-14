@@ -3,7 +3,6 @@ package reader
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,6 +89,29 @@ func analysisAPIFixture(t *testing.T, s *Server, response func(AnalysisInput) st
 		t.Fatal(err)
 	}
 	return calls
+}
+
+func TestCollectionTickSendsNoAutomaticAnalysis(t *testing.T) {
+	s := testServer(t)
+	candidate := seedAnalysisCandidate(t, s)
+	calls := analysisAPIFixture(t, s, func(input AnalysisInput) string { return mustJSONText(fixtureAnalysisResult(input)) })
+	// Keep the tick's citation path on the local fixture, never a public service.
+	m1RegressionFixture(t, s, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[]}`))
+	})
+	for i := 0; i < 3; i++ {
+		s.Collection().tickOnce(context.Background())
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("tick sent %d automatic analysis requests", calls.Load())
+	}
+	job := submitAnalysisHTTP(t, s, candidate.ArXivID)
+	if job := waitAnalysisJobHTTP(t, s, job.ID); job.Status != runSucceeded {
+		t.Fatalf("manual analysis still required to work: %+v", job)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("manual submission sent %d requests, expected 1", calls.Load())
+	}
 }
 
 func TestPaperAnalysisProductionAPIAndCache(t *testing.T) {
@@ -211,77 +233,6 @@ func TestPaperAnalysisChangedIdentityRemovesStaleScores(t *testing.T) {
 	}
 	if got := score(); got != 20 {
 		t.Fatalf("changed content kept stale score: %d", got)
-	}
-}
-
-func TestPaperAnalysisBackgroundKeepsWeightedTasksMoving(t *testing.T) {
-	s := testServer(t)
-	template := seedAnalysisCandidate(t, s)
-	tasks, err := s.Store.CollectionTasks()
-	if err != nil {
-		t.Fatal(err)
-	}
-	high := tasks[0]
-	high.Priority = 1
-	if high, err = s.Store.SaveCollectionTask(high, high.QueryRevision); err != nil {
-		t.Fatal(err)
-	}
-	low, err := s.Store.SaveCollectionTask(CollectionTask{Name: "low", Enabled: true, Priority: 5, Config: high.Config}, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tx, err := s.Store.DB.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM collection_matches WHERE arxiv_id=?", template.ArXivID); err != nil {
-		t.Fatal(err)
-	}
-	for group, task := range []CollectionTask{high, low} {
-		for i := 0; i < 40; i++ {
-			candidate := template
-			candidate.ArXivID = fmt.Sprintf("2601.%05d", group*100+i+1)
-			if err := s.Store.UpsertCandidate(tx, candidate); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.Store.UpsertMatch(tx, CollectionMatch{TaskID: task.ID, QueryRevision: task.QueryRevision, ArXivID: candidate.ArXivID, Channel: channelLatest, BranchHash: "topic", RuleScore: 20, Evidence: []CollectionEvidence{}, FirstSeenAt: now(), LastSeenAt: now()}); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	var mu sync.Mutex
-	counts := map[string]int{}
-	calls := analysisAPIFixture(t, s, func(input AnalysisInput) string {
-		mu.Lock()
-		for _, task := range input.Tasks {
-			counts[task.TaskID]++
-		}
-		mu.Unlock()
-		return mustJSONText(fixtureAnalysisResult(input))
-	})
-	for i := 0; i < 6; i++ {
-		before := calls.Load()
-		s.Collection().runAnalysisRound(context.Background())
-		if got := calls.Load() - before; got != analysisBatchBudget {
-			t.Fatalf("round sent %d requests, expected bounded batch %d", got, analysisBatchBudget)
-		}
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if counts[high.ID] != 25 || counts[low.ID] != 5 {
-		t.Fatalf("weighted fairness/starvation: high=%d low=%d", counts[high.ID], counts[low.ID])
-	}
-	var body string
-	if err := s.Store.DB.QueryRow("SELECT body FROM collection_cursors WHERE owner_key=?", analysisScheduleOwner).Scan(&body); err != nil {
-		t.Fatal(err)
-	}
-	var state analysisSchedule
-	if err := json.Unmarshal([]byte(body), &state); err != nil || len(state.Positions) != 2 {
-		t.Fatalf("fairness cursor not persistent: %s %v", body, err)
 	}
 }
 

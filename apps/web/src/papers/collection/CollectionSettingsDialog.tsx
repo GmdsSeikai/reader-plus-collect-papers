@@ -146,7 +146,7 @@ export function CollectionSettingsDialog({
                     else change({ analysisEnabled: false });
                   }}
                 />
-                启用摘要分析
+                启用手动摘要分析
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="space-y-1">
@@ -347,9 +347,9 @@ export function CollectionSettingsDialog({
       <AlertDialog open={confirmEnable} onOpenChange={setConfirmEnable}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>启用摘要分析？</AlertDialogTitle>
+            <AlertDialogTitle>启用手动摘要分析？</AlertDialogTitle>
             <AlertDialogDescription>
-              模型请求可能产生费用。失败或取消的已发请求仍占用每日额度；一篇论文涉及多个任务时可能拆成多次请求。
+              分析只在你主动提交时发起，不会自动运行。模型请求可能产生费用；失败或取消的已发请求仍占用每日额度，一篇论文涉及多个任务时可能拆成多次请求。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
