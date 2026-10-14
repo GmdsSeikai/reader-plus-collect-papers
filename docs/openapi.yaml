@@ -1541,6 +1541,11 @@
                                     },
                                   "prompt": { "type": "string" },
                                   "context": { "type": "string" },
+                                  "readingLocation":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentLocation",
+                                      "description": "Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence.",
+                                    },
                                   "references":
                                     {
                                       "type": "array",
@@ -4259,6 +4264,11 @@
                   "content": { "type": "string" },
                   "createdAt": { "type": "string" },
                   "context": { "type": "string" },
+                  "readingLocation":
+                    {
+                      "$ref": "#/components/schemas/DocumentLocation",
+                      "description": "Original reading position at send time, retained independently of current navigation and source citations.",
+                    },
                   "attachments":
                     {
                       "type": "array",

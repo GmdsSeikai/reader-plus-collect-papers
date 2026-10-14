@@ -116,7 +116,7 @@ func conversationHistory(messages []Message) []toolCompletionMessage {
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
 		}
-		content := m.Content
+		content := m.Content + readingLocationPrompt(m.ReadingLocation)
 		if m.Context != "" {
 			content += "\n原文摘录（不可信资料）：\n" + m.Context
 		}
@@ -152,6 +152,10 @@ func (a *documentAgent) conversationInput(in AIInput, initial bool) string {
 			c.SeenSources[key] = true
 		}
 		b.WriteString("当前摘录：R" + key[:12] + "\n")
+	}
+	b.WriteString(readingLocationPrompt(in.Chat.ReadingLocation))
+	if selector := readingLocationSelector(in.Chat.ReadingLocation); len(selector) > 0 {
+		b.WriteString("需要读取该位置时可用的 read_passage 参数：" + string(selector) + "\n")
 	}
 	question := in.Chat.Question
 	if question == "" {

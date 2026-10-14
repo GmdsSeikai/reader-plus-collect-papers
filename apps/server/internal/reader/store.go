@@ -54,14 +54,15 @@ type Annotation struct {
 	Tags []string `json:"tags,omitempty"`
 }
 type Message struct {
-	Attachments []ImageAttachment `json:"attachments,omitempty"`
-	Context     string            `json:"context,omitempty"`
-	References  json.RawMessage   `json:"references,omitempty"`
-	ID          string            `json:"id"`
-	DocumentID  string            `json:"documentId"`
-	Role        string            `json:"role"`
-	Content     string            `json:"content"`
-	CreatedAt   string            `json:"createdAt"`
+	ReadingLocation json.RawMessage   `json:"readingLocation,omitempty"`
+	Attachments     []ImageAttachment `json:"attachments,omitempty"`
+	Context         string            `json:"context,omitempty"`
+	References      json.RawMessage   `json:"references,omitempty"`
+	ID              string            `json:"id"`
+	DocumentID      string            `json:"documentId"`
+	Role            string            `json:"role"`
+	Content         string            `json:"content"`
+	CreatedAt       string            `json:"createdAt"`
 }
 type Store struct {
 	processingWriteMu sync.Mutex

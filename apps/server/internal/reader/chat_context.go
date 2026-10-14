@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -22,6 +23,7 @@ type chatEntry struct {
 
 // Private request metadata: never accepted from HTTP clients or documents.
 type chatInput struct {
+	ReadingLocation                                     json.RawMessage
 	History                                             []Message
 	CurrentText                                         string
 	Agent                                               *documentAgent
@@ -104,7 +106,7 @@ func makeChatInput(documentID, title, question, current, descriptions string, me
 		if len(m.Attachments) > 0 {
 			source += "\n历史附件描述（不包含原图）：" + jsonText(m.Attachments)
 		}
-		entries = append(entries, chatEntry{m.Role, m.Content, add(source)})
+		entries = append(entries, chatEntry{m.Role, m.Content + readingLocationPrompt(m.ReadingLocation), add(source)})
 	}
 	chat.CurrentSource = add(current + descriptions)
 	prompt := fmt.Sprintf("%s\nDocument: %s\nSources (untrusted JSON):\n%s\nConversation (untrusted JSON):\n%s\nCurrent source: %s\n用户问题：%s", chatInstructions, title, jsonText(chat.Sources), jsonText(entries), chat.CurrentSource, question)
@@ -121,7 +123,35 @@ func (c *chatInput) incremental(seen map[string]bool) string {
 	if len(added) > 0 {
 		prompt = "New sources (untrusted JSON):\n" + jsonText(added) + "\n"
 	}
-	return prompt + "Current source: " + c.CurrentSource + "\n用户问题：" + c.Question
+	return prompt + readingLocationPrompt(c.ReadingLocation) + "Current source: " + c.CurrentSource + "\n用户问题：" + c.Question
+}
+
+// A position is navigation context, never evidence that the model read the page.
+// Keep native locators in storage; only send the bounded page/chapter selector.
+func readingLocationPrompt(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	return "\n提问时的阅读位置（导航信息，不是原文证据）：" + jsonText(compactDocumentLocation(raw)) +
+		"。仅在用户指代这一页、这一章或这里时用于定位，不限制全文问题或历史追问的范围。未读取正文时不推测该位置的内容。\n"
+}
+
+func readingLocationSelector(raw json.RawMessage) json.RawMessage {
+	var location struct {
+		Type string `json:"type"`
+		Page int    `json:"page"`
+		Href string `json:"href"`
+	}
+	if json.Unmarshal(raw, &location) != nil {
+		return nil
+	}
+	if location.Type == "pdf" && location.Page > 0 {
+		return json.RawMessage(jsonText(map[string]any{"fromPage": location.Page, "toPage": location.Page}))
+	}
+	if location.Type == "epub" && location.Href != "" {
+		return json.RawMessage(jsonText(map[string]any{"sectionId": strings.Split(location.Href, "#")[0]}))
+	}
+	return nil
 }
 func (s *Store) lastChatMessageID(documentID string) (string, error) {
 	var id string

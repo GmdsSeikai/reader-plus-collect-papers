@@ -519,6 +519,7 @@ export async function chat(
   attachments: string[] = [],
   onFallback?: (message: string) => void,
   onEvent?: (event: ChatStreamEvent) => void,
+  readingLocation?: DocumentLocation,
 ) {
   const response = await diagnosticFetch(`/api/documents/${id}/chat`, {
     method: "POST",
@@ -531,6 +532,7 @@ export async function chat(
       prompt,
       context,
       references,
+      readingLocation,
       attachments,
     }),
     signal,

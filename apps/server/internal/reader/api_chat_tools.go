@@ -256,6 +256,15 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 	a.conversationEvents = append(a.conversationEvents, current)
 	if !req.Tools {
 		a.Mode = "retrieval"
+		// Text-only APIs cannot choose a reading tool. Retain their current-page
+		// fallback using the same corpus and location captured by the renderer.
+		if in.Chat.CurrentText == "" {
+			if selector := readingLocationSelector(in.Chat.ReadingLocation); len(selector) > 0 {
+				if _, err = a.call(ctx, "read_passage", selector); err != nil {
+					return GenerateResult{}, err
+				}
+			}
+		}
 		if err = a.preRetrieve(ctx, in.Chat.Question); err != nil {
 			return GenerateResult{}, err
 		}

@@ -451,6 +451,8 @@ export interface ImageAttachment {
   caption?: string;
 }
 export interface Message {
+  /** Navigation snapshot at send time; not an original-text citation. */
+  readingLocation?: DocumentLocation;
   attachments?: ImageAttachment[];
   context?: string;
   references?: SourceReference[];

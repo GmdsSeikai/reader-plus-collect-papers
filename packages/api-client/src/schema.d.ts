@@ -1281,6 +1281,8 @@ export interface paths {
                         attachments?: string[];
                         prompt: string;
                         context: string;
+                        /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
+                        readingLocation?: components["schemas"]["DocumentLocation"];
                         references?: {
                             text: string;
                             /** @enum {unknown} */
@@ -3455,6 +3457,8 @@ export interface components {
             content: string;
             createdAt: string;
             context?: string;
+            /** @description Original reading position at send time, retained independently of current navigation and source citations. */
+            readingLocation?: components["schemas"]["DocumentLocation"];
             attachments?: {
                 id: string;
                 page: number;

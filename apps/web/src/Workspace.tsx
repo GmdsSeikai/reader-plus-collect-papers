@@ -39,7 +39,6 @@ import {
   type Annotation,
   type Document as ReaderDocument,
   type DocumentLocation,
-  type SourceReference,
   type ReaderAdapter,
   type ReaderSelection,
   type ReaderAnnotationTarget,
@@ -95,7 +94,8 @@ import { SourceReferences } from "./SourceReferences";
 import { ChatSession } from "./chat/chat-session";
 import { AssistantPanel } from "./chat/AssistantPanel";
 import { ImagePreview, imageLabel } from "./ImagePreview";
-import { contextReferences } from "./references";
+import { readingContext } from "./chat/reading-context";
+import { referenceLabel } from "./references";
 import { ReferenceNavigation } from "./reference-navigation";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AnnotationToolbar, annotationLabels } from "./AnnotationToolbar";
@@ -701,28 +701,19 @@ export function Workspace({
     abort.current = controller;
     const serial = ++sendSerial.current;
     try {
-      let context = selected
-        .map(
-          (s, i) => `[选区 ${i + 1} · ${locationLabel(s.location)}]\n${s.text}`,
-        )
-        .join("\n\n");
-      let references: SourceReference[] = selected.map(
-        ({ text, location }) => ({
-          text,
-          location,
-          kind: "selection",
-        }),
+      const captured = await readingContext(
+        adapter,
+        provider,
+        selected,
+        useSection,
+        attachments.length > 0,
       );
-      if (useSection || !context) {
-        const sourceLocation = adapter?.getLocation();
-        context = (await adapter?.getContext()) || "";
-        references = sourceLocation
-          ? contextReferences(context.slice(0, 21000), sourceLocation)
-          : [];
-      }
+      let { context } = captured;
       if (controller.signal.aborted) return;
       // The reader's marks go last so they never displace the passage itself.
-      const marks = annotationContext(annotations, 4000, palette);
+      const marks = captured.positionOnly
+        ? ""
+        : annotationContext(annotations, 4000, palette);
       const passage = context.slice(
         0,
         marks ? 21000 - marks.length - 2 : 21000,
@@ -733,7 +724,8 @@ export function Workspace({
         provider,
         prompt: question,
         context,
-        references,
+        references: captured.references,
+        readingLocation: captured.readingLocation,
         attachments,
       });
       if (serial !== sendSerial.current) return;
@@ -1411,9 +1403,11 @@ export function Workspace({
                         <ArrowLeft className="ml-auto rotate-180" />
                       </Button>
                       <p className="privacy-note">
-                        对话发送所选文字或当前
-                        {doc.type === "epub" ? "章节" : "页面"}给 AI。PDF
-                        图表按主 Agent 设置自动预处理。
+                        {(provider === "codex" || provider === "api") &&
+                        !images.length
+                          ? "对话附带阅读位置，AI 按需读取原文；主动引用的文字会随问题发送。"
+                          : `对话发送所选文字或当前${doc.type === "epub" ? "章节" : "页面"}给 AI。`}
+                        PDF 图表按主 Agent 设置自动预处理。
                       </p>
                     </div>
                   }
@@ -1424,12 +1418,23 @@ export function Workspace({
                     </>
                   )}
                   references={(message) => (
-                    <SourceReferences
-                      message={message}
-                      toc={toc}
-                      adapter={adapter}
-                      onNavigate={visitReference}
-                    />
+                    <>
+                      {message.readingLocation && (
+                        <span
+                          className="chat-reading-location"
+                          title="提问时的阅读位置"
+                        >
+                          <BookOpen size={12} aria-hidden="true" />
+                          {referenceLabel(message.readingLocation, toc)}
+                        </span>
+                      )}
+                      <SourceReferences
+                        message={message}
+                        toc={toc}
+                        adapter={adapter}
+                        onNavigate={visitReference}
+                      />
+                    </>
                   )}
                 />
                 <div className="chat-compose">

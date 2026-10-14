@@ -1,7 +1,13 @@
 import { api, chat, type ChatStreamEvent } from "@reader/api";
-import type { ImageAttachment, Message, SourceReference } from "@reader/core";
+import type {
+  DocumentLocation,
+  ImageAttachment,
+  Message,
+  SourceReference,
+} from "@reader/core";
 import { refreshAIConfig } from "../store";
 export type ChatInput = {
+  readingLocation?: DocumentLocation;
   provider: string;
   prompt: string;
   context: string;
@@ -60,6 +66,7 @@ const transport: ChatTransport = {
         input.attachments.map((image) => image.id),
         undefined,
         emit,
+        input.readingLocation,
       );
     } finally {
       // The server records failed primary attempts even when a fallback succeeds.

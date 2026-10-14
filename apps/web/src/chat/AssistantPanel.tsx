@@ -45,6 +45,7 @@ export function chatRows(state: ChatSnapshot): ChatRow[] {
           role: "user",
           content: pending.input.prompt,
           context: pending.input.context,
+          readingLocation: pending.input.readingLocation,
           references: pending.input.references,
           attachments: pending.input.attachments,
           createdAt: "",

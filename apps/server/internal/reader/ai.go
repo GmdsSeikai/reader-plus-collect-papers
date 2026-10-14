@@ -79,11 +79,12 @@ func apiProvider(c APIConnection) Provider {
 }
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider    string          `json:"provider"`
-		Prompt      string          `json:"prompt"`
-		Context     *string         `json:"context"`
-		References  json.RawMessage `json:"references"`
-		Attachments []string        `json:"attachments"`
+		Provider        string          `json:"provider"`
+		Prompt          string          `json:"prompt"`
+		Context         *string         `json:"context"`
+		ReadingLocation json.RawMessage `json:"readingLocation"`
+		References      json.RawMessage `json:"references"`
+		Attachments     []string        `json:"attachments"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -105,6 +106,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "文档不存在")
 		return
 	}
+	if len(req.ReadingLocation) > 0 && (len(req.ReadingLocation) > 16384 || !validLocation(req.ReadingLocation, d.Type)) {
+		fail(w, 400, "阅读位置无效")
+		return
+	}
 	ctx, finish, err := s.beginDocumentTask(r.Context(), d.ID)
 	if err != nil {
 		fail(w, 409, "文档正在删除")
@@ -112,5 +117,5 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer finish()
 	r = r.WithContext(ctx)
-	s.chatDocument(w, r, d.ID, d.Title, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments)
+	s.chatDocument(w, r, d.ID, d.Title, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments, req.ReadingLocation)
 }

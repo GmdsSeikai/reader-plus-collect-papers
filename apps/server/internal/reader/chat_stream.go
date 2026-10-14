@@ -114,7 +114,12 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 					if ctx.Err() != nil {
 						return
 					}
-					if finalErr = out.send("activity", map[string]string{"phase": "reading", "message": "全文索引未就绪，使用当前摘录"}); finalErr != nil {
+					message := "全文索引未就绪，使用当前摘录"
+					if in.Chat.CurrentText == "" {
+						message = "全文索引未就绪，当前未提供原文"
+						in.Prompt += "\n本轮没有可用的原文工具或新原文，阅读位置不能作为内容依据。问题需要核查原文时明确说明暂时无法读取，不猜测页面内容。"
+					}
+					if finalErr = out.send("activity", map[string]string{"phase": "reading", "message": message}); finalErr != nil {
 						return
 					}
 				} else {

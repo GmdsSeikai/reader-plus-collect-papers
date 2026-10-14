@@ -946,6 +946,14 @@ kbd {
   padding: 14px;
   margin: 10px 0;
 }
+.chat-reading-location {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
 .chat-user-references + .chat-question {
   margin-top: 10px;
 }
