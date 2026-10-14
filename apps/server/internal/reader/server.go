@@ -155,6 +155,8 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(204)
 	}))
 	mux.HandleFunc("GET /api/documents/{id}/search", s.search)
+	mux.HandleFunc("GET /api/documents/{id}/text", s.documentText)
+	mux.HandleFunc("GET /api/search", s.librarySearch)
 	mux.HandleFunc("GET /api/documents/{id}/messages", s.messages)
 	mux.HandleFunc("POST /api/documents/{id}/chat", s.chat)
 	mux.HandleFunc("GET /api/providers", s.providers)
@@ -307,6 +309,11 @@ func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, status, err.Error())
 		return
+	}
+	if status < 300 {
+		// Open windows reload the library when the revision changes, so files
+		// imported from the command line appear without a restart.
+		s.connectorRevision.Add(1)
 	}
 	respond(w, status, d)
 }

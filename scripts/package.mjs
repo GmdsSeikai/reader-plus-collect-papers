@@ -66,8 +66,10 @@ await cp(join(root, "apps/web/dist"), join(staging, "web"), {
   recursive: true,
 });
 await mkdir(join(staging, "bin"));
-const binary = `reader-server${process.platform === "win32" ? ".exe" : ""}`;
-await cp(join(desktop, "bin", binary), join(staging, "bin", binary));
+for (const name of ["reader-server", "reader"]) {
+  const binary = `${name}${process.platform === "win32" ? ".exe" : ""}`;
+  await cp(join(desktop, "bin", binary), join(staging, "bin", binary));
+}
 // onnxruntime-node ships other platforms too. Keep the native runner's ABI only.
 const nativeRoot = join(processor, "node_modules/onnxruntime-node/bin/napi-v6");
 for (const platform of await readdir(nativeRoot)) {
