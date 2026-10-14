@@ -16,28 +16,35 @@ const buildCommit = /^[a-f0-9]{40}$/.test(commitResult.stdout?.trim() || "")
 const platform =
   process.env.GOOS ||
   (process.platform === "win32" ? "windows" : process.platform);
-const output = new URL(
-  `../apps/desktop/bin/reader-server${platform === "windows" ? ".exe" : ""}`,
-  import.meta.url,
-);
+const exe = platform === "windows" ? ".exe" : "";
 await mkdir(new URL("../apps/desktop/bin/", import.meta.url), {
   recursive: true,
 });
-const result = spawnSync(
-  "go",
+// The app's sidecar and the `reader` command line that talks to it.
+for (const [name, ldflags] of [
   [
-    "build",
-    "-trimpath",
-    // Omit the symbol table and DWARF; panics keep function names and lines.
-    `-ldflags=-s -w -X main.readerVersion=${readerVersion} -X main.buildCommit=${buildCommit}`,
-    "-o",
-    fileURLToPath(output),
-    "./cmd/reader-server",
+    "reader-server",
+    `-X main.readerVersion=${readerVersion} -X main.buildCommit=${buildCommit}`,
   ],
-  {
-    cwd: new URL("../apps/server/", import.meta.url),
-    stdio: "inherit",
-  },
-);
-if (result.error) throw result.error;
-if (result.status !== 0) process.exit(result.status ?? 1);
+  ["reader", `-X main.readerVersion=${readerVersion}`],
+]) {
+  const output = new URL(`../apps/desktop/bin/${name}${exe}`, import.meta.url);
+  const result = spawnSync(
+    "go",
+    [
+      "build",
+      "-trimpath",
+      // Omit the symbol table and DWARF; panics keep function names and lines.
+      `-ldflags=-s -w ${ldflags}`,
+      "-o",
+      fileURLToPath(output),
+      `./cmd/${name}`,
+    ],
+    {
+      cwd: new URL("../apps/server/", import.meta.url),
+      stdio: "inherit",
+    },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"mime"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -224,11 +223,14 @@ func toolCompletion(ctx context.Context, c APIConnection, req completionRequest,
 	if tools != nil {
 		payload["tools"] = tools
 	}
-	if req.Effort != "" {
-		payload["reasoning_effort"] = req.Effort
-		if strings.HasPrefix(strings.ToLower(req.Model), "deepseek") {
-			payload["thinking"] = map[string]string{"type": "enabled"}
+	endpoint := resolveAPIEndpoint(c)
+	rule := reasoningRule(endpoint, req.Model, req.SupportedEfforts)
+	rule.apply(payload, endpoint.Protocol, req.Effort, rule.resolve(req.Effort))
+	if endpoint.Protocol == "anthropic" {
+		if len(tools) > 0 {
+			return toolCompletionResult{}, generationError(ErrorCapability, "Messages API 暂未适配文档工具调用")
 		}
+		return anthropicDocumentCompletion(ctx, c, payload, messages, callbacks...)
 	}
 	body, _ := json.Marshal(payload)
 	bodyLimit := 4 << 20
@@ -267,7 +269,7 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 		return GenerateResult{}, err
 	}
 	a.updateContextWindow(req.ContextWindow, 0, "api_models")
-	key := "chat-completions-v2\n" + c.URL + "\n" + c.Key + "\n" + req.Model + "\n" + req.Effort
+	key := "document-api-v3\n" + resolveAPIEndpoint(c).Protocol + "\n" + c.URL + "\n" + c.Key + "\n" + req.Model + "\n" + req.Effort
 	if req.Vision {
 		key += "\nvision"
 	}

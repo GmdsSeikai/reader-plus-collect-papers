@@ -51,7 +51,17 @@ func (c *codexChatCache) acquire(root, model string, in AIInput) (*codexSession,
 	executable, _ := exec.LookPath("codex")
 	key := executable + "\x00" + model + "\x00" + in.Effort + "\x00" + chat.Title
 	e := c.entry
-	if e != nil && (e.key != key || e.document != chat.DocumentID || e.savedID != chat.PriorID || e.pending != nil || e.turns >= 64 || e.sourceBytes >= 256000) {
+	// A reused session keeps every source it has seen, so count this turn's new
+	// sources too; a fresh session receives only the budgeted list.
+	unseen := 0
+	if e != nil {
+		for _, source := range chat.Sources {
+			if !e.seen[source.ID] {
+				unseen += len(source.Text)
+			}
+		}
+	}
+	if e != nil && (e.key != key || e.document != chat.DocumentID || e.savedID != chat.PriorID || e.pending != nil || e.turns >= 64 || e.sourceBytes+unseen > chatSourceBytes) {
 		c.discardLocked()
 		e = nil
 	}

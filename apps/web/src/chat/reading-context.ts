@@ -1,18 +1,19 @@
-import {
-  locationLabel,
-  type ReaderAdapter,
-  type ReaderSelection,
-  type SourceReference,
-} from "@reader/core";
-import { contextReferences } from "../references";
+import { type ReaderAdapter, type ReaderSelection } from "@reader/core";
+import { composeChatContext } from "./compose-context";
 
 /** Capture the sending position before any asynchronous page extraction. */
 export async function readingContext(
-  adapter: Pick<ReaderAdapter, "getLocation" | "getContext"> | undefined,
+  adapter:
+    | Pick<ReaderAdapter, "getLocation" | "getContext" | "getChapterContext">
+    | undefined,
   provider: string,
   selected: ReaderSelection[],
   useSection: boolean,
   hasImages: boolean,
+  options: Pick<
+    Parameters<typeof composeChatContext>[0],
+    "includeChapter" | "marks" | "confirmOversize"
+  > = {},
 ) {
   const position = adapter?.getLocation();
   const readingLocation = position
@@ -34,23 +35,25 @@ export async function readingContext(
           endBlockId: position.endBlockId,
         }
     : undefined;
-  const quotes = useSection ? [] : selected;
-  let context = quotes
-    .map((s, i) => `[选区 ${i + 1} · ${locationLabel(s.location)}]\n${s.text}`)
-    .join("\n\n");
-  let references: SourceReference[] = quotes.map(({ text, location }) => ({
-    text,
-    location: structuredClone(location),
-    kind: "selection",
-  }));
   const documentAgent =
     !hasImages && (provider === "codex" || provider === "api");
-  if (!context && !documentAgent) {
-    context = (await adapter?.getContext()) || "";
-    references = readingLocation
-      ? contextReferences(context.slice(0, 21000), readingLocation)
-      : [];
-  }
+  const quotes = structuredClone(useSection ? [] : selected);
+  const { context, references } = await composeChatContext({
+    ...options,
+    adapter:
+      adapter && readingLocation
+        ? {
+            ...adapter,
+            getLocation: () => readingLocation,
+            getContext: () => adapter.getContext(),
+            getChapterContext: adapter.getChapterContext?.bind(adapter),
+          }
+        : undefined,
+    selected: quotes,
+    // Explicit preferences and quotations keep main's chapter context. For
+    // an Agent, the page action only supplies its captured reading position.
+    useSection: !documentAgent && (useSection || hasImages),
+  });
   return {
     context,
     references,

@@ -196,6 +196,14 @@ func TestConnectorOriginRestriction(t *testing.T) {
 	if w.Code != 403 {
 		t.Fatalf("other extension origin: %d", w.Code)
 	}
+	for _, origin := range []string{connectorExtensionOrigin, connectorStoreExtensionOrigin} {
+		r.Header.Set("Origin", origin)
+		w = httptest.NewRecorder()
+		s.ConnectorHandler().ServeHTTP(w, r)
+		if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != origin {
+			t.Fatalf("%s: %d %q", origin, w.Code, w.Header().Get("Access-Control-Allow-Origin"))
+		}
+	}
 }
 
 func TestConnectorOriginlessBrowserRequestNeedsCredential(t *testing.T) {

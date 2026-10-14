@@ -63,6 +63,9 @@ it.each(["codex", "api", "claude", "kimi"])(
     const reader = {
       getLocation: () => ({ type: "pdf" as const, page: 8 }),
       getContext: vi.fn(async () => "unrelated page"),
+      getChapterContext: vi.fn(async () => [
+        { text: "full chapter", location: { type: "pdf" as const, page: 2 } },
+      ]),
     };
     const result = await readingContext(
       reader,
@@ -73,6 +76,7 @@ it.each(["codex", "api", "claude", "kimi"])(
     );
     selected[0].location = { type: "pdf", page: 3 };
     expect(result.context).toContain("exact selected sentence");
+    expect(result.context).toContain("full chapter");
     expect(result.references).toEqual([
       {
         text: "exact selected sentence",
@@ -86,8 +90,8 @@ it.each(["codex", "api", "claude", "kimi"])(
 );
 
 it.each([
-  ["claude", false],
-  ["kimi", false],
+  ["claude", true],
+  ["kimi", true],
   ["codex", true],
   ["api", true],
 ] as const)(
@@ -102,11 +106,52 @@ it.each([
       }),
     };
     const result = await readingContext(reader, provider, [], false, hasImages);
-    expect(result.context).toBe("page four text");
+    expect(result.context).toContain("page four text");
     expect(result.readingLocation).toMatchObject({ page: 4 });
     expect(result.references[0]).toMatchObject({
       kind: "section",
       location: { page: 4 },
     });
+  },
+);
+
+it.each(["codex", "api", "claude", "kimi"])(
+  "%s honors explicit chapter preference",
+  async (provider) => {
+    const getChapterContext = vi.fn(async () => [
+      {
+        text: "requested chapter",
+        location: { type: "pdf" as const, page: 3 },
+      },
+    ]);
+    const result = await readingContext(
+      {
+        getLocation: () => ({ type: "pdf", page: 3 }),
+        getContext: async () => "page",
+        getChapterContext,
+      },
+      provider,
+      [],
+      false,
+      false,
+      { includeChapter: true },
+    );
+    expect(result.context).toContain("requested chapter");
+    expect(getChapterContext).toHaveBeenCalledOnce();
+  },
+);
+it.each(["claude", "kimi"])(
+  "%s keeps main's default without implicit page text",
+  async (provider) => {
+    const getContext = vi.fn(async () => "page");
+    const result = await readingContext(
+      { getLocation: () => ({ type: "pdf", page: 3 }), getContext },
+      provider,
+      [],
+      false,
+      false,
+    );
+    expect(result.context).toBe("");
+    expect(getContext).not.toHaveBeenCalled();
   },
 );

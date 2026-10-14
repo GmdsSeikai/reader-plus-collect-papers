@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { DiagnosticExport } from "./DiagnosticExport";
+import { CommandLineSettings } from "./CommandLineSettings";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
@@ -57,6 +58,7 @@ import {
   TabsTrigger,
 } from "@reader/ui/components/tabs";
 import { HighlightColorsEditor } from "./HighlightColorsEditor";
+import { ProxySettings } from "./ProxySettings";
 import {
   primaryLibraryMode,
   updateLibraryPreferences,
@@ -480,7 +482,7 @@ export function Settings({
             )}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Agent 连接、显示、阅读与论文库
+            Agent 连接、显示、阅读、诊断与论文库
           </DialogDescription>
         </DialogHeader>
         {apiDetails && (
@@ -608,6 +610,11 @@ export function Settings({
             className="settings-panel"
             keepMounted
           >
+            {window.readerDesktop?.proxySettings && (
+              <div className="mb-6">
+                <ProxySettings open={open} />
+              </div>
+            )}
             <section>
               <h3 className="mb-3 text-sm font-medium">本地日志</h3>
               <p className="mb-4 text-xs leading-5 text-muted-foreground">
@@ -737,6 +744,22 @@ export function Settings({
             <section className="mb-6">
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox
+                  checked={theme.autoCopySelection === true}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoCopySelection: !!checked })
+                  }
+                />
+                <span>
+                  自动复制选中文字
+                  <span className="block text-xs text-muted-foreground">
+                    选中文字或点击高亮、划线等批注时，自动复制到剪贴板
+                  </span>
+                </span>
+              </label>
+            </section>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
                   checked={theme.linkTranslationAnnotations !== false}
                   onCheckedChange={(checked) =>
                     setTheme({ linkTranslationAnnotations: !!checked })
@@ -850,17 +873,6 @@ export function Settings({
                       保存
                     </Button>
                   </div>
-                  {journalRank.hasKey && (
-                    <Button
-                      className="mt-2"
-                      size="xs"
-                      variant="ghost"
-                      disabled={journalSaving}
-                      onClick={() => void saveJournalRank({}, "")}
-                    >
-                      移除 SecretKey
-                    </Button>
-                  )}
                   <div className="mt-4 flex items-center gap-2 text-xs">
                     <span id="journal-rank-filter-label">指标筛选</span>
                     <Select
@@ -946,6 +958,37 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="agent" className="settings-panel" keepMounted>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  aria-label="提问时附带本章原文"
+                  checked={config?.chatIncludeChapter === true}
+                  disabled={!config || saving || aiModelSaving || loading}
+                  onCheckedChange={async (checked) => {
+                    setSaving(true);
+                    try {
+                      const latest = await api.aiConfig();
+                      setAIConfig(
+                        await api.saveAIConfig({
+                          ...latest,
+                          chatIncludeChapter: !!checked,
+                        }),
+                      );
+                    } catch (error) {
+                      toast.error((error as Error).message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                />
+                <span>
+                  提问时附带本章原文
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    普通提问默认附带标题和已有摘要。引用或解释选区时，同时附带选区所在的完整章节。历史对话仍会保留。
+                  </span>
+                </span>
+              </label>
+            </section>
             <section>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-sm font-medium">Agent 连接</h3>
@@ -1078,6 +1121,7 @@ export function Settings({
                 数据目录。发送的选区或章节会交给对应服务。
               </p>
             </section>
+            <CommandLineSettings open={open} />
           </TabsContent>
         </Tabs>
       </DialogContent>

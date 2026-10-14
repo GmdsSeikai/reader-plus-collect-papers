@@ -15,6 +15,11 @@ import (
 type ErrorKind string
 
 const (
+	ErrorPermission     ErrorKind = "permission"
+	ErrorModel          ErrorKind = "model"
+	ErrorBilling        ErrorKind = "billing"
+	ErrorContext        ErrorKind = "context_limit"
+	ErrorContent        ErrorKind = "content_policy"
 	ErrorConfiguration  ErrorKind = "configuration"
 	ErrorAuthentication ErrorKind = "authentication"
 	ErrorCapability     ErrorKind = "capability"
@@ -290,6 +295,7 @@ func (g *GenerationService) Generate(ctx context.Context, in AIInput, interactiv
 func (g *GenerationService) attempt(ctx context.Context, provider string, in AIInput, emit func(ProviderEvent) error) (result GenerateResult, err error) {
 	started := time.Now()
 	attemptID := id()
+	ctx = context.WithValue(ctx, apiAttemptKey{}, attemptID)
 	slog.Info("generation.start", "attemptId", attemptID, "requestId", requestID(ctx), "provider", provider, "vision", len(in.images()) > 0)
 	defer func() {
 		level := slog.LevelInfo

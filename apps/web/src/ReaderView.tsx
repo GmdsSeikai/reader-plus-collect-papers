@@ -61,6 +61,9 @@ export function ReaderView({
         blockFocus: (block) => {
           if (!disposed) latest.current.events.blockFocus?.(block);
         },
+        annotationHover: (target) => {
+          if (!disposed) latest.current.events.annotationHover?.(target);
+        },
         annotation: (target) => {
           if (!disposed) latest.current.events.annotation?.(target);
         },

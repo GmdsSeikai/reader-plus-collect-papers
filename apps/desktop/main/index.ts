@@ -21,10 +21,14 @@ import {
   type ReaderLinkTarget,
 } from "../../../packages/reader-core/src/reader-link";
 import { writeClipboardText } from "./clipboard";
-import { childProxyEnvironment } from "./proxy";
+import {
+  ProxySettingsService,
+  electronProxyConfiguration,
+} from "./proxy-settings";
 import { startUpdateService } from "./update-service";
 import { devIsolation } from "./dev-isolation";
 import { startDiagnosticService } from "./diagnostic-service";
+import { commandLineStatus, setCommandLine } from "./command-line";
 const isolation = devIsolation({
   isPackaged: app.isPackaged,
   env: process.env,
@@ -43,24 +47,30 @@ let window: BrowserWindow | undefined;
 let quitting = false;
 let closing = false;
 let flushed = false;
+let restartRequested = false;
+let proxySettings: ProxySettingsService;
 const root = resolve(__dirname, "../..");
+function bundledBinary(name: "reader-server" | "reader") {
+  const file = process.platform === "win32" ? `${name}.exe` : name;
+  return app.isPackaged
+    ? join(process.resourcesPath, "bin", file)
+    : join(root, "desktop", "bin", file);
+}
+function serverBinary() {
+  return bundledBinary("reader-server");
+}
+const commandLineHost = () => ({
+  platform: process.platform,
+  packaged: app.isPackaged,
+  binary: bundledBinary("reader"),
+  env: process.env,
+});
 async function startServer() {
-  const childEnv = await childProxyEnvironment(process.env);
+  const childEnv = proxySettings.activeEnvironment;
   serverToken = randomBytes(32).toString("hex");
   diagnostics?.logs.secrets.push(serverToken);
   diagnostics?.record("server.start_requested");
-  const binary = app.isPackaged
-    ? join(
-        process.resourcesPath,
-        "bin",
-        process.platform === "win32" ? "reader-server.exe" : "reader-server",
-      )
-    : join(
-        root,
-        "desktop",
-        "bin",
-        process.platform === "win32" ? "reader-server.exe" : "reader-server",
-      );
+  const binary = serverBinary();
   const web = app.isPackaged
     ? join(process.resourcesPath, "web")
     : join(root, "web", "dist");
@@ -259,6 +269,13 @@ app
         ]);
       else app.setAsDefaultProtocolClient(READER_SCHEME);
     }
+    proxySettings = await ProxySettingsService.open(
+      app.getPath("userData"),
+      process.env,
+    );
+    await session.defaultSession.setProxy(
+      electronProxyConfiguration(proxySettings.activeSettings),
+    );
     const url = await startServer();
     session.defaultSession.setPermissionRequestHandler(
       (contents, permission, callback, details) => {
@@ -369,6 +386,7 @@ app
           });
           if (result.response === 0) {
             closing = false;
+            restartRequested = false;
             return;
           }
         }
@@ -413,6 +431,41 @@ app
     ipcMain.handle("reader:clipboard-write", (event, text: unknown) =>
       writeClipboardText(event, text, window?.webContents, url),
     );
+    const settingsSender = (event: Electron.IpcMainInvokeEvent) => {
+      if (
+        event.sender !== window?.webContents ||
+        event.senderFrame !== window.webContents.mainFrame ||
+        new URL(event.senderFrame.url).origin !== url
+      )
+        throw new Error("Invalid sender");
+    };
+    ipcMain.handle("reader:proxy-settings", (event) => {
+      settingsSender(event);
+      return proxySettings.state();
+    });
+    ipcMain.handle("reader:save-proxy-settings", (event, value: unknown) => {
+      settingsSender(event);
+      return proxySettings.save(value);
+    });
+    ipcMain.handle("reader:check-proxy", (event, value: unknown) => {
+      settingsSender(event);
+      return proxySettings.check(value, serverBinary());
+    });
+    ipcMain.handle("reader:command-line", (event) => {
+      settingsSender(event);
+      return commandLineStatus(commandLineHost());
+    });
+    ipcMain.handle("reader:set-command-line", (event, installed: unknown) => {
+      settingsSender(event);
+      if (typeof installed !== "boolean") throw new Error("Invalid request");
+      return setCommandLine(commandLineHost(), installed);
+    });
+    ipcMain.handle("reader:restart", (event) => {
+      settingsSender(event);
+      if (closing || restartRequested) return;
+      restartRequested = true;
+      app.quit();
+    });
     ipcMain.handle("reader:appearance", (event, appearance: unknown) => {
       if (
         event.sender !== window?.webContents ||
@@ -558,8 +611,13 @@ app.on("before-quit", (event) => {
     return;
   }
   quitting = true;
+  if (restartRequested) {
+    restartRequested = false;
+    app.relaunch();
+  }
   diagnostics?.record("desktop.stopping");
   updateService?.stop();
+  proxySettings?.stop();
   child?.kill();
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const)

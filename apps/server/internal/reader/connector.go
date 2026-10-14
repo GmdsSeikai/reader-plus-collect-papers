@@ -24,6 +24,13 @@ import (
 
 const ConnectorPort = "17841"
 const connectorExtensionOrigin = "chrome-extension://afojfnpkeokahhniipldpdpecaljdnbe"
+const connectorStoreExtensionOrigin = "chrome-extension://dfhdcomjdkaiajiibbkonbonjlnkdjlg"
+
+// The development build pins its ID with a manifest key; the Chrome Web Store
+// build cannot carry that key and is assigned its own ID.
+func connectorOriginAllowed(origin string) bool {
+	return origin == connectorExtensionOrigin || origin == connectorStoreExtensionOrigin
+}
 
 func (s *Server) SetConnectorAvailable(available bool) {
 	s.connectorAvailable = available
@@ -84,7 +91,7 @@ func (s *Server) ConnectorHandler() http.Handler {
 			return
 		}
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != connectorExtensionOrigin {
+		if origin != "" && !connectorOriginAllowed(origin) {
 			fail(w, 403, "invalid origin")
 			return
 		}

@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reader.local/server/internal/diagnostics"
+	"reader.local/server/internal/networkprobe"
 	"reader.local/server/internal/reader"
 	"runtime"
 	"syscall"
@@ -29,9 +30,14 @@ func main() {
 	port := flag.String("port", "17840", "loopback port, 0 for automatic")
 	web := flag.String("web", "", "built web directory")
 	connector := flag.Bool("connector", true, "enable Reader Connector listener")
+	probeNetwork := flag.Bool("probe-network", false, "check ChatGPT reachability and exit without opening a library")
 	logs := flag.String("logs", "", "diagnostic log directory")
 	session := flag.String("session", "", "diagnostic session ID")
 	flag.Parse()
+	if *probeNetwork {
+		_ = json.NewEncoder(os.Stdout).Encode(networkprobe.Run(context.Background()))
+		return
+	}
 	root, err := filepath.Abs(*data)
 	if err != nil {
 		log.Fatal(err)
@@ -92,6 +98,12 @@ func main() {
 	stopProcessing := server.StartProcessing(runContext)
 	defer stopProcessing()
 	httpServer := &http.Server{BaseContext: func(net.Listener) context.Context { return runContext }, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+	removeDiscovery, discoveryErr := reader.WriteDiscovery(root, reader.Discovery{URL: "http://" + listener.Addr().String(), Token: token, PID: os.Getpid(), Version: readerVersion})
+	if discoveryErr != nil {
+		log.Printf("command line discovery unavailable: %v", discoveryErr)
+	} else {
+		defer removeDiscovery()
+	}
 	ready, _ := json.Marshal(map[string]string{"url": "http://" + listener.Addr().String(), "token": token})
 	fmt.Println(string(ready))
 	stop := make(chan os.Signal, 1)

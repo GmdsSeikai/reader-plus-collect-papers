@@ -9,6 +9,23 @@ interface Window {
     ) => void;
     diagnosticSettings?: (settings: unknown) => void;
     checkForUpdates: () => Promise<void>;
+    onUpdateProgress?: (
+      callback: (
+        progress: import("@reader/core").UpdateProgress | null,
+      ) => void,
+    ) => () => void;
+    proxySettings?: () => Promise<import("@reader/core").ProxySettingsState>;
+    saveProxySettings?: (
+      settings: import("@reader/core").ProxySettings,
+    ) => Promise<import("@reader/core").ProxySettingsState>;
+    checkProxy?: (
+      settings: import("@reader/core").ProxySettings,
+    ) => Promise<import("@reader/core").ProxyCheckResult>;
+    restart?: () => Promise<void>;
+    commandLine?: () => Promise<import("@reader/core").CommandLineStatus>;
+    setCommandLine?: (
+      installed: boolean,
+    ) => Promise<import("@reader/core").CommandLineStatus>;
     writeClipboardText: (text: string) => Promise<void>;
     setAppearance: (
       appearance: "light" | "sepia" | "dark" | "system",

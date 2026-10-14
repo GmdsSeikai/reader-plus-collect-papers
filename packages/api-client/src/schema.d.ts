@@ -1209,6 +1209,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Readable text in reading order for the command line. PDFs have text only after layout parsing; units are pages for a PDF and reading-order chapters for an EPUB. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: number;
+                    to?: number;
+                    side?: "source" | "translation" | "both";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentText"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Search the source and translated text of every document. A block matches when it contains all whitespace-separated terms, ignoring case. */
+        get: {
+            parameters: {
+                query: {
+                    q: string;
+                    library?: "books" | "papers";
+                    document?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LibrarySearchHit"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/documents/{id}/messages": {
         parameters: {
             query?: never;
@@ -3454,6 +3555,42 @@ export interface components {
             /** @description IDs removed when overlapping underlines were merged into the returned annotation. */
             replacedIds?: string[];
         };
+        DocumentText: {
+            documentId: string;
+            /** @enum {string} */
+            type: "epub" | "pdf";
+            /** @description Page count of a PDF or chapter count of an EPUB. */
+            units: number;
+            /** @description False for a PDF without a layout index; it then has no blocks. */
+            parsed: boolean;
+            /** @description Parsed pages of a partly parsed book; absent means all. */
+            parsedPages?: number[];
+            blocks: components["schemas"]["TextBlock"][];
+        };
+        TextBlock: {
+            id: string;
+            /** @description Page or chapter, starting at 1. */
+            unit: number;
+            /** @description EPUB chapter resource. */
+            href?: string;
+            label: string;
+            /** @description Source text, or a figure caption; empty on the translation side. */
+            text: string;
+            /** @description Completed translation, when requested. */
+            translation?: string;
+        };
+        LibrarySearchHit: {
+            documentId: string;
+            title: string;
+            /** @enum {string} */
+            type: "epub" | "pdf";
+            unit: number;
+            href?: string;
+            blockId: string;
+            /** @enum {string} */
+            side: "source" | "translation";
+            excerpt: string;
+        };
         SearchResult: {
             id: string;
             excerpt: string;
@@ -3620,6 +3757,11 @@ export interface components {
             toolSchemaVersion?: string;
         };
         APIConnection: {
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            protocol: "auto" | "openai" | "anthropic";
             url: string;
             model: string;
             key?: string;
@@ -3629,6 +3771,14 @@ export interface components {
             /** @description Provider-reported context capacity; omitted when unavailable */
             contextWindow?: number;
             maxOutputTokens?: number;
+            effortInfo?: {
+                /** @enum {string} */
+                mode: "levels" | "budget" | "fixed" | "unknown";
+                note: string;
+                mappings?: {
+                    [key: string]: string;
+                };
+            };
             id: string;
             name: string;
             description: string;
@@ -3644,6 +3794,8 @@ export interface components {
         /** @enum {string} */
         ReasoningEffort: "low" | "medium" | "high" | "max";
         AIConfig: {
+            /** @description Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value. */
+            chatIncludeChapter?: boolean;
             primary: string;
             models: {
                 [key: string]: string;

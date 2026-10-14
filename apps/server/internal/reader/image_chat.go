@@ -65,7 +65,8 @@ func (s *Server) blockImage(w http.ResponseWriter, r *http.Request, documentID, 
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	http.ServeContent(w, r, blockID+".png", time.Time{}, bytes.NewReader(data))
 }
-func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, documentID, title, provider, question, textContext string, references json.RawMessage, ids []string, readingLocation json.RawMessage) {
+func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, document Document, provider, question, textContext string, references json.RawMessage, ids []string, readingLocation json.RawMessage) {
+	documentID := document.ID
 	if len(ids) > 4 {
 		fail(w, 400, "每次最多附加 4 张图片")
 		return
@@ -118,7 +119,7 @@ func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, documentID
 		fail(w, 500, "无法读取聊天历史")
 		return
 	}
-	prompt, chat := makeChatInput(documentID, title, question, textContext, descriptions.String(), messages)
+	prompt, chat := makeChatInput(documentID, document.Title, document.Metadata.Abstract, question, textContext, descriptions.String(), messages)
 	chat.ReadingLocation = readingLocation
 	prompt += readingLocationPrompt(readingLocation)
 	if err := s.Store.saveMessage(Message{DocumentID: documentID, Role: "user", Content: question, Context: textContext, References: references, Attachments: attachments, ReadingLocation: readingLocation}); err != nil {

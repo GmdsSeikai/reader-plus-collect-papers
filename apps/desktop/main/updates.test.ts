@@ -47,7 +47,9 @@ describe("release boundaries", () => {
         "arm64",
       ),
     ).toThrow();
-    expect(() => selectRelease(release(), "0.1.0", "darwin", "x64")).toThrow();
+    expect(selectRelease(release(), "0.1.0", "darwin", "x64").status).toBe(
+      "pending",
+    );
     const bad = release();
     bad.assets[0].browser_download_url = "https://example.com/payload.dmg";
     expect(() => selectRelease(bad, "0.1.0", "darwin", "arm64")).toThrow();
@@ -90,6 +92,22 @@ describe("release boundaries", () => {
     expect(() =>
       selectRelease(withArchive, "0.1.0", "darwin", "arm64"),
     ).toThrow();
+  });
+  it("selects Intel installers and archives without using Apple Silicon assets", () => {
+    const intel = release();
+    for (const ext of ["dmg", "zip"]) {
+      const name = `Reader-0.2.0-mac-intel-x64.${ext}`;
+      intel.assets.push({
+        name,
+        state: "uploaded",
+        browser_download_url: `https://github.com/cynicalight/reader/releases/download/v0.2.0/${name}`,
+      });
+    }
+    const result = selectRelease(intel, "0.1.0", "darwin", "x64");
+    expect(result.status === "available" && result.update).toMatchObject({
+      installer: "Reader-0.2.0-mac-intel-x64.dmg",
+      archive: { installer: "Reader-0.2.0-mac-intel-x64.zip" },
+    });
   });
   it("retries a release whose build assets are not ready", () => {
     expect(

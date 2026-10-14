@@ -9,6 +9,9 @@ import (
 )
 
 func probeAPIDocumentTools(ctx context.Context, c APIConnection, model string) (string, error) {
+	if resolveAPIEndpoint(c).Protocol != "openai" {
+		return "unsupported", generationError(ErrorCapability, "Messages API 暂未适配文档工具调用")
+	}
 	req := completionRequest{Model: model}
 	tool := map[string]any{"type": "function", "function": map[string]any{"name": "reader_probe", "description": "Get the hidden random nonce. Call this to obtain it.", "parameters": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}}
 	messages := []toolCompletionMessage{{Role: "user", Content: "Call reader_probe once, then reply with its exact returned nonce. Do not guess."}}
@@ -60,7 +63,7 @@ func (s *Server) testDocumentToolConnection(w http.ResponseWriter, r *http.Reque
 func (s *Server) ensureDocumentTools(ctx context.Context, connection APIConnection, model string, activity func(string, string, string) error) (Capability, error) {
 	c := s.aiConfig()
 	key := apiCapabilityKey(model)
-	if c.API.URL != connection.URL || c.API.Key != connection.Key || !capable(c, key, false) {
+	if c.API.URL != connection.URL || c.API.Key != connection.Key || c.API.Protocol != connection.Protocol || !capable(c, key, false) {
 		return Capability{}, generationError(ErrorConfiguration, "模型配置已改变，请重新提问")
 	}
 	cap := c.Capabilities[key]

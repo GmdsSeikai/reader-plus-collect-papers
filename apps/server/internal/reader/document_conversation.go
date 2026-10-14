@@ -150,6 +150,12 @@ func (a *documentAgent) conversationInput(in AIInput, initial bool) string {
 		b.WriteString("文档概览（派生资料）：\n" + jsonText(a.overviewContext()) + "\n")
 		c.OverviewVersion = version
 	}
+	for _, source := range in.Chat.Sources {
+		if source.ID == in.Chat.SummarySource && !c.SeenSources[source.ID] {
+			b.WriteString("文章摘要（派生资料，不等于原文）：\n" + source.Text + "\n")
+			c.SeenSources[source.ID] = true
+		}
+	}
 	if in.Chat.CurrentText != "" {
 		key := sourceKey(in.Chat.CurrentText)
 		if !c.SeenSources[key] {

@@ -2,7 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AIConfig, AgentModel } from "@reader/core";
+import type { AIConfig, AgentModel, ProxySettingsState } from "@reader/core";
 import { api } from "@reader/api";
 import { toast } from "sonner";
 import { Settings } from "./Settings";
@@ -70,6 +70,7 @@ const openAPI = async () =>
   );
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("PointerEvent", MouseEvent);
   vi.clearAllMocks();
   config = {
     primary: "api",
@@ -132,7 +133,48 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete window.readerDesktop;
   vi.unstubAllGlobals();
+});
+
+it("groups proxy settings and log export under diagnostics without a network tab", async () => {
+  const exportLogs = vi.fn(async () => true);
+  window.readerDesktop = {
+    platform: "darwin",
+    proxySettings: vi.fn(async (): Promise<ProxySettingsState> => ({
+      settings: { mode: "manual", host: "127.0.0.1", port: 7890 },
+      restartRequired: false,
+    })),
+    saveProxySettings: vi.fn(),
+    checkProxy: vi.fn(),
+    restart: vi.fn(),
+    exportDiagnostics: exportLogs,
+    checkForUpdates: vi.fn(),
+    writeClipboardText: vi.fn(),
+    setAppearance: vi.fn(),
+    importFiles: vi.fn(),
+    importLargePapers: vi.fn(),
+    showDocumentFile: vi.fn(),
+    openDocumentFile: vi.fn(),
+    openExternal: vi.fn(),
+    onBeforeClose: vi.fn(),
+    onLibraryChanged: vi.fn(),
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const tabs = Array.from(
+    host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  );
+  expect(tabs.map((tab) => tab.textContent)).not.toContain("网络");
+  const diagnostics = tabs.find((tab) => tab.textContent === "诊断")!;
+  await act(async () => diagnostics.click());
+  const panel = input("代理地址").closest('[role="tabpanel"]')!;
+  expect(panel.getAttribute("aria-labelledby")).toBe(diagnostics.id);
+  expect(panel.textContent).toContain("chatgpt.com/robots.txt");
+  const exportButton = Array.from(
+    panel.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((button) => button.textContent === "导出全部日志")!;
+  await act(async () => exportButton.click());
+  expect(exportLogs).toHaveBeenCalledOnce();
 });
 it("saves the API endpoint and key, then tests the new connection", async () => {
   await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
@@ -148,6 +190,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com",
+        protocol: "auto",
         model: "",
         key: "sk-test",
         hasKey: false,
@@ -194,6 +237,7 @@ it("keeps the saved key when changing only the API endpoint and rechecks models"
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com/v1",
+        protocol: "auto",
         model: "",
         key: undefined,
         hasKey: true,
@@ -206,6 +250,7 @@ it("keeps the saved key when changing only the API endpoint and rechecks models"
   expect(api.testAI).toHaveBeenCalledTimes(4);
   expect(config.api).toEqual({
     url: "https://api.deepseek.com/v1",
+    protocol: "auto",
     model: "",
     hasKey: true,
   });
@@ -255,4 +300,49 @@ it("adds and removes a model ID by hand and checks it", async () => {
   );
   expect(config.apiModels).toEqual([]);
   expect(host.textContent).not.toContain("my-model");
+});
+
+it("keeps selection auto-copy opt-in and lets reading settings toggle it", async () => {
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  const previous = useReaderStore.getState().theme;
+  useReaderStore.setState({
+    theme: { ...previous, autoCopySelection: undefined },
+  });
+  try {
+    await act(async () =>
+      root.render(<Settings open onOpenChange={() => {}} />),
+    );
+    const reading = [
+      ...host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent === "阅读")!;
+    await act(async () => reading.click());
+    const label = [...host.querySelectorAll("label")].find((node) =>
+      node.textContent?.includes("自动复制选中文字"),
+    )!;
+    const checkbox =
+      label.querySelector<HTMLButtonElement>('[role="checkbox"]')!;
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    await act(async () => checkbox.click());
+    expect(useReaderStore.getState().theme.autoCopySelection).toBe(true);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await act(async () => checkbox.click());
+    expect(useReaderStore.getState().theme.autoCopySelection).toBe(false);
+  } finally {
+    await act(async () => useReaderStore.setState({ theme: previous }));
+  }
+});
+
+it("defaults chapter context off and persists both toggle states without rechecking models", async () => {
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const toggle = () =>
+    host.querySelector<HTMLElement>('[aria-label="提问时附带本章原文"]')!;
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  await act(async () => toggle().click());
+  expect(config.chatIncludeChapter).toBe(true);
+  expect(useReaderStore.getState().aiConfig?.chatIncludeChapter).toBe(true);
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  await act(async () => toggle().click());
+  expect(config.chatIncludeChapter).toBe(false);
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(api.testAI).not.toHaveBeenCalled();
 });
