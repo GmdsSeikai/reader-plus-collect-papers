@@ -525,7 +525,7 @@ func (s *Store) claimImport(requestID string, fromStatuses []string, fields map[
 	}
 	sets := []string{}
 	args := []any{}
-	for _, key := range []string{"status", "error", "actual_sha256", "cache_rel_path", "document_id", "library", "confirm_pages", "expected_sha256"} {
+	for _, key := range []string{"status", "error", "condition", "actual_sha256", "cache_rel_path", "document_id", "library", "confirm_pages", "expected_sha256"} {
 		if v, ok := fields[key]; ok {
 			sets = append(sets, "\""+key+"\"=?")
 			args = append(args, v)
