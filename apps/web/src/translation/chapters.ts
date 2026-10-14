@@ -38,3 +38,32 @@ export function chapterRange(
   const next = starts.find((start) => start > current);
   return { fromPage, toPage: next ? Math.max(fromPage, next - 1) : pages };
 }
+
+/**
+ * The section around a quoted page, sent as chat context. Outline entries two
+ * levels deep split parts into chapters; without an outline the parsed
+ * headings mark sections, and failing both only the page itself is sent.
+ */
+export function quoteSectionRange(
+  toc: TOCItem[],
+  headingPages: number[],
+  page: number,
+  pages: number,
+): PageRange {
+  const entries = toc.length === 1 ? toc[0].children : toc;
+  const outline = entries
+    .flatMap((item) => [item, ...item.children])
+    .flatMap((item) =>
+      item.location.type === "pdf" && !item.id.startsWith("page-")
+        ? [item.location.page]
+        : [],
+    );
+  const starts = [...new Set(outline.length ? outline : headingPages)].sort(
+    (a, b) => a - b,
+  );
+  const current = Math.min(Math.max(1, page), pages);
+  if (!starts.length) return { fromPage: current, toPage: current };
+  const fromPage = starts.filter((start) => start <= current).at(-1) ?? 1;
+  const next = starts.find((start) => start > current);
+  return { fromPage, toPage: next ? Math.max(fromPage, next - 1) : pages };
+}
