@@ -4,6 +4,185 @@
  */
 
 export interface paths {
+    "/api/overviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job states */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OverviewJob"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Persisted source-versioned overview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        regenerate: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Existing overview or job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Overview queued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job canceled; translation unaffected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/diagnostics/events": {
         parameters: {
             query?: never;
@@ -3082,6 +3261,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OverviewContent: {
+            summary: string;
+            findings: {
+                text: string;
+                blockIds: string[];
+            }[];
+            limitations: {
+                text: string;
+                blockIds: string[];
+            }[];
+            terms: string[];
+        };
+        OverviewSection: {
+            key: string;
+            title: string;
+            firstBlockId: string;
+            lastBlockId: string;
+            location: {
+                [key: string]: unknown;
+            };
+            passageCount: number;
+            content: components["schemas"]["OverviewContent"];
+        };
+        DocumentOverview: {
+            documentId: string;
+            corpusRevision: string;
+            compilerVersion: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            content?: components["schemas"]["OverviewContent"];
+            sections: components["schemas"]["OverviewSection"][];
+            coverage: {
+                status: string;
+                totalUnits: number;
+                searchableUnits: number;
+                missingRanges: string[];
+                warnings: string[];
+            };
+            compiledPassages: number;
+            totalPassages: number;
+            updatedAt: string;
+            error?: string;
+        };
+        OverviewJob: {
+            documentId: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            error: string;
+            compiledPassages: number;
+            totalPassages: number;
+        };
         JournalRankConfig: {
             enabled: boolean;
             hasKey: boolean;

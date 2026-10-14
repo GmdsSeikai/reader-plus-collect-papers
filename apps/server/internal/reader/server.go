@@ -40,6 +40,8 @@ type Server struct {
 	annotationHistory      []annotationChange
 	codexChat              codexChatCache
 	corpusMu               sync.Mutex
+	overviewMu             sync.Mutex
+	overviewActive         map[string]context.CancelFunc
 	Store                  *Store
 	Token                  string
 	Web                    string
@@ -122,6 +124,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/documents/{id}/note", s.saveDocumentNote)
 	mux.HandleFunc("POST /api/documents/{id}/metadata/lookup", s.lookupMetadata)
 	mux.HandleFunc("GET /api/processing", s.processingList)
+	mux.HandleFunc("GET /api/overviews", s.listOverviewStatuses)
+	mux.HandleFunc("GET /api/documents/{id}/overview", s.getDocumentOverview)
+	mux.HandleFunc("POST /api/documents/{id}/overview", s.requestDocumentOverview)
+	mux.HandleFunc("DELETE /api/documents/{id}/overview/job", s.cancelDocumentOverview)
 	mux.HandleFunc("POST /api/documents/{id}/processing", s.retryProcessing)
 	mux.HandleFunc("GET /api/documents/{id}/assistance", s.getAssistance)
 	mux.HandleFunc("POST /api/documents/{id}/assistance", s.setAssistance)
@@ -184,6 +190,19 @@ func (s *Server) Handler() http.Handler {
 		var v map[string]any
 		if !decode(w, r, &v) {
 			return
+		}
+		if value, exists := v["documentContextTokens"]; exists {
+			n, ok := value.(float64)
+			if !ok || n < 8192 || n > 1048576 || n != float64(int(n)) {
+				fail(w, 400, "文档上下文预算须为 8192—1048576 的整数")
+				return
+			}
+		}
+		if value, exists := v["autoGenerateOverview"]; exists {
+			if _, ok := value.(bool); !ok {
+				fail(w, 400, "自动概要设置必须为布尔值")
+				return
+			}
 		}
 		if value, exists := v["autoTranslatePDF"]; exists {
 			if _, ok := value.(bool); !ok {
@@ -449,6 +468,9 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 		p := initialDocumentProcessing(d, settings)
 		b, _ := json.Marshal(p)
 		_, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
+		if err == nil {
+			err = queueImportedOverview(tx, d.ID, settings)
+		}
 	}
 	if err == nil {
 		_, err = tx.Exec("INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued')", d.ID)

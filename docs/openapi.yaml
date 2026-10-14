@@ -4,6 +4,195 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/overviews":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Overview job states",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/OverviewJob",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Persisted source-versioned overview",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                { "regenerate": { "type": "boolean" } },
+                              "required": ["regenerate"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Existing overview or job",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "202":
+                    {
+                      "description": "Overview queued",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview/job":
+        {
+          "delete":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "204":
+                    {
+                      "description": "Overview job canceled; translation unaffected",
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/diagnostics/events":
         {
           "post":
@@ -3516,6 +3705,184 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "OverviewContent":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "summary": { "type": "string" },
+                  "findings":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "limitations":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "terms": { "type": "array", "items": { "type": "string" } },
+                },
+              "required": ["summary", "findings", "limitations", "terms"],
+            },
+          "OverviewSection":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "key": { "type": "string" },
+                  "title": { "type": "string" },
+                  "firstBlockId": { "type": "string" },
+                  "lastBlockId": { "type": "string" },
+                  "location":
+                    { "type": "object", "additionalProperties": true },
+                  "passageCount": { "type": "integer" },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                },
+              "required":
+                [
+                  "key",
+                  "title",
+                  "firstBlockId",
+                  "lastBlockId",
+                  "location",
+                  "passageCount",
+                  "content",
+                ],
+            },
+          "DocumentOverview":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "compilerVersion": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                  "sections":
+                    {
+                      "type": "array",
+                      "items":
+                        { "$ref": "#/components/schemas/OverviewSection" },
+                    },
+                  "coverage":
+                    {
+                      "type": "object",
+                      "properties":
+                        {
+                          "status": { "type": "string" },
+                          "totalUnits": { "type": "integer" },
+                          "searchableUnits": { "type": "integer" },
+                          "missingRanges":
+                            { "type": "array", "items": { "type": "string" } },
+                          "warnings":
+                            { "type": "array", "items": { "type": "string" } },
+                        },
+                      "required":
+                        [
+                          "status",
+                          "totalUnits",
+                          "searchableUnits",
+                          "missingRanges",
+                          "warnings",
+                        ],
+                    },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                  "updatedAt": { "type": "string" },
+                  "error": { "type": "string" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "corpusRevision",
+                  "compilerVersion",
+                  "status",
+                  "sections",
+                  "coverage",
+                  "compiledPassages",
+                  "totalPassages",
+                  "updatedAt",
+                ],
+            },
+          "OverviewJob":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "status",
+                  "error",
+                  "compiledPassages",
+                  "totalPassages",
+                ],
+            },
+
           "JournalRankConfig":
             {
               "type": "object",

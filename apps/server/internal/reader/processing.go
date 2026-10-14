@@ -152,6 +152,9 @@ func (s *Store) enqueueDocument(d Document) error {
 	_, e := s.DB.Exec("INSERT OR IGNORE INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
 	if e == nil {
 		e = s.queueDocumentCorpus(d.ID)
+		if e == nil {
+			e = queueImportedOverview(s.DB, d.ID, value)
+		}
 	}
 	return e
 }
@@ -281,6 +284,9 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 		return cancel
 	}
 	var workers sync.WaitGroup
+	if _, e := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued' WHERE status='running'"); e != nil {
+		log.Printf("cannot recover document overviews: %v", e)
+	}
 	if _, e := s.Store.DB.Exec("UPDATE document_corpus_jobs SET status='queued' WHERE status='running'"); e != nil {
 		log.Printf("cannot recover document indexing: %v", e)
 	}
@@ -400,12 +406,17 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 	workers.Add(1)
 	go func() { defer workers.Done(); s.corpusWorker(ctx) }()
 	workers.Add(1)
+	go func() { defer workers.Done(); s.overviewWorker(ctx) }()
+	workers.Add(1)
 	go func() { defer workers.Done(); s.classificationWorker(ctx) }()
 	workers.Add(1)
 	go func() { defer workers.Done(); s.metadataWorker(ctx) }()
 	return func() { cancel(); workers.Wait() }
 }
 func (s *Server) wakeProcessing() {
+	if _, err := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued',error='' WHERE status='waiting'"); err != nil {
+		log.Printf("cannot wake overview jobs: %v", err)
+	}
 	s.processingMu.Lock()
 	defer s.processingMu.Unlock()
 	// Reset only jobs blocked on a missing connection, never interrupted/failed jobs.

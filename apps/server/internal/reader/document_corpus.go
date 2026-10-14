@@ -151,6 +151,20 @@ func (s *Server) documentCorpus(ctx context.Context, documentID string, preparin
 	if _, err = tx.ExecContext(ctx, "INSERT INTO document_corpora(document_id,fingerprint,revision,body) VALUES(?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET fingerprint=excluded.fingerprint,revision=excluded.revision,body=excluded.body", d.ID, fingerprint, c.Revision, string(raw)); err != nil {
 		return nil, err
 	}
+	// Only refresh existing overviews automatically. Opening an old library
+	// must not enqueue first-time paid generation for every historical document.
+	var settings string
+	_ = tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='reader'").Scan(&settings)
+	var prefs struct {
+		Enabled bool `json:"autoGenerateOverview"`
+	}
+	if json.Unmarshal([]byte(settings), &prefs) == nil && prefs.Enabled {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO document_overview_jobs(document_id,job_id,status,error)
+ SELECT ?,?,'queued','' WHERE EXISTS(SELECT 1 FROM document_overviews WHERE document_id=?)
+ ON CONFLICT(document_id) DO UPDATE SET job_id=excluded.job_id,status='queued',error='' WHERE document_overview_jobs.status NOT IN ('running','queued')`, d.ID, id(), d.ID); err != nil {
+			return nil, err
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}

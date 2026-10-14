@@ -14,6 +14,8 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 import type {
   Document,
+  DocumentOverview,
+  OverviewJob,
   TagBoard,
   DocumentLocation,
   Annotation,
@@ -279,6 +281,20 @@ export const api = {
     request<Processing>(`/api/documents/${id}/assistance`, {
       method: "POST",
       body: JSON.stringify({ action }),
+    }),
+  overviewJobs: () => request<OverviewJob[]>("/api/overviews"),
+  documentOverview: (id: string) =>
+    request<DocumentOverview>(
+      `/api/documents/${encodeURIComponent(id)}/overview`,
+    ),
+  generateOverview: (id: string, regenerate = false) =>
+    request<DocumentOverview>(
+      `/api/documents/${encodeURIComponent(id)}/overview`,
+      { method: "POST", body: JSON.stringify({ regenerate }) },
+    ),
+  cancelOverview: (id: string) =>
+    request<void>(`/api/documents/${encodeURIComponent(id)}/overview/job`, {
+      method: "DELETE",
     }),
   processing: () => request<Processing[]>("/api/processing"),
   process: (id: string) =>

@@ -276,6 +276,9 @@ export interface ReaderAnnotationTarget {
 export type Appearance = "light" | "sepia" | "dark" | "system";
 export interface ReaderTheme {
   autoTranslatePDF?: boolean;
+  autoGenerateOverview?: boolean;
+  /** Estimated total document-agent context; output and history reserve is included. */
+  documentContextTokens?: number;
   appearance?: Appearance;
   mode: "light" | "sepia" | "dark";
   fontSize: number;
@@ -302,6 +305,8 @@ export interface HighlightColor {
 }
 export const defaultTheme: ReaderTheme = {
   autoTranslatePDF: true,
+  autoGenerateOverview: false,
+  documentContextTokens: 65536,
   appearance: "system",
   mode: "light",
   fontSize: 1.15,
@@ -626,4 +631,51 @@ export interface EPUBChapterLink {
 export interface EPUBChapters {
   chapters: EPUBChapter[];
   toc: EPUBChapterLink[] | null;
+}
+
+export interface OverviewContent {
+  summary: string;
+  findings: { text: string; blockIds: string[] }[];
+  limitations: { text: string; blockIds: string[] }[];
+  terms: string[];
+}
+export interface OverviewSection {
+  key: string;
+  title: string;
+  firstBlockId: string;
+  lastBlockId: string;
+  location: DocumentLocation;
+  passageCount: number;
+  content: OverviewContent;
+}
+export type OverviewStatus =
+  | "missing"
+  | "queued"
+  | "running"
+  | "waiting"
+  | "complete"
+  | "partial"
+  | "failed"
+  | "canceled"
+  | "stale";
+export interface OverviewJob {
+  documentId: string;
+  status: OverviewStatus;
+  error?: string;
+  compiledPassages: number;
+  totalPassages: number;
+}
+export interface DocumentOverview extends OverviewJob {
+  corpusRevision: string;
+  compilerVersion: string;
+  content?: OverviewContent;
+  sections: OverviewSection[];
+  coverage: {
+    status: string;
+    totalUnits: number;
+    searchableUnits: number;
+    missingRanges: string[];
+    warnings: string[];
+  };
+  updatedAt: string;
 }
