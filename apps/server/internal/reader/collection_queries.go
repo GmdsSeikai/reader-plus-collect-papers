@@ -576,3 +576,19 @@ func (s *Store) ActiveCollectionImports() ([]CollectionImportRequest, error) {
 	}
 	return out, rows.Err()
 }
+
+// LatestCollectionImport returns the newest request for a paper across all
+// states so the detail view can restore its import status after switching
+// pages. Ordering is created_at then request_id for exact ties.
+func (s *Store) LatestCollectionImport(arxivID string) (CollectionImportRequest, error) {
+	var req CollectionImportRequest
+	var snapshot string
+	err := s.DB.QueryRow(`SELECT request_id,arxiv_id,download_version,metadata_snapshot,status,expected_sha256,actual_sha256,cache_rel_path,document_id,library,confirm_pages,error,"condition",created_at,updated_at
+		FROM collection_imports WHERE arxiv_id=? ORDER BY created_at DESC, request_id DESC LIMIT 1`, arxivID).
+		Scan(&req.RequestID, &req.ArXivID, &req.DownloadVersion, &snapshot, &req.Status, &req.ExpectedSHA256, &req.ActualSHA256, &req.CacheRelPath, &req.DocumentID, &req.Library, &req.ConfirmPages, &req.Error, &req.Condition, &req.CreatedAt, &req.UpdatedAt)
+	if err != nil {
+		return req, err
+	}
+	req.MetadataSnapshot = json.RawMessage(snapshot)
+	return req, nil
+}

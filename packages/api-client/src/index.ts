@@ -540,6 +540,7 @@ export const collectionApi = {
       citation: CollectionCitation;
       analyses: CollectionAnalysis[];
       analysisJob: CollectionAnalysisJob | null;
+      latestImport: CollectionImportRequest | null;
     }>(`/api/collection/candidates/${encodeURIComponent(id)}`),
   analyze: (id: string) =>
     request<CollectionAnalysisJob>(`/api/collection/candidates/${encodeURIComponent(id)}/analysis`, {

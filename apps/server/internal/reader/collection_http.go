@@ -19,13 +19,32 @@ func (s *Server) collection() *CollectionManager {
 	return s.collectionManager
 }
 
+// collectionTaskView adds the derived open-run pointer to list items. The
+// run is never persisted on the task row.
+type collectionTaskView struct {
+	CollectionTask
+	ActiveRun *CollectionRun `json:"activeRun"`
+}
+
+func (s *Server) taskView(task CollectionTask) collectionTaskView {
+	v := collectionTaskView{CollectionTask: task}
+	if run, err := s.Store.OpenCollectionRun(task.ID); err == nil {
+		v.ActiveRun = &run
+	}
+	return v
+}
+
 func (s *Server) collectionTasksList(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.Store.CollectionTasks()
 	if err != nil {
 		collectionFail(w, 500, "query-invalid", "无法读取任务")
 		return
 	}
-	respond(w, 200, tasks)
+	views := make([]collectionTaskView, 0, len(tasks))
+	for _, task := range tasks {
+		views = append(views, s.taskView(task))
+	}
+	respond(w, 200, views)
 }
 
 type collectionTaskBody struct {
@@ -286,7 +305,16 @@ func (s *Server) collectionCandidateGet(w http.ResponseWriter, r *http.Request) 
 		collectionFail(w, 500, "analysis-unavailable", "无法读取分析命令")
 		return
 	}
-	respond(w, 200, map[string]any{"candidate": c, "citation": cit, "analyses": analyses, "analysisJob": job})
+	// latestImport derives from existing requests so the detail view can
+	// restore import status after switching pages; absent records stay null.
+	var latestImport *CollectionImportRequest
+	if req, err := s.Store.LatestCollectionImport(c.ArXivID); err == nil {
+		latestImport = &req
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		collectionFail(w, 500, "query-invalid", "无法读取导入状态")
+		return
+	}
+	respond(w, 200, map[string]any{"candidate": c, "citation": cit, "analyses": analyses, "analysisJob": job, "latestImport": latestImport})
 }
 
 func (s *Server) collectionCandidatePatch(w http.ResponseWriter, r *http.Request) {

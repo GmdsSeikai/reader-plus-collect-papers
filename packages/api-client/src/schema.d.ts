@@ -2869,6 +2869,7 @@ export interface paths {
                             citation?: components["schemas"]["CollectionCitation"];
                             analyses?: components["schemas"]["CollectionAnalysis"][];
                             analysisJob?: components["schemas"]["CollectionAnalysisJob"] | null;
+                            latestImport?: components["schemas"]["CollectionImportRequest"] | null;
                         };
                     };
                 };
@@ -3764,6 +3765,7 @@ export interface components {
             nextRunAt?: string;
             createdAt?: string;
             updatedAt?: string;
+            activeRun?: components["schemas"]["CollectionRun"] | null;
         };
         CollectionRun: {
             id: string;
