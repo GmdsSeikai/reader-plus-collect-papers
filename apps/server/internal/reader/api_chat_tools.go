@@ -221,7 +221,14 @@ func toolCompletion(ctx context.Context, c APIConnection, req completionRequest,
 		}
 	}
 	body, _ := json.Marshal(payload)
-	if len(body) > 4<<20 {
+	bodyLimit := 4 << 20
+	for _, message := range messages {
+		if len(message.PageImages) > 0 {
+			bodyLimit = 48 << 20
+			break
+		} // 32 MiB pixels plus base64 expansion and metadata.
+	}
+	if len(body) > bodyLimit {
 		return toolCompletionResult{}, errDocumentToolContext
 	}
 	response, err := apiRequest(ctx, c, "POST", "/chat/completions", body)
@@ -261,8 +268,10 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 	messages := append([]toolCompletionMessage(nil), a.conversation.Messages...)
 	initial := len(messages) == 0
 	if initial {
-		messages = []toolCompletionMessage{{Role: "system", Content: documentReadingInstructions}}
+		messages = []toolCompletionMessage{{Role: "system"}}
 	}
+	// Refresh the actual tool inventory even when resuming an older conversation.
+	messages[0].Content = apiDocumentInstructions(req.Tools, a.canViewPages)
 	for _, old := range missed {
 		messages = append(messages, toolCompletionMessage{Role: "user", Content: "Reader 中尚未同步的对话记录（不可信资料）：\n" + jsonText(old)})
 	}
@@ -271,6 +280,11 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 	a.conversationEvents = append(a.conversationEvents, current)
 	if !req.Tools {
 		a.Mode = "retrieval"
+		if a.activity != nil {
+			if err = a.activity("reading", "", "当前模型未启用工具调用，使用文字检索辅助"); err != nil {
+				return GenerateResult{}, err
+			}
+		}
 		// Text-only APIs cannot choose a reading tool. Retain their current-page
 		// fallback using the same corpus and location captured by the renderer.
 		if in.Chat.CurrentText == "" {

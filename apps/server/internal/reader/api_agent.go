@@ -135,6 +135,13 @@ func (a apiAgentAdapter) Stream(ctx context.Context, req GenerateRequest, emit f
 		return GenerateResult{}, err
 	}
 	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && a.task == taskChat && len(req.Input.images()) == 0 {
+		agent := req.Input.Chat.Agent
+		capability, err := agent.server.ensureDocumentTools(ctx, a.conn, completion.Model, agent.activity)
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		completion.Tools = capability.Tools == "passed"
+		completion.Vision = capability.Vision
 		return streamAPIDocumentChat(ctx, a.conn, completion, req.Input, emit)
 	}
 	return streamCompletion(ctx, a.conn, completion, req.Input, emit)
