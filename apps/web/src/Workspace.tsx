@@ -702,7 +702,7 @@ export function Workspace({
     abort.current = controller;
     const serial = ++sendSerial.current;
     try {
-      const { context, references } = await composeChatContext({
+      const { context, references, notice } = await composeChatContext({
         adapter,
         selected,
         includeChapter: aiConfig?.chatIncludeChapter,
@@ -710,6 +710,7 @@ export function Workspace({
         marks: annotationContext(annotations, 4000, palette),
       });
       if (controller.signal.aborted) return;
+      if (notice) toast.info(notice);
       if (!directImage) setPrompt("");
       await session.send({
         provider,
