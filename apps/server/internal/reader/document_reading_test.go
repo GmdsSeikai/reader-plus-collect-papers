@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -240,4 +241,43 @@ func TestDocumentReadingSoftStopPreservesFailuresAndEvidence(t *testing.T) {
 		t.Fatal("user cancellation was masked", err)
 	}
 
+}
+
+func TestPartialCorpusDisclosesGapsWithoutBudgetStop(t *testing.T) {
+	s, a := prepareConversationFixture(t)
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			respond(w, 200, map[string]any{"data": []any{map[string]string{"id": "test"}}})
+			return
+		}
+		calls++
+		if calls == 1 {
+			writeReadingCalls(w, 1, a.corpus.Passages[1].ID, "")
+		} else {
+			writeConversationReply(w, "依据原文回答 [S2]", "")
+		}
+	}))
+	defer upstream.Close()
+	configureDocumentAPI(t, s, upstream.URL)
+	if err := os.WriteFile(filepath.Join(s.Store.Root, "cache", "doc", "b.xhtml"), []byte("<html><body></body></html>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	a.corpus, err = s.documentCorpus(t.Context(), "doc", nil)
+	if err != nil || a.corpus.Coverage.Status != "partial" {
+		t.Fatal("fixture did not lose a chapter", err)
+	}
+
+	r := conversationRequest(t, s, "api", "请核对原文")
+	if strings.Count(r.Body.String(), "event: done") != 1 {
+		t.Fatal(r.Body)
+	}
+	if !strings.Contains(r.Body.String(), "无法检索的原文范围") || strings.Contains(r.Body.String(), "因结束阅读") {
+		t.Fatal("gap notice missing or malformed", r.Body)
+	}
+	history, err := s.Store.chatHistory("doc")
+	if err != nil || len(history) != 2 || !strings.Contains(history[1].Content, "无法检索的原文范围") {
+		t.Fatal("notice not saved", err, history)
+	}
 }

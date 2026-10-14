@@ -74,10 +74,13 @@ func (a *documentAgent) finishDocumentAnswer(ctx context.Context, result Generat
 	overviewOnly := len(a.Evidence) == 0 && a.overview != nil
 	providedSources := a.providedSources
 	a.mu.Unlock()
-	if reason == "" && !overviewOnly {
+	if reason == "" && !overviewOnly && !partial {
 		return result, nil
 	}
-	notice := fmt.Sprintf("\n\n阅读范围：本次依据 %d 段已读原文作答，可检索原文共 %d 段。本轮因%s结束阅读。", read, total, reason)
+	notice := fmt.Sprintf("\n\n阅读范围：本次依据 %d 段已读原文作答，可检索原文共 %d 段。", read, total)
+	if reason != "" {
+		notice += "本轮因" + reason + "结束阅读。"
+	}
 	if overviewOnly {
 		notice = "\n\n依据已保存的文档概要作答，本轮未逐段核对原文。"
 		if providedSources {
