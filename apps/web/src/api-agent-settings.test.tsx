@@ -332,17 +332,7 @@ it("keeps selection auto-copy opt-in and lets reading settings toggle it", async
   }
 });
 
-it("defaults chapter context off and persists both toggle states without rechecking models", async () => {
+it("does not expose automatic chapter context", async () => {
   await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
-  const toggle = () =>
-    host.querySelector<HTMLElement>('[aria-label="提问时附带本章原文"]')!;
-  expect(toggle().getAttribute("aria-checked")).toBe("false");
-  await act(async () => toggle().click());
-  expect(config.chatIncludeChapter).toBe(true);
-  expect(useReaderStore.getState().aiConfig?.chatIncludeChapter).toBe(true);
-  expect(toggle().getAttribute("aria-checked")).toBe("true");
-  await act(async () => toggle().click());
-  expect(config.chatIncludeChapter).toBe(false);
-  expect(toggle().getAttribute("aria-checked")).toBe("false");
-  expect(api.testAI).not.toHaveBeenCalled();
+  expect(host.querySelector('[aria-label="提问时附带本章原文"]')).toBeNull();
 });

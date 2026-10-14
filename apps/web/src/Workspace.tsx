@@ -97,11 +97,6 @@ import { AssistantPanel } from "./chat/AssistantPanel";
 import { ImagePreview, imageLabel } from "./ImagePreview";
 import { readingContext } from "./chat/reading-context";
 import { referenceLabel } from "./references";
-import {
-  type OversizeChoice,
-  type OversizeContext,
-} from "./chat/compose-context";
-import { ContextSizeDialog } from "./chat/ContextSizeDialog";
 import { ReferenceNavigation } from "./reference-navigation";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AnnotationToolbar, annotationLabels } from "./AnnotationToolbar";
@@ -109,7 +104,6 @@ import { useAnnotationUndo } from "./useAnnotationUndo";
 import { useAnnotationDeletion } from "./useAnnotationDeletion";
 import {
   activeAnnotation,
-  annotationContext,
   applySavedAnnotation,
   highlightPalette,
 } from "./annotations";
@@ -385,10 +379,6 @@ export function Workspace({
   const chat = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const sendSerial = useRef(0);
   const [sending, setSending] = useState(false);
-  const [oversize, setOversize] = useState<{
-    request: OversizeContext;
-    resolve: (choice: OversizeChoice) => void;
-  }>();
   const [pageInput, setPageInput] = useState("");
   const abort = useRef<AbortController | null>(null);
   const searchSerial = useRef(0);
@@ -720,12 +710,6 @@ export function Workspace({
         selected,
         useSection,
         attachments.length > 0,
-        {
-          includeChapter: aiConfig?.chatIncludeChapter,
-          marks: annotationContext(annotations, 4000, palette),
-          confirmOversize: (request) =>
-            new Promise((resolve) => setOversize({ request, resolve })),
-        },
       );
       const { context } = captured;
       if (controller.signal.aborted) return;
@@ -1430,9 +1414,8 @@ export function Workspace({
                         <ArrowLeft className="ml-auto rotate-180" />
                       </Button>
                       <p className="privacy-note">
-                        {aiConfig?.chatIncludeChapter
-                          ? "提问时附带标题、已有摘要和本章原文。"
-                          : "对话附带阅读位置，AI 按需读取原文；引用选区时补充所在章节。"}
+                        主动引用的文字和图片随问题发送；文档 Agent
+                        按需检索、读取原文。
                       </p>
                     </div>
                   }
@@ -1706,13 +1689,6 @@ export function Workspace({
       <ProcessingUsageDialog
         document={usageOpen ? doc : null}
         onClose={() => setUsageOpen(false)}
-      />
-      <ContextSizeDialog
-        request={oversize?.request}
-        onChoose={(choice) => {
-          oversize?.resolve(choice);
-          setOversize(undefined);
-        }}
       />
     </div>
   );

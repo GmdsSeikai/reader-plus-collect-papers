@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -152,30 +154,6 @@ func TestChatSummaryIsSeparateFromExplicitSources(t *testing.T) {
 	}
 }
 
-func TestChatChapterPreferencePersists(t *testing.T) {
-	s := testServer(t)
-	if s.aiConfig().ChatIncludeChapter != nil {
-		t.Fatal("chapter context should default off")
-	}
-	for _, enabled := range []bool{true, false} {
-		c := AIConfig{ChatIncludeChapter: &enabled}
-		if r := request(t, s, "PUT", "/api/ai/config", configJSON(c)); r.Code != 200 {
-			t.Fatal(r.Body)
-		}
-		if r := request(t, s, "PUT", "/api/ai/config", strings.NewReader(`{"models":{}}`)); r.Code != 200 {
-			t.Fatal(r.Body)
-		}
-		var got AIConfig
-		r := request(t, s, "GET", "/api/ai/config", nil)
-		if err := json.Unmarshal(r.Body.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		if got.ChatIncludeChapter == nil || *got.ChatIncludeChapter != enabled {
-			t.Fatalf("preference lost after omitted update: %+v", got.ChatIncludeChapter)
-		}
-	}
-}
-
 func TestEveryChatKindIncludesTitleAndSummary(t *testing.T) {
 	for _, kind := range []string{"ordinary", "selection", "image"} {
 		t.Run(kind, func(t *testing.T) {
@@ -234,5 +212,28 @@ func TestChatAcceptsConfirmedLongContextUpToHardCap(t *testing.T) {
 	r = request(t, s, "POST", "/api/documents/"+d.ID+"/chat", body(strings.Repeat("证", chatContextBytes/3+1)))
 	if r.Code != 400 {
 		t.Fatal(r.Code, r.Body)
+	}
+}
+
+func TestRetiredChapterPreferenceDoesNotChangeSavedConnections(t *testing.T) {
+	s := testServer(t)
+	file := filepath.Join(s.Store.Root, "ai-connections.json")
+	raw := `{"config":{"primary":"api","models":{"api":"chosen-model"},"api":{"url":"https://example.test/v1","key":"fixture-key"},"chatIncludeChapter":true}}`
+	if err := os.WriteFile(file, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := s.aiConfig()
+	if c.Primary != "api" || c.Models["api"] != "chosen-model" || c.API.Key != "fixture-key" {
+		t.Fatal("retired field discarded configured connection")
+	}
+	if err := s.writeAIConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(file)
+	if err != nil || strings.Contains(string(saved), "chatIncludeChapter") {
+		t.Fatal("retired field persisted", err)
+	}
+	if c = s.aiConfig(); c.API.Key != "fixture-key" || c.Models["api"] != "chosen-model" {
+		t.Fatal("connection changed on save")
 	}
 }

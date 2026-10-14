@@ -2,81 +2,79 @@ import { expect, it, vi } from "vitest";
 import type { EPUBLocation, PDFLocation, ReaderSelection } from "@reader/core";
 import { readingContext } from "./reading-context";
 
-it.each(["codex", "api"])(
-  "%s sends a PDF position without extracting or attaching page text",
+it.each(["codex", "api", "claude", "kimi"])(
+  "%s never extracts page text for ordinary questions or image attachments",
   async (provider) => {
-    const position: PDFLocation = {
-      type: "pdf",
-      page: 5,
-      y: 0.6,
-      quote: "not an explicit quote",
+    for (const hasImages of [false, true]) {
+      const position: PDFLocation = {
+        type: "pdf",
+        page: 5,
+        y: 0.6,
+        quote: "not an explicit quote",
+      };
+      const reader = {
+        getLocation: () => position,
+        getContext: vi.fn(async () => "page text"),
+      };
+      const pending = readingContext(reader, provider, [], false, hasImages);
+      position.page = 9;
+      const result = await pending;
+      expect(result).toEqual({
+        context: "",
+        references: [],
+        readingLocation: { type: "pdf", page: 5, x: undefined, y: 0.6 },
+      });
+      expect(result.readingLocation).not.toHaveProperty("quote");
+      expect(reader.getContext).not.toHaveBeenCalled();
+    }
+  },
+);
+
+it.each(["codex", "api"])(
+  "%s sends a native EPUB position for explicit chapter questions",
+  async (provider) => {
+    const position: EPUBLocation = {
+      type: "epub",
+      href: "ch2.xhtml#section",
+      progression: 0.7,
+      locator: '{"href":"ch2.xhtml","type":"application/xhtml+xml"}',
+      blockId: "b7",
     };
     const reader = {
       getLocation: () => position,
-      getContext: vi.fn(async () => "page text"),
+      getContext: vi.fn(async () => "whole chapter"),
     };
-    const pending = readingContext(reader, provider, [], false, false);
-    position.page = 9;
-    const result = await pending;
-    expect(result).toMatchObject({
-      context: "",
-      references: [],
-      positionOnly: true,
-      readingLocation: { type: "pdf", page: 5, y: 0.6 },
+    const result = await readingContext(reader, provider, [], true, false);
+    position.href = "ch3.xhtml";
+    expect(result.readingLocation).toMatchObject({
+      href: "ch2.xhtml#section",
+      progression: 0.7,
+      locator: position.locator,
+      blockId: "b7",
     });
-    expect(result.readingLocation).not.toHaveProperty("quote");
+    expect(result.context).toBe("");
+    expect(result.references).toEqual([]);
     expect(reader.getContext).not.toHaveBeenCalled();
   },
 );
 
-it("keeps an EPUB native position for explicit current-chapter questions without attaching the chapter", async () => {
-  const position: EPUBLocation = {
-    type: "epub",
-    href: "ch2.xhtml#section",
-    progression: 0.7,
-    locator: '{"href":"ch2.xhtml","type":"application/xhtml+xml"}',
-    blockId: "b7",
-  };
-  const reader = {
-    getLocation: () => position,
-    getContext: vi.fn(async () => "whole chapter"),
-  };
-  const result = await readingContext(reader, "codex", [], true, false);
-  position.href = "ch3.xhtml";
-  expect(result.readingLocation).toMatchObject({
-    href: "ch2.xhtml#section",
-    progression: 0.7,
-    locator: position.locator,
-    blockId: "b7",
-  });
-  expect(result.context).toBe("");
-  expect(result.references).toEqual([]);
-  expect(reader.getContext).not.toHaveBeenCalled();
-});
-
 it.each(["codex", "api", "claude", "kimi"])(
-  "%s sends explicitly selected text and freezes its source",
+  "%s sends only the selected passage without requiring parsed chapter text",
   async (provider) => {
     const selected: ReaderSelection[] = [
       { text: "exact selected sentence", location: { type: "pdf", page: 2 } },
     ];
     const reader = {
       getLocation: () => ({ type: "pdf" as const, page: 8 }),
-      getContext: vi.fn(async () => "unrelated page"),
-      getChapterContext: vi.fn(async () => [
-        { text: "full chapter", location: { type: "pdf" as const, page: 2 } },
-      ]),
+      getContext: vi.fn(async () => {
+        throw new Error("unparsed chapter");
+      }),
     };
-    const result = await readingContext(
-      reader,
-      provider,
-      selected,
-      false,
-      false,
-    );
+    const pending = readingContext(reader, provider, selected, false, false);
+    selected[0].text = "changed selection";
     selected[0].location = { type: "pdf", page: 3 };
-    expect(result.context).toContain("exact selected sentence");
-    expect(result.context).toContain("full chapter");
+    const result = await pending;
+    expect(result.context).toBe("[选区 · 第 2 页]\nexact selected sentence");
     expect(result.references).toEqual([
       {
         text: "exact selected sentence",
@@ -84,19 +82,13 @@ it.each(["codex", "api", "claude", "kimi"])(
         kind: "selection",
       },
     ]);
-    expect(result.positionOnly).toBe(false);
     expect(reader.getContext).not.toHaveBeenCalled();
   },
 );
 
-it.each([
-  ["claude", true],
-  ["kimi", true],
-  ["codex", true],
-  ["api", true],
-] as const)(
-  "preserves automatic text for legacy/image path %s (images=%s)",
-  async (provider, hasImages) => {
+it.each(["claude", "kimi"])(
+  "%s still reads text for an explicitly requested page summary",
+  async (provider) => {
     const position: PDFLocation = { type: "pdf", page: 4 };
     const reader = {
       getLocation: () => position,
@@ -105,8 +97,8 @@ it.each([
         return "page four text";
       }),
     };
-    const result = await readingContext(reader, provider, [], false, hasImages);
-    expect(result.context).toContain("page four text");
+    const result = await readingContext(reader, provider, [], true, false);
+    expect(result.context).toBe("page four text");
     expect(result.readingLocation).toMatchObject({ page: 4 });
     expect(result.references[0]).toMatchObject({
       kind: "section",
@@ -115,43 +107,21 @@ it.each([
   },
 );
 
-it.each(["codex", "api", "claude", "kimi"])(
-  "%s honors explicit chapter preference",
-  async (provider) => {
-    const getChapterContext = vi.fn(async () => [
-      {
-        text: "requested chapter",
-        location: { type: "pdf" as const, page: 3 },
-      },
-    ]);
-    const result = await readingContext(
-      {
-        getLocation: () => ({ type: "pdf", page: 3 }),
-        getContext: async () => "page",
-        getChapterContext,
-      },
-      provider,
-      [],
+it("keeps long explicit quotations intact and rejects oversized UTF-8 input", async () => {
+  const quote: ReaderSelection = {
+    text: "文".repeat(60000) + "末尾",
+    location: { type: "pdf", page: 2 },
+  };
+  const result = await readingContext(undefined, "api", [quote], false, false);
+  expect(result.context.endsWith(quote.text)).toBe(true);
+  expect(result.references[0].text).toBe(quote.text);
+  await expect(
+    readingContext(
+      undefined,
+      "api",
+      [{ ...quote, text: "文".repeat(90000) }],
       false,
       false,
-      { includeChapter: true },
-    );
-    expect(result.context).toContain("requested chapter");
-    expect(getChapterContext).toHaveBeenCalledOnce();
-  },
-);
-it.each(["claude", "kimi"])(
-  "%s keeps main's default without implicit page text",
-  async (provider) => {
-    const getContext = vi.fn(async () => "page");
-    const result = await readingContext(
-      { getLocation: () => ({ type: "pdf", page: 3 }), getContext },
-      provider,
-      [],
-      false,
-      false,
-    );
-    expect(result.context).toBe("");
-    expect(getContext).not.toHaveBeenCalled();
-  },
-);
+    ),
+  ).rejects.toThrow("256 KB");
+});

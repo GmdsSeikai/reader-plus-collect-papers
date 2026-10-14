@@ -1,19 +1,21 @@
-import { type ReaderAdapter, type ReaderSelection } from "@reader/core";
-import { composeChatContext } from "./compose-context";
+import {
+  locationLabel,
+  type ReaderAdapter,
+  type ReaderSelection,
+  type SourceReference,
+} from "@reader/core";
+import { contextReferences } from "../references";
 
-/** Capture the sending position before any asynchronous page extraction. */
+// Mirrors the server request limit. Explicit quotations are never shortened.
+export const chatContextBytes = 256000;
+
+/** Capture only what the reader chose, plus a navigation snapshot. */
 export async function readingContext(
-  adapter:
-    | Pick<ReaderAdapter, "getLocation" | "getContext" | "getChapterContext">
-    | undefined,
+  adapter: Pick<ReaderAdapter, "getLocation" | "getContext"> | undefined,
   provider: string,
   selected: ReaderSelection[],
   useSection: boolean,
   hasImages: boolean,
-  options: Pick<
-    Parameters<typeof composeChatContext>[0],
-    "includeChapter" | "marks" | "confirmOversize"
-  > = {},
 ) {
   const position = adapter?.getLocation();
   const readingLocation = position
@@ -35,29 +37,26 @@ export async function readingContext(
           endBlockId: position.endBlockId,
         }
     : undefined;
+  const quotes = structuredClone(useSection ? [] : selected);
+  let context = quotes
+    .map((quote) => `[选区 · ${locationLabel(quote.location)}]\n${quote.text}`)
+    .join("\n\n");
+  let references: SourceReference[] = quotes.map(({ text, location }) => ({
+    text,
+    location,
+    kind: "selection",
+  }));
+  // Only an explicit page/chapter action needs renderer text for providers
+  // without document tools. Merely attaching an image never reads the page.
   const documentAgent =
     !hasImages && (provider === "codex" || provider === "api");
-  const quotes = structuredClone(useSection ? [] : selected);
-  const { context, references } = await composeChatContext({
-    ...options,
-    adapter:
-      adapter && readingLocation
-        ? {
-            ...adapter,
-            getLocation: () => readingLocation,
-            getContext: () => adapter.getContext(),
-            getChapterContext: adapter.getChapterContext?.bind(adapter),
-          }
-        : undefined,
-    selected: quotes,
-    // Explicit preferences and quotations keep main's chapter context. For
-    // an Agent, the page action only supplies its captured reading position.
-    useSection: !documentAgent && (useSection || hasImages),
-  });
-  return {
-    context,
-    references,
-    readingLocation,
-    positionOnly: documentAgent && !context,
-  };
+  if (useSection && !documentAgent && adapter) {
+    context = await adapter.getContext();
+    references = readingLocation
+      ? contextReferences(context, readingLocation)
+      : [];
+  }
+  if (new TextEncoder().encode(context).length > chatContextBytes)
+    throw new Error("引用原文超过 256 KB，请减少引用内容或分开提问。");
+  return { context, references, readingLocation };
 }

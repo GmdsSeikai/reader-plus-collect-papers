@@ -827,7 +827,7 @@ export function PDFReadingView({
             location.page,
             engine?.getPageCount?.() ||
               Math.max(1, ...blocks.map((b) => b.page)),
-            headingPages(blocks, false),
+            headingPages(blocks),
           );
         }}
       />
