@@ -150,6 +150,12 @@ func (s *Store) enqueueDocument(d Document) error {
 	p := initialDocumentProcessing(d, value)
 	b, _ := json.Marshal(p)
 	_, e := s.DB.Exec("INSERT OR IGNORE INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
+	if e == nil {
+		e = s.queueDocumentCorpus(d.ID)
+		if e == nil {
+			e = queueImportedOverview(s.DB, d.ID, value)
+		}
+	}
 	return e
 }
 func (s *Server) processingList(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +284,17 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 		return cancel
 	}
 	var workers sync.WaitGroup
+	if _, e := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued' WHERE status='running'"); e != nil {
+		log.Printf("cannot recover document overviews: %v", e)
+	}
+	if _, e := s.Store.DB.Exec("UPDATE document_corpus_jobs SET status='queued' WHERE status='running'"); e != nil {
+		log.Printf("cannot recover document indexing: %v", e)
+	}
+	if _, e := s.Store.DB.Exec(`INSERT OR IGNORE INTO document_corpus_jobs(document_id,status)
+ SELECT d.id,'queued' FROM documents d LEFT JOIN document_corpora c ON c.document_id=d.id
+ WHERE c.document_id IS NULL AND d.deleted_at=''`); e != nil {
+		log.Printf("cannot queue document indexing: %v", e)
+	}
 	rows, e := s.Store.DB.Query("SELECT body FROM document_processing WHERE status='running' OR json_extract(body,'$.translating.status')='running'")
 	if e == nil {
 		var pending []Processing
@@ -387,12 +404,19 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 		}(phase)
 	}
 	workers.Add(1)
+	go func() { defer workers.Done(); s.corpusWorker(ctx) }()
+	workers.Add(1)
+	go func() { defer workers.Done(); s.overviewWorker(ctx) }()
+	workers.Add(1)
 	go func() { defer workers.Done(); s.classificationWorker(ctx) }()
 	workers.Add(1)
 	go func() { defer workers.Done(); s.metadataWorker(ctx) }()
 	return func() { cancel(); workers.Wait() }
 }
 func (s *Server) wakeProcessing() {
+	if _, err := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued',error='' WHERE status='waiting'"); err != nil {
+		log.Printf("cannot wake overview jobs: %v", err)
+	}
 	s.processingMu.Lock()
 	defer s.processingMu.Unlock()
 	// Reset only jobs blocked on a missing connection, never interrupted/failed jobs.
@@ -424,6 +448,11 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 	if e != nil {
 		return e
 	}
+	// Persist the refresh before publishing changed layout, so an interrupted
+	// parse still prepares its index after restart.
+	if e = s.Store.queueDocumentCorpus(d.ID); e != nil {
+		return e
+	}
 	if d.Library == "books" {
 		if e = s.learnBookChapter(ctx, d, p); e != nil {
 			return e
@@ -452,6 +481,14 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 	}
 	if e != nil {
 		return e
+	}
+	// Publish searchable original passages as part of parsing, before the
+	// translation lane. Index failure must not invalidate a successful parse.
+	if _, indexErr := s.documentCorpus(ctx, d.ID, nil); indexErr != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		_ = s.Store.queueDocumentCorpus(d.ID)
 	}
 	p.PagesDone = m.Pages
 	p.PagesTotal = m.Pages

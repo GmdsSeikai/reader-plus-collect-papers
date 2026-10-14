@@ -54,14 +54,16 @@ type Annotation struct {
 	Tags []string `json:"tags,omitempty"`
 }
 type Message struct {
-	Attachments []ImageAttachment `json:"attachments,omitempty"`
-	Context     string            `json:"context,omitempty"`
-	References  json.RawMessage   `json:"references,omitempty"`
-	ID          string            `json:"id"`
-	DocumentID  string            `json:"documentId"`
-	Role        string            `json:"role"`
-	Content     string            `json:"content"`
-	CreatedAt   string            `json:"createdAt"`
+	Reasoning       string            `json:"reasoning,omitempty"`
+	ReadingLocation json.RawMessage   `json:"readingLocation,omitempty"`
+	Attachments     []ImageAttachment `json:"attachments,omitempty"`
+	Context         string            `json:"context,omitempty"`
+	References      json.RawMessage   `json:"references,omitempty"`
+	ID              string            `json:"id"`
+	DocumentID      string            `json:"documentId"`
+	Role            string            `json:"role"`
+	Content         string            `json:"content"`
+	CreatedAt       string            `json:"createdAt"`
 }
 type Store struct {
 	processingWriteMu sync.Mutex
@@ -99,7 +101,17 @@ func OpenStore(root string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS document_relations(a TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,b TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(a,b),CHECK(a<b));
  CREATE TABLE IF NOT EXISTS connector_snapshots(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,source_url TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS document_relations_b ON document_relations(b);
- CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(document_id UNINDEXED,href UNINDEXED,content,tokenize='unicode61');`)
+ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(document_id UNINDEXED,href UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS document_corpora(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,fingerprint TEXT NOT NULL,revision TEXT NOT NULL,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS document_corpus_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,status TEXT NOT NULL);
+ CREATE VIRTUAL TABLE IF NOT EXISTS document_passages_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,block_id UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS document_overview_drafts(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS document_overviews(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS document_overview_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '');
+ CREATE VIRTUAL TABLE IF NOT EXISTS document_overviews_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,content,tokenize='unicode61');
+ CREATE TRIGGER IF NOT EXISTS document_overview_delete AFTER DELETE ON document_overviews BEGIN DELETE FROM document_overviews_fts WHERE document_id=old.document_id; END;
+ CREATE TABLE IF NOT EXISTS document_conversations(document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,provider TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(document_id,provider));
+ CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);`)
 	if err != nil {
 		db.Close()
 		return nil, err

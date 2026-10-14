@@ -278,6 +278,9 @@ export interface ReaderTheme {
   /** Opt in to copying text selections and selected annotations. */
   autoCopySelection?: boolean;
   autoTranslatePDF?: boolean;
+  autoGenerateOverview?: boolean;
+  /** Estimated total document-agent context; output and history reserve is included. */
+  documentContextTokens?: number;
   appearance?: Appearance;
   mode: "light" | "sepia" | "dark";
   fontSize: number;
@@ -305,6 +308,8 @@ export interface HighlightColor {
 export const defaultTheme: ReaderTheme = {
   autoCopySelection: false,
   autoTranslatePDF: true,
+  autoGenerateOverview: false,
+  documentContextTokens: 0,
   appearance: "system",
   mode: "light",
   fontSize: 1.15,
@@ -378,8 +383,6 @@ export interface ReaderAdapter {
   /** Layout choices that must apply before the first page is shown. */
   preferTheme?(theme: ReaderTheme): void;
   getContext(): Promise<string>;
-  /** Complete chapter text at the requested location; callers enforce request limits. */
-  getChapterContext?(location: DocumentLocation): Promise<ReaderSelection[]>;
   /** Whether most of a remembered viewport position is on screen again. */
   isNear?(location: DocumentLocation): boolean;
   setBlocks?(blocks: PDFBlock[]): void;
@@ -438,6 +441,21 @@ export interface Provider {
   status: string;
 }
 export interface SourceReference {
+  /** Rendered page evidence, separate from extracted text. */
+  pageImage?: {
+    page: number;
+    width: number;
+    height: number;
+    bytes: number;
+    sourceId: string;
+    corpusRevision: string;
+    contentHash: string;
+  };
+  /** Server-issued evidence from a completed document reading attempt. */
+  sourceId?: string;
+  corpusRevision?: string;
+  contentHash?: string;
+  precision?: "page" | "block" | "paragraph";
   text: string;
   location: DocumentLocation;
   kind?: "selection" | "section";
@@ -449,6 +467,10 @@ export interface ImageAttachment {
   caption?: string;
 }
 export interface Message {
+  /** Provider-returned thinking, displayed separately and never added to answer context. */
+  reasoning?: string;
+  /** Navigation snapshot at send time; not an original-text citation. */
+  readingLocation?: DocumentLocation;
   attachments?: ImageAttachment[];
   context?: string;
   references?: SourceReference[];
@@ -519,6 +541,9 @@ export interface TranslationBlock {
   error?: string;
 }
 export interface AICapability {
+  tools?: "passed" | "unsupported" | "failed";
+  toolSchemaVersion?: string;
+  toolError?: string;
   pendingVision?: boolean;
   text: boolean;
   vision: boolean;
@@ -536,8 +561,6 @@ export interface APIConnection {
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export interface AIConfig {
-  /** Automatically attach current chapter text to ordinary chat; defaults to false. */
-  chatIncludeChapter?: boolean;
   primary: string;
   models: Record<string, string>;
   efforts?: Record<string, Record<string, ReasoningEffort>>;
@@ -555,6 +578,8 @@ export interface AIConfig {
   capabilities: Record<string, AICapability>;
 }
 export interface AgentModel {
+  contextWindow?: number;
+  maxOutputTokens?: number;
   effortInfo?: {
     mode: "levels" | "budget" | "fixed" | "unknown";
     note: string;
@@ -635,6 +660,55 @@ export interface EPUBChapterLink {
 export interface EPUBChapters {
   chapters: EPUBChapter[];
   toc: EPUBChapterLink[] | null;
+}
+
+export interface OverviewContent {
+  summary: string;
+  findings: { text: string; blockIds: string[] }[];
+  limitations: { text: string; blockIds: string[] }[];
+  terms: string[];
+}
+export interface OverviewSection {
+  key: string;
+  title: string;
+  firstBlockId: string;
+  lastBlockId: string;
+  location: DocumentLocation;
+  passageCount: number;
+  content: OverviewContent;
+}
+export type OverviewStatus =
+  | "missing"
+  | "queued"
+  | "running"
+  | "waiting"
+  | "complete"
+  | "partial"
+  | "failed"
+  | "canceled"
+  | "stale";
+export interface OverviewJob {
+  documentId: string;
+  status: OverviewStatus;
+  error?: string;
+  compiledPassages: number;
+  totalPassages: number;
+}
+export interface DocumentOverview extends OverviewJob {
+  stale: boolean;
+  sources?: { blockId: string; label: string; location: DocumentLocation }[];
+  corpusRevision: string;
+  compilerVersion: string;
+  content?: OverviewContent;
+  sections: OverviewSection[];
+  coverage: {
+    status: string;
+    totalUnits: number;
+    searchableUnits: number;
+    missingRanges: string[];
+    warnings: string[];
+  };
+  updatedAt: string;
 }
 export type {
   ProxySettings,

@@ -79,11 +79,12 @@ func apiProvider(c APIConnection) Provider {
 }
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider    string          `json:"provider"`
-		Prompt      string          `json:"prompt"`
-		Context     *string         `json:"context"`
-		References  json.RawMessage `json:"references"`
-		Attachments []string        `json:"attachments"`
+		Provider        string          `json:"provider"`
+		Prompt          string          `json:"prompt"`
+		Context         *string         `json:"context"`
+		ReadingLocation json.RawMessage `json:"readingLocation"`
+		References      json.RawMessage `json:"references"`
+		Attachments     []string        `json:"attachments"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -96,7 +97,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "未知 AI 服务")
 		return
 	}
-	// The client confirms contexts above 64 KB; this cap keeps the request body under 1 MB.
+	// Bound explicit source attachments independently of the model context window.
 	if strings.TrimSpace(req.Prompt) == "" || len(req.Prompt) > 16000 || len(*req.Context) > chatContextBytes {
 		fail(w, 400, "问题或上下文长度无效")
 		return
@@ -106,6 +107,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "文档不存在")
 		return
 	}
+	if len(req.ReadingLocation) > 0 && (len(req.ReadingLocation) > 16384 || !validLocation(req.ReadingLocation, d.Type)) {
+		fail(w, 400, "阅读位置无效")
+		return
+	}
 	ctx, finish, err := s.beginDocumentTask(r.Context(), d.ID)
 	if err != nil {
 		fail(w, 409, "文档正在删除")
@@ -113,5 +118,5 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer finish()
 	r = r.WithContext(ctx)
-	s.chatDocument(w, r, d, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments)
+	s.chatDocument(w, r, d, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments, req.ReadingLocation)
 }

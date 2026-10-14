@@ -946,6 +946,33 @@ kbd {
   padding: 14px;
   margin: 10px 0;
 }
+.chat-reading-location {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.chat-thinking {
+  margin-bottom: 0.5rem;
+}
+.chat-thinking-toggle {
+  padding-inline: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+.chat-thinking-content {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.5rem 0 0.5rem 0.75rem;
+  border-left: 1px solid var(--border);
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
 .chat-user-references + .chat-question {
   margin-top: 10px;
 }
@@ -3084,7 +3111,7 @@ textarea.paper-note-input {
   padding: 3px;
   cursor: pointer;
 }
-/* Waiting for the first answer chunk; keep the original provider glyph. */
+/* Tool activity uses a quiet book icon; ordinary provider waits keep their glyph. */
 .chat-waiting {
   display: flex;
   align-items: center;
@@ -3095,7 +3122,17 @@ textarea.paper-note-input {
 }
 .chat-waiting-icon {
   display: inline-flex;
+  flex-shrink: 0;
   animation: chat-waiting-spin 2.4s linear infinite;
+}
+.chat-waiting-icon--activity {
+  animation: none;
+}
+.chat-waiting .chat-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @keyframes chat-waiting-spin {
   to {

@@ -109,6 +109,10 @@ func TestSevenProviderWireParameters(t *testing.T) {
 			if err != nil || result.Text != "ok" || calls != 1 {
 				t.Fatalf("%+v %v calls=%d", result, err, calls)
 			}
+			document, err := toolCompletion(t.Context(), APIConnection{URL: tt.url, Key: "test-key"}, completionRequest{Model: tt.model, Effort: tt.level}, []toolCompletionMessage{{Role: "system", Content: "document instructions"}, {Role: "user", Content: "private"}}, nil)
+			if err != nil || document.Text != "ok" || calls != 2 {
+				t.Fatalf("document request: %+v %v calls=%d", document, err, calls)
+			}
 		})
 	}
 }

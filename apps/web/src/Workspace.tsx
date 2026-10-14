@@ -88,18 +88,15 @@ import {
   TooltipContent,
 } from "@reader/ui/components/tooltip";
 import { toast } from "sonner";
+import { DocumentOverviewDialog } from "./DocumentOverview";
 import { ProcessingUsageDialog } from "./ProcessingUsage";
 import { ModelSelector } from "./ModelSelector";
 import { SourceReferences } from "./SourceReferences";
 import { ChatSession } from "./chat/chat-session";
 import { AssistantPanel } from "./chat/AssistantPanel";
 import { ImagePreview, imageLabel } from "./ImagePreview";
-import {
-  composeChatContext,
-  type OversizeChoice,
-  type OversizeContext,
-} from "./chat/compose-context";
-import { ContextSizeDialog } from "./chat/ContextSizeDialog";
+import { readingContext } from "./chat/reading-context";
+import { referenceLabel } from "./references";
 import { ReferenceNavigation } from "./reference-navigation";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AnnotationToolbar, annotationLabels } from "./AnnotationToolbar";
@@ -107,7 +104,6 @@ import { useAnnotationUndo } from "./useAnnotationUndo";
 import { useAnnotationDeletion } from "./useAnnotationDeletion";
 import {
   activeAnnotation,
-  annotationContext,
   applySavedAnnotation,
   highlightPalette,
 } from "./annotations";
@@ -318,6 +314,7 @@ export function Workspace({
       group.removeAttribute("data-toggling");
     };
   }, [left, right, leftPanel, rightPanel]);
+  const [overviewOpen, setOverviewOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [rightTab, setRightTab] = useState("ai");
   const [leftTab, setLeftTab] = useState("toc");
@@ -382,10 +379,6 @@ export function Workspace({
   const chat = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const sendSerial = useRef(0);
   const [sending, setSending] = useState(false);
-  const [oversize, setOversize] = useState<{
-    request: OversizeContext;
-    resolve: (choice: OversizeChoice) => void;
-  }>();
   const [pageInput, setPageInput] = useState("");
   const abort = useRef<AbortController | null>(null);
   const searchSerial = useRef(0);
@@ -711,22 +704,22 @@ export function Workspace({
     abort.current = controller;
     const serial = ++sendSerial.current;
     try {
-      const { context, references } = await composeChatContext({
+      const captured = await readingContext(
         adapter,
+        provider,
         selected,
-        includeChapter: aiConfig?.chatIncludeChapter,
         useSection,
-        marks: annotationContext(annotations, 4000, palette),
-        confirmOversize: (request) =>
-          new Promise((resolve) => setOversize({ request, resolve })),
-      });
+        attachments.length > 0,
+      );
+      const { context } = captured;
       if (controller.signal.aborted) return;
       if (!directImage) setPrompt("");
       await session.send({
         provider,
         prompt: question,
         context,
-        references,
+        references: captured.references,
+        readingLocation: captured.readingLocation,
         attachments,
       });
       if (serial !== sendSerial.current) return;
@@ -928,6 +921,9 @@ export function Workspace({
               返回阅读位置
             </Button>
           )}
+          <IconButton label="文档概要" onClick={() => setOverviewOpen(true)}>
+            <BookOpen />
+          </IconButton>
           <div ref={setReadingToolbar} />
           <span className="toolbar-divider" />
           <IconButton
@@ -1418,9 +1414,8 @@ export function Workspace({
                         <ArrowLeft className="ml-auto rotate-180" />
                       </Button>
                       <p className="privacy-note">
-                        {aiConfig?.chatIncludeChapter
-                          ? "提问时附带标题、已有摘要和本章原文。"
-                          : "提问默认附带标题和已有摘要，引用选区时补充所在章节。"}
+                        主动引用的文字和图片随问题发送；文档 Agent
+                        按需检索、读取原文。
                       </p>
                     </div>
                   }
@@ -1431,12 +1426,23 @@ export function Workspace({
                     </>
                   )}
                   references={(message) => (
-                    <SourceReferences
-                      message={message}
-                      toc={toc}
-                      adapter={adapter}
-                      onNavigate={visitReference}
-                    />
+                    <>
+                      {message.readingLocation && (
+                        <span
+                          className="chat-reading-location"
+                          title="提问时的阅读位置"
+                        >
+                          <BookOpen size={12} aria-hidden="true" />
+                          {referenceLabel(message.readingLocation, toc)}
+                        </span>
+                      )}
+                      <SourceReferences
+                        message={message}
+                        toc={toc}
+                        adapter={adapter}
+                        onNavigate={visitReference}
+                      />
+                    </>
                   )}
                 />
                 <div className="chat-compose">
@@ -1672,16 +1678,17 @@ export function Workspace({
           onClose={() => setExportingNotes(false)}
         />
       )}
+      <DocumentOverviewDialog
+        key={doc.id}
+        document={overviewOpen ? doc : null}
+        onClose={() => setOverviewOpen(false)}
+        onNavigate={async (location) => {
+          await adapter?.goTo(location);
+        }}
+      />
       <ProcessingUsageDialog
         document={usageOpen ? doc : null}
         onClose={() => setUsageOpen(false)}
-      />
-      <ContextSizeDialog
-        request={oversize?.request}
-        onChoose={(choice) => {
-          oversize?.resolve(choice);
-          setOversize(undefined);
-        }}
       />
     </div>
   );

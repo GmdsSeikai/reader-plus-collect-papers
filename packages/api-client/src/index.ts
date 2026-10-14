@@ -14,6 +14,8 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 import type {
   Document,
+  DocumentOverview,
+  OverviewJob,
   TagBoard,
   DocumentLocation,
   Annotation,
@@ -280,6 +282,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action }),
     }),
+  overviewJobs: () => request<OverviewJob[]>("/api/overviews"),
+  documentOverview: (id: string) =>
+    request<DocumentOverview>(
+      `/api/documents/${encodeURIComponent(id)}/overview`,
+    ),
+  generateOverview: (id: string, regenerate = false) =>
+    request<DocumentOverview>(
+      `/api/documents/${encodeURIComponent(id)}/overview`,
+      { method: "POST", body: JSON.stringify({ regenerate }) },
+    ),
+  cancelOverview: (id: string) =>
+    request<void>(`/api/documents/${encodeURIComponent(id)}/overview/job`, {
+      method: "DELETE",
+    }),
   processing: () => request<Processing[]>("/api/processing"),
   process: (id: string) =>
     request<Processing>(`/api/documents/${id}/processing`, { method: "POST" }),
@@ -297,7 +313,7 @@ export const api = {
     }),
   testAI: (
     provider: string,
-    capability?: "text" | "vision",
+    capability?: "text" | "vision" | "tools",
     model?: string,
   ) => {
     const query = new URLSearchParams();
@@ -455,6 +471,10 @@ export const api = {
     ),
   messages: (id: string, signal?: AbortSignal) =>
     request<Message[]>(`/api/documents/${id}/messages`, { signal }),
+  validateEvidence: (id: string, message: string, source: string) =>
+    request<{ valid: boolean }>(
+      `/api/documents/${encodeURIComponent(id)}/messages/${encodeURIComponent(message)}/sources/${encodeURIComponent(source)}`,
+    ),
   providers: (checkAuth = true) =>
     request<Provider[]>(`/api/providers${checkAuth ? "" : "?auth=skip"}`),
   /** Rename a category across a library, or remove it when `to` is omitted. */
@@ -499,6 +519,7 @@ export async function chat(
   attachments: string[] = [],
   onFallback?: (message: string) => void,
   onEvent?: (event: ChatStreamEvent) => void,
+  readingLocation?: DocumentLocation,
 ) {
   const response = await diagnosticFetch(`/api/documents/${id}/chat`, {
     method: "POST",
@@ -511,6 +532,7 @@ export async function chat(
       prompt,
       context,
       references,
+      readingLocation,
       attachments,
     }),
     signal,

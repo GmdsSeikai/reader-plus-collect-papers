@@ -118,6 +118,7 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 	}
 	for _, m := range models {
 		if m.ID == req.Model {
+			req.ContextWindow = m.ContextWindow
 			req.SupportedEfforts = m.SupportedEfforts
 		}
 	}
@@ -161,6 +162,16 @@ func (a apiAgentAdapter) Stream(ctx context.Context, req GenerateRequest, emit f
 	completion, err := a.resolve(ctx, len(req.Input.images()) > 0)
 	if err != nil {
 		return GenerateResult{}, err
+	}
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && a.task == taskChat && len(req.Input.images()) == 0 {
+		agent := req.Input.Chat.Agent
+		capability, err := agent.server.ensureDocumentTools(ctx, a.conn, completion.Model, agent.activity)
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		completion.Tools = capability.Tools == "passed"
+		completion.Vision = capability.Vision
+		return streamAPIDocumentChat(ctx, a.conn, completion, req.Input, emit)
 	}
 	return streamCompletion(ctx, a.conn, completion, req.Input, emit)
 }
@@ -304,14 +315,22 @@ func discoverAPIModels(ctx context.Context, c APIConnection) (models []AgentMode
 	return decodeAPIModels(body)
 }
 
-// Only id is standard. Name and effort levels are optional provider extensions.
+// Only id is standard. DeepSeek context_window and OpenRouter context_length
+// are optional metadata, never inferred from a model name.
 func decodeAPIModels(body []byte) ([]AgentModel, error) {
 	var result struct {
 		Data []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			DisplayName string `json:"display_name"`
-			Effort      struct {
+			ID              string `json:"id"`
+			DisplayName     string `json:"display_name"`
+			Name            string `json:"name"`
+			ContextWindow   int    `json:"context_window"`
+			ContextLength   int    `json:"context_length"`
+			MaxOutputTokens int    `json:"max_output_tokens"`
+			TopProvider     struct {
+				ContextLength   int `json:"context_length"`
+				MaxOutputTokens int `json:"max_completion_tokens"`
+			} `json:"top_provider"`
+			Effort struct {
 				Levels  []string `json:"supported_levels"`
 				Default string   `json:"default_level"`
 			} `json:"effort"`
@@ -335,7 +354,18 @@ func decodeAPIModels(body []byte) ([]AgentModel, error) {
 		if name == "" {
 			name = id
 		}
-		models = append(models, AgentModel{ID: id, Name: name, SupportedEfforts: m.Effort.Levels, DefaultEffort: m.Effort.Default})
+		window := validContextWindow(m.ContextWindow)
+		if window == 0 {
+			window = validContextWindow(m.ContextLength)
+		}
+		if n := validContextWindow(m.TopProvider.ContextLength); n > 0 && (window == 0 || n < window) {
+			window = n
+		}
+		output := validContextWindow(m.MaxOutputTokens)
+		if output == 0 {
+			output = validContextWindow(m.TopProvider.MaxOutputTokens)
+		}
+		models = append(models, AgentModel{ID: id, Name: name, ContextWindow: window, MaxOutputTokens: output, SupportedEfforts: m.Effort.Levels, DefaultEffort: m.Effort.Default})
 	}
 	if len(models) == 0 {
 		return nil, errors.New("API 未返回可用模型")

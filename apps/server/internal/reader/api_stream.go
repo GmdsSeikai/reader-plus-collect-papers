@@ -26,6 +26,18 @@ func (a apiAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(P
 	if e := validateAPI(a.config); e != nil {
 		return GenerateResult{}, generationError(ErrorConfiguration, e.Error())
 	}
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && len(req.Input.images()) == 0 {
+		completion := completionRequest{Model: a.config.Model}
+		if models, err := req.Input.Chat.Agent.server.apiCatalog(a.config)(ctx); err == nil {
+			for _, m := range models {
+				if m.ID == completion.Model {
+					completion.ContextWindow = m.ContextWindow
+					break
+				}
+			}
+		}
+		return streamAPIDocumentChat(ctx, a.config, completion, req.Input, emit)
+	}
 	return streamCompletion(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
 }
 
@@ -38,6 +50,10 @@ type completionMessage struct {
 // History holds earlier completed turns of the same conversation; the new user
 // turn is appended after it. Effort is resolved by the calling adapter.
 type completionRequest struct {
+	Vision           bool
+	PageImageData    func(documentPageImage) ([]byte, error)
+	ContextWindow    int
+	Tools            bool
 	Model, Effort    string
 	SupportedEfforts []string
 	ReasoningSink    func(string)
@@ -129,7 +145,7 @@ func streamCompletion(ctx context.Context, c APIConnection, req completionReques
 	apiLog(ctx, slog.LevelInfo, "api.start", "operation", "generate", "effortMode", rule.Mode)
 	originalEmit := emit
 	emit = func(event ProviderEvent) error {
-		if event.Text != "" {
+		if event.Text != "" || event.Reasoning != "" {
 			trace.Visible = true
 		}
 		if originalEmit != nil {
@@ -174,18 +190,11 @@ func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEv
 	return readCompletionStreamWithConnection(ctx, r, APIConnection{}, nil, emit)
 }
 func readCompletionStreamWithConnection(ctx context.Context, r io.Reader, c APIConnection, reasoningSink func(string), emit func(ProviderEvent) error) (GenerateResult, error) {
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 4096), maxProviderFrame)
-	var frame, text strings.Builder
+	var text strings.Builder
 	finished := false
 	reasoningBytes := 0
 	model := ""
-	protocol := func() (GenerateResult, error) {
-		return GenerateResult{}, generationError(ErrorProtocol, "API 流协议无效或缺少成功终态")
-	}
-	dispatch := func() (bool, error) {
-		data := strings.TrimSuffix(frame.String(), "\n")
-		frame.Reset()
+	dispatch := func(data string) (bool, error) {
 		if data == "" {
 			return false, nil
 		}
@@ -253,12 +262,19 @@ func readCompletionStreamWithConnection(ctx context.Context, r io.Reader, c APIC
 			if len(choice.Delta.ToolCalls) > 0 && string(choice.Delta.ToolCalls) != "null" || len(choice.Delta.FunctionCall) > 0 && string(choice.Delta.FunctionCall) != "null" {
 				return false, generationError(ErrorCapability, "API 返回了不支持的工具调用")
 			}
-			if reasoningSink != nil && choice.Delta.Reasoning != "" {
+			if choice.Delta.Reasoning != "" {
 				reasoningBytes += len(choice.Delta.Reasoning)
 				if reasoningBytes > 1<<20 {
 					return false, generationError(ErrorLimit, "API 思考内容超过限制")
 				}
-				reasoningSink(choice.Delta.Reasoning)
+				if reasoningSink != nil {
+					reasoningSink(choice.Delta.Reasoning)
+				}
+				if emit != nil {
+					if err := emit(ProviderEvent{Reasoning: choice.Delta.Reasoning}); err != nil {
+						return false, err
+					}
+				}
 			}
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				part := *choice.Delta.Content
@@ -287,18 +303,33 @@ func readCompletionStreamWithConnection(ctx context.Context, r io.Reader, c APIC
 		}
 		return false, nil
 	}
+	if err := consumeCompletionFrames(ctx, r, dispatch); err != nil {
+		return GenerateResult{}, err
+	}
+	return GenerateResult{Text: text.String(), FinishReason: "stop"}, nil
+}
+
+// The existing text stream and tool rounds share framing, limits and EOF rules.
+func consumeCompletionFrames(ctx context.Context, r io.Reader, dispatch func(string) (bool, error)) error {
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 4096), maxProviderFrame)
+	var frame strings.Builder
 	for scan.Scan() {
 		if ctx.Err() != nil {
-			return GenerateResult{}, ctx.Err()
+			return ctx.Err()
 		}
 		line := scan.Text()
 		if line == "" {
-			done, e := dispatch()
-			if e != nil {
-				return GenerateResult{}, e
-			}
-			if done {
-				return GenerateResult{text.String(), "stop"}, nil
+			data := strings.TrimSuffix(frame.String(), "\n")
+			frame.Reset()
+			if data != "" {
+				done, err := dispatch(data)
+				if err != nil {
+					return err
+				}
+				if done {
+					return nil
+				}
 			}
 			continue
 		}
@@ -312,18 +343,17 @@ func readCompletionStreamWithConnection(ctx context.Context, r io.Reader, c APIC
 		value = strings.TrimPrefix(value, " ")
 		if field == "data" {
 			if frame.Len()+len(value)+1 > maxProviderFrame {
-				return protocol()
+				return generationError(ErrorProtocol, "API 事件超过大小限制")
 			}
 			frame.WriteString(value)
 			frame.WriteByte('\n')
 		}
 	}
 	if ctx.Err() != nil {
-		return GenerateResult{}, ctx.Err()
+		return ctx.Err()
 	}
 	if scan.Err() != nil {
-		return GenerateResult{}, generationError(ErrorNetwork, "API 流中断或事件过大")
+		return generationError(ErrorNetwork, "API 流中断或事件过大")
 	}
-	// EOF is never completion, including EOF after finish_reason without [DONE].
-	return protocol()
+	return generationError(ErrorProtocol, "API 流缺少完整成功终态")
 }

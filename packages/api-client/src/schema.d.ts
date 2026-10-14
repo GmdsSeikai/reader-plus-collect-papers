@@ -4,6 +4,185 @@
  */
 
 export interface paths {
+    "/api/overviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job states */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OverviewJob"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Persisted source-versioned overview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        regenerate: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Existing overview or job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Overview queued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job canceled; translation unaffected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/diagnostics/events": {
         parameters: {
             query?: never;
@@ -1203,11 +1382,19 @@ export interface paths {
                         attachments?: string[];
                         prompt: string;
                         context: string;
+                        /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
+                        readingLocation?: components["schemas"]["DocumentLocation"];
                         references?: {
                             text: string;
                             /** @enum {unknown} */
                             kind?: "selection" | "section";
                             location: components["schemas"]["DocumentLocation"];
+                            sourceId?: string;
+                            pageImage?: components["schemas"]["PageImageEvidence"];
+                            corpusRevision?: string;
+                            contentHash?: string;
+                            /** @enum {string} */
+                            precision?: "page" | "block" | "paragraph";
                         }[];
                     };
                 };
@@ -1865,7 +2052,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration. */
-                    capability?: "text" | "vision";
+                    capability?: "text" | "vision" | "tools";
                     /** @description Required for the api provider, which is checked one model at a time; the result is stored under capabilities["api:<model>"]. */
                     model?: string;
                 };
@@ -3118,10 +3305,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/messages/{message}/sources/{source}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Validate a persisted original-text citation before navigation */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    message: string;
+                    source: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Original source is still current */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            valid: boolean;
+                        };
+                    };
+                };
+                /** @description Document, message or source is unavailable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Original text or citation version has changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OverviewContent: {
+            summary: string;
+            findings: {
+                text: string;
+                blockIds: string[];
+            }[];
+            limitations: {
+                text: string;
+                blockIds: string[];
+            }[];
+            terms: string[];
+        };
+        OverviewSection: {
+            key: string;
+            title: string;
+            firstBlockId: string;
+            lastBlockId: string;
+            location: {
+                [key: string]: unknown;
+            };
+            passageCount: number;
+            content: components["schemas"]["OverviewContent"];
+        };
+        DocumentOverview: {
+            stale?: boolean;
+            sources?: {
+                blockId: string;
+                label: string;
+                location: {
+                    [key: string]: unknown;
+                };
+            }[];
+            documentId: string;
+            corpusRevision: string;
+            compilerVersion: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            content?: components["schemas"]["OverviewContent"];
+            sections: components["schemas"]["OverviewSection"][];
+            coverage: {
+                status: string;
+                totalUnits: number;
+                searchableUnits: number;
+                missingRanges: string[];
+                warnings: string[];
+            };
+            compiledPassages: number;
+            totalPassages: number;
+            updatedAt: string;
+            error?: string;
+        };
+        OverviewJob: {
+            documentId: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            error: string;
+            compiledPassages: number;
+            totalPassages: number;
+        };
         JournalRankConfig: {
             enabled: boolean;
             hasKey: boolean;
@@ -3170,6 +3472,15 @@ export interface components {
             notes: number;
             annotations: number;
             warnings: string[];
+        };
+        PageImageEvidence: {
+            page: number;
+            width: number;
+            height: number;
+            bytes: number;
+            sourceId: string;
+            corpusRevision: string;
+            contentHash: string;
         };
         DocumentLocation: {
             /** @constant */
@@ -3291,8 +3602,12 @@ export interface components {
             /** @enum {unknown} */
             role: "user" | "assistant";
             content: string;
+            /** @description Provider-returned thinking displayed separately from the final answer. */
+            reasoning?: string;
             createdAt: string;
             context?: string;
+            /** @description Original reading position at send time, retained independently of current navigation and source citations. */
+            readingLocation?: components["schemas"]["DocumentLocation"];
             attachments?: {
                 id: string;
                 page: number;
@@ -3304,6 +3619,12 @@ export interface components {
                 /** @enum {unknown} */
                 kind?: "selection" | "section";
                 location: components["schemas"]["DocumentLocation"];
+                sourceId?: string;
+                pageImage?: components["schemas"]["PageImageEvidence"];
+                corpusRevision?: string;
+                contentHash?: string;
+                /** @enum {string} */
+                precision?: "page" | "block" | "paragraph";
             }[];
         };
         Provider: {
@@ -3318,11 +3639,33 @@ export interface components {
         };
         /** @description Decoded SSE event union for documentation and generated types only. Wire uses event: NAME and data: JSON lines; no envelope is transmitted. Append delta text verbatim. Only done confirms successful persistence. EOF is not completion. After error/done ignore late data. No automatic POST replay. */
         ChatStreamEvent: {
+            /** @constant */
+            event: "reasoning";
+            data: {
+                text: string;
+            };
+        } | {
+            /** @constant */
+            event: "draft";
+            data: {
+                text: string;
+                reset: boolean;
+            };
+        } | {
             /** @enum {string} */
             event: "status";
             data: {
                 /** @enum {string} */
                 status: "reading" | "reading-image";
+            };
+        } | {
+            /** @enum {string} */
+            event: "activity";
+            data: {
+                /** @enum {string} */
+                phase: "indexing" | "reading" | "writing";
+                message: string;
+                tool?: string;
             };
         } | {
             /** @enum {string} */
@@ -3404,6 +3747,14 @@ export interface components {
             vision: boolean;
             checkedAt: string;
             error?: string;
+            /**
+             * @description Independent structured tool-call capability; missing means not checked.
+             * @enum {string}
+             */
+            tools?: "passed" | "unsupported" | "failed";
+            toolError?: string;
+            /** @description Server-owned fingerprint of the checked tool protocol and schemas. */
+            toolSchemaVersion?: string;
         };
         APIConnection: {
             /**
@@ -3417,6 +3768,9 @@ export interface components {
             hasKey: boolean;
         };
         AgentModel: {
+            /** @description Provider-reported context capacity; omitted when unavailable */
+            contextWindow?: number;
+            maxOutputTokens?: number;
             effortInfo?: {
                 /** @enum {string} */
                 mode: "levels" | "budget" | "fixed" | "unknown";
@@ -3440,8 +3794,6 @@ export interface components {
         /** @enum {string} */
         ReasoningEffort: "low" | "medium" | "high" | "max";
         AIConfig: {
-            /** @description Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value. */
-            chatIncludeChapter?: boolean;
             primary: string;
             models: {
                 [key: string]: string;

@@ -4,6 +4,195 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/overviews":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Overview job states",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/OverviewJob",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Persisted source-versioned overview",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                { "regenerate": { "type": "boolean" } },
+                              "required": ["regenerate"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Existing overview or job",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "202":
+                    {
+                      "description": "Overview queued",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview/job":
+        {
+          "delete":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "204":
+                    {
+                      "description": "Overview job canceled; translation unaffected",
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/diagnostics/events":
         {
           "post":
@@ -1491,6 +1680,11 @@
                                     },
                                   "prompt": { "type": "string" },
                                   "context": { "type": "string" },
+                                  "readingLocation":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentLocation",
+                                      "description": "Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence.",
+                                    },
                                   "references":
                                     {
                                       "type": "array",
@@ -1508,6 +1702,25 @@
                                               "location":
                                                 {
                                                   "$ref": "#/components/schemas/DocumentLocation",
+                                                },
+                                              "sourceId": { "type": "string" },
+                                              "pageImage":
+                                                {
+                                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                                },
+                                              "corpusRevision":
+                                                { "type": "string" },
+                                              "contentHash":
+                                                { "type": "string" },
+                                              "precision":
+                                                {
+                                                  "type": "string",
+                                                  "enum":
+                                                    [
+                                                      "page",
+                                                      "block",
+                                                      "paragraph",
+                                                    ],
                                                 },
                                             },
                                           "required": ["text", "location"],
@@ -2148,7 +2361,8 @@
                     "name": "capability",
                     "in": "query",
                     "description": "Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration.",
-                    "schema": { "type": "string", "enum": ["text", "vision"] },
+                    "schema":
+                      { "type": "string", "enum": ["text", "vision", "tools"] },
                   },
                   {
                     "name": "model",
@@ -3577,12 +3791,267 @@
                 },
             },
         },
+      "/api/documents/{id}/messages/{message}/sources/{source}":
+        {
+          "get":
+            {
+              "summary": "Validate a persisted original-text citation before navigation",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "source",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Original source is still current",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["valid"],
+                                  "properties":
+                                    { "valid": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "404":
+                    {
+                      "description": "Document, message or source is unavailable",
+                    },
+                  "409":
+                    {
+                      "description": "Original text or citation version has changed",
+                    },
+                },
+            },
+        },
     },
   "components":
     {
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "OverviewContent":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "summary": { "type": "string" },
+                  "findings":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "limitations":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "terms": { "type": "array", "items": { "type": "string" } },
+                },
+              "required": ["summary", "findings", "limitations", "terms"],
+            },
+          "OverviewSection":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "key": { "type": "string" },
+                  "title": { "type": "string" },
+                  "firstBlockId": { "type": "string" },
+                  "lastBlockId": { "type": "string" },
+                  "location":
+                    { "type": "object", "additionalProperties": true },
+                  "passageCount": { "type": "integer" },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                },
+              "required":
+                [
+                  "key",
+                  "title",
+                  "firstBlockId",
+                  "lastBlockId",
+                  "location",
+                  "passageCount",
+                  "content",
+                ],
+            },
+          "DocumentOverview":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "stale": { "type": "boolean" },
+                  "sources":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "required": ["blockId", "label", "location"],
+                          "properties":
+                            {
+                              "blockId": { "type": "string" },
+                              "label": { "type": "string" },
+                              "location":
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true,
+                                },
+                            },
+                        },
+                    },
+
+                  "documentId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "compilerVersion": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                  "sections":
+                    {
+                      "type": "array",
+                      "items":
+                        { "$ref": "#/components/schemas/OverviewSection" },
+                    },
+                  "coverage":
+                    {
+                      "type": "object",
+                      "properties":
+                        {
+                          "status": { "type": "string" },
+                          "totalUnits": { "type": "integer" },
+                          "searchableUnits": { "type": "integer" },
+                          "missingRanges":
+                            { "type": "array", "items": { "type": "string" } },
+                          "warnings":
+                            { "type": "array", "items": { "type": "string" } },
+                        },
+                      "required":
+                        [
+                          "status",
+                          "totalUnits",
+                          "searchableUnits",
+                          "missingRanges",
+                          "warnings",
+                        ],
+                    },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                  "updatedAt": { "type": "string" },
+                  "error": { "type": "string" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "corpusRevision",
+                  "compilerVersion",
+                  "status",
+                  "sections",
+                  "coverage",
+                  "compiledPassages",
+                  "totalPassages",
+                  "updatedAt",
+                ],
+            },
+          "OverviewJob":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "status",
+                  "error",
+                  "compiledPassages",
+                  "totalPassages",
+                ],
+            },
+
           "JournalRankConfig":
             {
               "type": "object",
@@ -3716,6 +4185,30 @@
                 },
               "required":
                 ["documentId", "status", "notes", "annotations", "warnings"],
+            },
+          "PageImageEvidence":
+            {
+              "type": "object",
+              "required":
+                [
+                  "page",
+                  "width",
+                  "height",
+                  "bytes",
+                  "sourceId",
+                  "corpusRevision",
+                  "contentHash",
+                ],
+              "properties":
+                {
+                  "page": { "type": "integer", "minimum": 1 },
+                  "width": { "type": "integer" },
+                  "height": { "type": "integer" },
+                  "bytes": { "type": "integer" },
+                  "sourceId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                },
             },
           "DocumentLocation":
             {
@@ -4023,8 +4516,18 @@
                   "documentId": { "type": "string" },
                   "role": { "enum": ["user", "assistant"] },
                   "content": { "type": "string" },
+                  "reasoning":
+                    {
+                      "type": "string",
+                      "description": "Provider-returned thinking displayed separately from the final answer.",
+                    },
                   "createdAt": { "type": "string" },
                   "context": { "type": "string" },
+                  "readingLocation":
+                    {
+                      "$ref": "#/components/schemas/DocumentLocation",
+                      "description": "Original reading position at send time, retained independently of current navigation and source citations.",
+                    },
                   "attachments":
                     {
                       "type": "array",
@@ -4054,6 +4557,18 @@
                               "location":
                                 {
                                   "$ref": "#/components/schemas/DocumentLocation",
+                                },
+                              "sourceId": { "type": "string" },
+                              "pageImage":
+                                {
+                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                },
+                              "corpusRevision": { "type": "string" },
+                              "contentHash": { "type": "string" },
+                              "precision":
+                                {
+                                  "type": "string",
+                                  "enum": ["page", "block", "paragraph"],
                                 },
                             },
                           "required": ["text", "location"],
@@ -4086,6 +4601,40 @@
                 [
                   {
                     "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "reasoning" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text"],
+                            "properties": { "text": { "type": "string" } },
+                          },
+                      },
+                  },
+
+                  {
+                    "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "draft" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text", "reset"],
+                            "properties":
+                              {
+                                "text": { "type": "string" },
+                                "reset": { "type": "boolean" },
+                              },
+                          },
+                      },
+                  },
+
+                  {
+                    "type": "object",
                     "additionalProperties": false,
                     "required": ["event", "data"],
                     "properties":
@@ -4103,6 +4652,31 @@
                                     "type": "string",
                                     "enum": ["reading", "reading-image"],
                                   },
+                              },
+                          },
+                      },
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "type": "string", "enum": ["activity"] },
+                        "data":
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["phase", "message"],
+                            "properties":
+                              {
+                                "phase":
+                                  {
+                                    "type": "string",
+                                    "enum": ["indexing", "reading", "writing"],
+                                  },
+                                "message": { "type": "string" },
+                                "tool": { "type": "string" },
                               },
                           },
                       },
@@ -4294,6 +4868,18 @@
                   "vision": { "type": "boolean" },
                   "checkedAt": { "type": "string" },
                   "error": { "type": "string" },
+                  "tools":
+                    {
+                      "type": "string",
+                      "enum": ["passed", "unsupported", "failed"],
+                      "description": "Independent structured tool-call capability; missing means not checked.",
+                    },
+                  "toolError": { "type": "string" },
+                  "toolSchemaVersion":
+                    {
+                      "type": "string",
+                      "description": "Server-owned fingerprint of the checked tool protocol and schemas.",
+                    },
                 },
               "required": ["text", "vision", "checkedAt"],
             },
@@ -4321,6 +4907,13 @@
               "required": ["id", "name", "description", "isDefault"],
               "properties":
                 {
+                  "contextWindow":
+                    {
+                      "type": "integer",
+                      "description": "Provider-reported context capacity; omitted when unavailable",
+                    },
+                  "maxOutputTokens": { "type": "integer" },
+
                   "effortInfo":
                     {
                       "type": "object",
@@ -4374,11 +4967,6 @@
               "type": "object",
               "properties":
                 {
-                  "chatIncludeChapter":
-                    {
-                      "type": "boolean",
-                      "description": "Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value.",
-                    },
                   "primary": { "type": "string" },
                   "models":
                     {

@@ -969,26 +969,6 @@ export class EPUBReaderAdapter implements ReaderAdapter {
         .slice(0, 24000) ?? ""
     );
   }
-  async getChapterContext(
-    location: DocumentLocation,
-  ): Promise<ReaderSelection[]> {
-    if (location.type !== "epub") return [];
-    const chapter = this.chapter(location.href);
-    if (!chapter) throw new Error("无法读取引用所在章节");
-    return [
-      {
-        text: chapter.info.blocks
-          .filter((b) => !b.image)
-          .map((b) => b.text)
-          .join("\n\n"),
-        location: {
-          type: "epub",
-          href: location.href.split("#")[0],
-          progression: 0,
-        },
-      },
-    ];
-  }
   async destroy() {
     this.events.annotationHover?.(null);
     this.disposed = true;

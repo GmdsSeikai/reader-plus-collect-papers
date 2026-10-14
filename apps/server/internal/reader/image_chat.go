@@ -65,7 +65,7 @@ func (s *Server) blockImage(w http.ResponseWriter, r *http.Request, documentID, 
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	http.ServeContent(w, r, blockID+".png", time.Time{}, bytes.NewReader(data))
 }
-func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, document Document, provider, question, textContext string, references json.RawMessage, ids []string) {
+func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, document Document, provider, question, textContext string, references json.RawMessage, ids []string, readingLocation json.RawMessage) {
 	documentID := document.ID
 	if len(ids) > 4 {
 		fail(w, 400, "每次最多附加 4 张图片")
@@ -106,17 +106,23 @@ func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, document D
 		return
 	}
 	defer s.aiMu.Unlock()
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
+	ctx, finish, taskErr := s.beginDocumentTask(ctx, documentID)
+	if taskErr != nil {
+		fail(w, 404, "文档已不可用")
+		return
+	}
+	defer finish()
 	messages, err := s.Store.chatHistory(documentID)
 	if err != nil {
 		fail(w, 500, "无法读取聊天历史")
 		return
 	}
-	prompt, chat := makeChatInput(documentID, document.Title, document.Metadata.Abstract, question, textContext, descriptions.String(), messages)
-	if err := s.Store.saveMessage(Message{DocumentID: documentID, Role: "user", Content: question, Context: textContext, References: references, Attachments: attachments}); err != nil {
+	chat := &chatInput{DocumentID: documentID, Title: document.Title, Summary: document.Metadata.Abstract, Question: question, CurrentText: textContext + descriptions.String(), History: messages, ReadingLocation: readingLocation}
+	if err := s.Store.saveMessage(Message{DocumentID: documentID, Role: "user", Content: question, Context: textContext, References: references, Attachments: attachments, ReadingLocation: readingLocation}); err != nil {
 		fail(w, 500, "无法保存对话")
 		return
 	}
-	s.streamChat(ctx, cancel, w, documentID, config, AIInput{Prompt: prompt, Images: images, Chat: chat})
+	s.streamChat(ctx, cancel, w, documentID, config, AIInput{Prompt: question, Images: images, Chat: chat})
 }

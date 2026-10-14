@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { PDFBlock, TOCItem } from "@reader/core";
-import { chapterRange, headingPages, quoteSectionRange } from "./chapters";
+import { chapterRange, headingPages } from "./chapters";
 
 const entry = (
   id: string,
@@ -42,30 +42,6 @@ it("uses the page and its neighbours for a PDF without an outline", () => {
   expect(chapterRange([], 90, 90)).toEqual({ fromPage: 89, toPage: 90 });
 });
 
-it("quote sections split parts into their chapters", () => {
-  const toc = [
-    entry("part-1", 1, [entry("0-0", 3), entry("0-1", 12)]),
-    entry("part-2", 30, [entry("1-0", 31), entry("1-1", 44)]),
-  ];
-  expect(quoteSectionRange(toc, 15, 80)).toEqual({
-    fromPage: 12,
-    toPage: 29,
-  });
-  expect(quoteSectionRange(toc, 50, 80)).toEqual({
-    fromPage: 44,
-    toPage: 80,
-  });
-});
-
-it("quote sections without an outline span the quoted page and its neighbours", () => {
-  const pages = Array.from({ length: 20 }, (_, i) =>
-    entry(`page-${i + 1}`, i + 1),
-  );
-  expect(quoteSectionRange(pages, 7, 20)).toEqual({ fromPage: 6, toPage: 8 });
-  expect(quoteSectionRange([], 1, 20)).toEqual({ fromPage: 1, toPage: 2 });
-  expect(quoteSectionRange([], 20, 20)).toEqual({ fromPage: 19, toPage: 20 });
-});
-
 it("parsed headings mark sections when the PDF has no outline", () => {
   const heading = (page: number, text: string): PDFBlock => ({
     id: `${page}-${text}`,
@@ -88,19 +64,14 @@ it("parsed headings mark sections when the PDF has no outline", () => {
     heading(9, "3 Results"),
     { ...heading(5, "Figure 1"), label: "figure_title" },
   ];
-  expect(headingPages(blocks, true).starts).toEqual([1, 2, 4, 6, 9]);
-  expect(headingPages(blocks, false).starts).toEqual([1, 2, 4, 9]);
-  // Translation keeps the whole chapter; quotes stop at the subsection.
-  expect(chapterRange([], 7, 20, headingPages(blocks, false))).toEqual({
+  expect(headingPages(blocks).starts).toEqual([1, 2, 4, 9]);
+  // Translation keeps the whole chapter.
+  expect(chapterRange([], 7, 20, headingPages(blocks))).toEqual({
     fromPage: 4,
     toPage: 8,
   });
-  expect(quoteSectionRange([], 7, 20, headingPages(blocks, true))).toEqual({
-    fromPage: 6,
-    toPage: 8,
-  });
   // A fully parsed last chapter runs to the end of the document.
-  expect(chapterRange([], 15, 20, headingPages(blocks, false))).toEqual({
+  expect(chapterRange([], 15, 20, headingPages(blocks))).toEqual({
     fromPage: 9,
     toPage: 20,
   });
@@ -130,7 +101,7 @@ it("parsed headings never reach past the parsed pages of a long book", () => {
   });
   // A parsed run without headings does not grow beyond the neighbours.
   expect(
-    quoteSectionRange([], 30, 300, {
+    chapterRange([], 30, 300, {
       starts: [],
       parsed: [28, 29, 30, 31, 32],
     }),

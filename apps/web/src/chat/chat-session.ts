@@ -1,7 +1,13 @@
 import { api, chat, type ChatStreamEvent } from "@reader/api";
-import type { ImageAttachment, Message, SourceReference } from "@reader/core";
+import type {
+  DocumentLocation,
+  ImageAttachment,
+  Message,
+  SourceReference,
+} from "@reader/core";
 import { refreshAIConfig } from "../store";
 export type ChatInput = {
+  readingLocation?: DocumentLocation;
   provider: string;
   prompt: string;
   context: string;
@@ -9,6 +15,8 @@ export type ChatInput = {
   attachments: ImageAttachment[];
 };
 export type PendingAnswer = {
+  reasoning?: string;
+  draft?: string;
   key: string;
   content: string;
   phase:
@@ -19,6 +27,7 @@ export type PendingAnswer = {
     | "unconfirmed"
     | "cancelled";
   notice: string;
+  activity?: Extract<ChatStreamEvent, { event: "activity" }>["data"];
   fallback: string;
   before: Set<string>;
   input: ChatInput;
@@ -58,6 +67,7 @@ const transport: ChatTransport = {
         input.attachments.map((image) => image.id),
         undefined,
         emit,
+        input.readingLocation,
       );
     } finally {
       // The server records failed primary attempts even when a fallback succeeds.
@@ -167,24 +177,55 @@ export class ChatSession {
     const emit = (event: ChatStreamEvent) => {
       if (!this.current(serial) || controller.signal.aborted || terminal)
         return;
-      if (event.event === "delta") {
-        pending.content += event.data.text;
+      if (event.event === "reasoning") {
+        pending.reasoning = (pending.reasoning || "") + event.data.text;
         pending.notice = "";
+        pending.activity = undefined;
         if (!this.frame) this.frame = requestAnimationFrame(this.flush);
         return;
       }
-      if (event.event === "status")
+      if (event.event === "draft") {
+        pending.draft = event.data.reset
+          ? ""
+          : (pending.draft || "") + event.data.text;
+        if (pending.draft) {
+          pending.notice = "";
+          pending.activity = undefined;
+        }
+        if (!this.frame) this.frame = requestAnimationFrame(this.flush);
+        return;
+      }
+      if (event.event === "delta") {
+        pending.draft = "";
+        pending.content += event.data.text;
+        pending.notice = "";
+        pending.activity = undefined;
+        if (!this.frame) this.frame = requestAnimationFrame(this.flush);
+        return;
+      }
+      if (event.event === "status") {
+        pending.activity = undefined;
         pending.notice =
           event.data.status === "reading-image"
             ? "正在阅读图片…"
             : "正在阅读上下文…";
-      if (event.event === "fallback") pending.fallback = event.data.message;
+      }
+      if (event.event === "fallback") {
+        pending.activity = undefined;
+        pending.fallback = event.data.message;
+      }
+      if (event.event === "activity") {
+        pending.activity = event.data;
+        pending.notice = event.data.message;
+      }
       if (event.event === "error") {
+        pending.activity = undefined;
         terminal = true;
         pending.phase = "incomplete";
         pending.notice = `${event.data.error}（回答未完成）`;
       }
       if (event.event === "done") {
+        pending.activity = undefined;
         terminal = true;
         pending.phase = "syncing";
         pending.notice = "回答已保存，正在同步…";
@@ -264,6 +305,7 @@ export class ChatSession {
         messageKeys[assistant.id] = pending.key;
         pending.savedId = assistant.id;
         pending.content = assistant.content;
+        pending.reasoning = assistant.reasoning;
         pending.phase = "saved";
         pending.notice = "";
       } else {

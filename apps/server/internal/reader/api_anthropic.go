@@ -27,6 +27,10 @@ func streamAnthropic(ctx context.Context, c APIConnection, req completionRequest
 	payload["system"] = readerSystemPrompt
 	delete(payload, "n")
 	delete(payload, "stream_options")
+	return requestAnthropic(ctx, c, payload, emit)
+}
+
+func requestAnthropic(ctx context.Context, c APIConnection, payload map[string]any, emit func(ProviderEvent) error) (GenerateResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return GenerateResult{}, generationError(ErrorConfiguration, "无法构造 API 请求")
@@ -242,4 +246,37 @@ func readAnthropicStream(ctx context.Context, r io.Reader, c APIConnection, emit
 		return GenerateResult{}, generationError(ErrorNetwork, "Messages API 流中断或事件过大")
 	}
 	return GenerateResult{}, protocol()
+}
+
+// The Messages adapter currently supports text generation, so document chat
+// uses the shared pre-retrieval path and persists the same active window.
+func anthropicDocumentCompletion(ctx context.Context, c APIConnection, payload map[string]any, messages []toolCompletionMessage, callbacks ...toolStreamCallbacks) (toolCompletionResult, error) {
+	var system []string
+	var history []completionMessage
+	for _, m := range messages {
+		text, ok := m.Content.(string)
+		if !ok || len(m.Calls) > 0 || m.CallID != "" || len(m.PageImages) > 0 {
+			return toolCompletionResult{}, generationError(ErrorCapability, "Messages API 暂未适配文档工具消息")
+		}
+		if m.Role == "system" {
+			system = append(system, text)
+		} else {
+			history = append(history, completionMessage{Role: m.Role, Content: text})
+		}
+	}
+	payload["system"], payload["messages"] = strings.Join(system, "\n\n"), history
+	delete(payload, "n")
+	delete(payload, "stream_options")
+	var response toolCompletionResult
+	result, err := requestAnthropic(ctx, c, payload, func(event ProviderEvent) error {
+		for _, metric := range event.Metrics {
+			response.Model, response.Tokens = metric.Model, metric.Tokens
+		}
+		if len(callbacks) > 0 && callbacks[0].Draft != nil && event.Text != "" {
+			return callbacks[0].Draft(event.Text, false)
+		}
+		return nil
+	})
+	response.Text = result.Text
+	return response, err
 }

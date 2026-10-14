@@ -11,20 +11,14 @@ export interface ParsedHeadings {
   parsed: number[];
 }
 
-/**
- * Pages where parsed headings start a section. Chapters skip numbered
- * subsections such as "2.1"; quotes keep them for a narrower section.
- */
-export function headingPages(
-  blocks: PDFBlock[],
-  subsections: boolean,
-): ParsedHeadings {
+/** Chapter headings for translation, excluding numbered subsections. */
+export function headingPages(blocks: PDFBlock[]): ParsedHeadings {
   return {
     starts: blocks
       .filter(
         (b) =>
           (b.label === "paragraph_title" || b.label === "doc_title") &&
-          (subsections || !/^\s*[\dA-Z]+\.\d/.test(b.text)),
+          !/^\s*[\dA-Z]+\.\d/.test(b.text),
       )
       .map((b) => b.page),
     parsed: blocks.map((b) => b.page),
@@ -43,42 +37,14 @@ export function chapterRange(
   pages: number,
   headings?: ParsedHeadings,
 ): PageRange {
-  return outlineRange(toc, page, pages, headings, (item) => [item]);
-}
-
-/**
- * The section around a quoted page, sent as chat context. Outline entries two
- * levels deep split parts into chapters.
- */
-export function quoteSectionRange(
-  toc: TOCItem[],
-  page: number,
-  pages: number,
-  headings?: ParsedHeadings,
-): PageRange {
-  return outlineRange(toc, page, pages, headings, (item) => [
-    item,
-    ...item.children,
-  ]);
-}
-
-function outlineRange(
-  toc: TOCItem[],
-  page: number,
-  pages: number,
-  headings: ParsedHeadings | undefined,
-  expand: (item: TOCItem) => TOCItem[],
-): PageRange {
   const entries = toc.length === 1 ? toc[0].children : toc;
   const outline = [
     ...new Set(
-      entries
-        .flatMap(expand)
-        .flatMap((item) =>
-          item.location.type === "pdf" && !item.id.startsWith("page-")
-            ? [item.location.page]
-            : [],
-        ),
+      entries.flatMap((item) =>
+        item.location.type === "pdf" && !item.id.startsWith("page-")
+          ? [item.location.page]
+          : [],
+      ),
     ),
   ].sort((a, b) => a - b);
   const current = Math.min(Math.max(1, page), pages);

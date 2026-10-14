@@ -308,6 +308,31 @@ export function Settings({
     await checkAll([`api:${model.id}`], () => "text", snapshot);
     warnWithoutVision(apiModels);
   };
+  const checkTools = async (model: AgentModel) => {
+    const snapshot = useReaderStore.getState().aiConfig;
+    if (!snapshot) return;
+    setSaving(true);
+    try {
+      const capability = await api.testAI("api", "tools", model.id);
+      const current = useReaderStore.getState().aiConfig;
+      if (current && current.api.url === snapshot.api.url)
+        setAIConfig({
+          ...current,
+          capabilities: {
+            ...current.capabilities,
+            [`api:${model.id}`]: capability,
+          },
+        });
+      if (capability.tools !== "passed")
+        toast.error(
+          capability.toolError || "工具调用未通过，仍可使用检索辅助回答",
+        );
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const saveConfig = async (change: (latest: AIConfig) => AIConfig) => {
     setSaving(true);
     try {
@@ -503,6 +528,19 @@ export function Settings({
                                 检测
                               </Button>
                             )}
+                            {result?.text && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={saving || testing.has(id)}
+                                onClick={() => void checkTools(model)}
+                                title={result.toolError}
+                              >
+                                {result.tools === "passed"
+                                  ? "检索工具已通过"
+                                  : "检测检索工具"}
+                              </Button>
+                            )}
                             {model.custom && (
                               <Button
                                 variant="ghost"
@@ -657,6 +695,52 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="reading" className="settings-panel" keepMounted>
+            <section className="mb-6 space-y-4">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={theme.autoGenerateOverview ?? false}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoGenerateOverview: !!checked })
+                  }
+                />
+                <span>
+                  导入后生成文档概要
+                  <span className="block text-xs text-muted-foreground">
+                    使用已配置的文字模型，单独记录用量；已有文档按需生成。
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm">
+                文档上下文上限（可选）
+                <Input
+                  className="mt-2 max-w-48"
+                  type="number"
+                  min={8192}
+                  max={1048576}
+                  step={1024}
+                  defaultValue={theme.documentContextTokens || ""}
+                  placeholder="自动获取"
+                  key={theme.documentContextTokens}
+                  onBlur={(e) => {
+                    const n = Number(e.currentTarget.value);
+                    if (
+                      Number.isInteger(n) &&
+                      (n === 0 || n >= 8192) &&
+                      n <= 1048576
+                    )
+                      setTheme({ documentContextTokens: n });
+                    else
+                      e.currentTarget.value = String(
+                        theme.documentContextTokens || "",
+                      );
+                  }}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  优先读取模型信息或 Codex 配置；留空为自动，未知时采用
+                  64K。填写后只限制上限。
+                </span>
+              </label>
+            </section>
             <section className="mb-6">
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox
@@ -874,37 +958,6 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="agent" className="settings-panel" keepMounted>
-            <section className="mb-6">
-              <label className="flex items-start gap-2 text-sm">
-                <Checkbox
-                  aria-label="提问时附带本章原文"
-                  checked={config?.chatIncludeChapter === true}
-                  disabled={!config || saving || aiModelSaving || loading}
-                  onCheckedChange={async (checked) => {
-                    setSaving(true);
-                    try {
-                      const latest = await api.aiConfig();
-                      setAIConfig(
-                        await api.saveAIConfig({
-                          ...latest,
-                          chatIncludeChapter: !!checked,
-                        }),
-                      );
-                    } catch (error) {
-                      toast.error((error as Error).message);
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                />
-                <span>
-                  提问时附带本章原文
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                    普通提问默认附带标题和已有摘要。引用或解释选区时，同时附带选区所在的完整章节。历史对话仍会保留。
-                  </span>
-                </span>
-              </label>
-            </section>
             <section>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-sm font-medium">Agent 连接</h3>

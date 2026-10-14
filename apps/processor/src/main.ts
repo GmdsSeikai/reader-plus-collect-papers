@@ -8,6 +8,7 @@ import { detectRegions } from "./detect";
 import { assignText, readingRegions, isAsset, type Region } from "./layout";
 import { extractTextSpans } from "./text";
 import { digest, model, resolveModel } from "./model";
+import { renderPage } from "./render-page";
 
 Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
 const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -91,23 +92,8 @@ try {
   for (let number = first; number <= last; number++) {
     const pageStart = performance.now();
     const page = await pdf.getPage(number);
-    const original = page.getViewport({ scale: 1 });
-    const scale = Math.min(
-      2,
-      Math.sqrt(4_000_000 / (original.width * original.height)),
-    );
-    const viewport = page.getViewport({ scale });
-    const canvas = createCanvas(
-      Math.ceil(viewport.width),
-      Math.ceil(viewport.height),
-    );
+    const { canvas, scale } = await renderPage(page);
     const context = canvas.getContext("2d");
-    await page.render({
-      canvas: canvas as unknown as HTMLCanvasElement,
-      canvasContext: context as unknown as CanvasRenderingContext2D,
-      viewport,
-      background: "white",
-    }).promise;
     const regions = await detectRegions(session, canvas);
     const spans = await extractTextSpans(page, scale);
     if (!spans.length) incompletePages.push(number);

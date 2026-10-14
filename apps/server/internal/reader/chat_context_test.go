@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -58,12 +60,13 @@ func TestChatKeepsLongSourceWithoutRepeatingIt(t *testing.T) {
 func TestChatHistoryKeepsQuestionAnswerBoundaries(t *testing.T) {
 	source := strings.Repeat("完整中文证据。", 6000)
 	messages := []Message{{Role: "assistant", Content: "不应出现的孤立回答"}, {Role: "user", Content: "需要保留的问题", Context: source}, {Role: "assistant", Content: strings.Repeat("很长的中文回答。", 6000)}}
-	prompt, chat := makeChatInput("doc", "title", "", "本轮问题", source, "", messages)
+	chat := &chatInput{DocumentID: "doc", Title: "title", Question: "本轮问题", CurrentText: source, History: messages}
+	prompt := chat.legacyPrompt()
 	if strings.Contains(prompt, "不应出现的孤立回答") {
 		t.Fatal("included an orphan answer")
 	}
-	if !strings.Contains(prompt, "需要保留的问题") || !strings.Contains(prompt, "历史回答已截短") {
-		t.Fatal("missing paired question or truncation marker")
+	if !strings.Contains(prompt, "需要保留的问题") || strings.Contains(prompt, "历史回答已截短") {
+		t.Fatal("history was truncated or lost its paired question")
 	}
 	if len(chat.Sources) != 1 || chat.Sources[0].Text != source {
 		t.Fatal("source was truncated or duplicated")
@@ -81,7 +84,8 @@ func TestChatHistorySourcesStayWithinTotalBudget(t *testing.T) {
 		{Role: "user", Content: "第一问", Context: old}, {Role: "assistant", Content: "答一"},
 		{Role: "user", Content: "第二问", Context: recent}, {Role: "assistant", Content: "答二"},
 	}
-	prompt, chat := makeChatInput("doc", "title", "", "第三问", current, "", messages)
+	chat := &chatInput{DocumentID: "doc", Title: "title", Question: "第三问", CurrentText: current, History: messages}
+	prompt := chat.legacyPrompt()
 	total := 0
 	for _, source := range chat.Sources {
 		total += len(source.Text)
@@ -138,7 +142,8 @@ func TestChatAddsDocumentSummaryWithoutImplicitExcerpt(t *testing.T) {
 
 func TestChatSummaryIsSeparateFromExplicitSources(t *testing.T) {
 	source := "手动引用的完整原文"
-	prompt, chat := makeChatInput("doc", "文章", "已有摘要", "继续解释", source, "", []Message{{Role: "user", Content: "上一问", Context: source}})
+	chat := &chatInput{DocumentID: "doc", Title: "文章", Summary: "已有摘要", Question: "继续解释", CurrentText: source, History: []Message{{Role: "user", Content: "上一问", Context: source}}}
+	prompt := chat.legacyPrompt()
 	if strings.Count(prompt, source) != 1 || len(chat.Sources) != 2 || chat.CurrentSource == chat.SummarySource {
 		t.Fatalf("sources not deduplicated/separated: %s", prompt)
 	}
@@ -146,33 +151,10 @@ func TestChatSummaryIsSeparateFromExplicitSources(t *testing.T) {
 	if strings.Contains(next, "已有摘要") || !strings.Contains(next, "Document summary: "+chat.SummarySource) {
 		t.Fatal(next)
 	}
-	_, empty := makeChatInput("doc", "文章", "", "一般问题", "", "", nil)
+	empty := &chatInput{DocumentID: "doc", Title: "文章", Question: "一般问题"}
+	_ = empty.legacyPrompt()
 	if len(empty.Sources) != 0 || empty.CurrentSource != "" || empty.SummarySource != "" {
 		t.Fatalf("invented sources: %+v", empty)
-	}
-}
-
-func TestChatChapterPreferencePersists(t *testing.T) {
-	s := testServer(t)
-	if s.aiConfig().ChatIncludeChapter != nil {
-		t.Fatal("chapter context should default off")
-	}
-	for _, enabled := range []bool{true, false} {
-		c := AIConfig{ChatIncludeChapter: &enabled}
-		if r := request(t, s, "PUT", "/api/ai/config", configJSON(c)); r.Code != 200 {
-			t.Fatal(r.Body)
-		}
-		if r := request(t, s, "PUT", "/api/ai/config", strings.NewReader(`{"models":{}}`)); r.Code != 200 {
-			t.Fatal(r.Body)
-		}
-		var got AIConfig
-		r := request(t, s, "GET", "/api/ai/config", nil)
-		if err := json.Unmarshal(r.Body.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		if got.ChatIncludeChapter == nil || *got.ChatIncludeChapter != enabled {
-			t.Fatalf("preference lost after omitted update: %+v", got.ChatIncludeChapter)
-		}
 	}
 }
 
@@ -234,5 +216,28 @@ func TestChatAcceptsConfirmedLongContextUpToHardCap(t *testing.T) {
 	r = request(t, s, "POST", "/api/documents/"+d.ID+"/chat", body(strings.Repeat("证", chatContextBytes/3+1)))
 	if r.Code != 400 {
 		t.Fatal(r.Code, r.Body)
+	}
+}
+
+func TestRetiredChapterPreferenceDoesNotChangeSavedConnections(t *testing.T) {
+	s := testServer(t)
+	file := filepath.Join(s.Store.Root, "ai-connections.json")
+	raw := `{"config":{"primary":"api","models":{"api":"chosen-model"},"api":{"url":"https://example.test/v1","key":"fixture-key"},"chatIncludeChapter":true}}`
+	if err := os.WriteFile(file, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := s.aiConfig()
+	if c.Primary != "api" || c.Models["api"] != "chosen-model" || c.API.Key != "fixture-key" {
+		t.Fatal("retired field discarded configured connection")
+	}
+	if err := s.writeAIConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(file)
+	if err != nil || strings.Contains(string(saved), "chatIncludeChapter") {
+		t.Fatal("retired field persisted", err)
+	}
+	if c = s.aiConfig(); c.API.Key != "fixture-key" || c.Models["api"] != "chosen-model" {
+		t.Fatal("connection changed on save")
 	}
 }

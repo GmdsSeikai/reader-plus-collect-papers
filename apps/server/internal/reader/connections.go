@@ -30,19 +30,20 @@ type APIConnection struct {
 	HasKey   bool   `json:"hasKey"`
 }
 type Capability struct {
-	PendingVision bool   `json:"pendingVision,omitempty"`
-	Text          bool   `json:"text"`
-	Vision        bool   `json:"vision"`
-	CheckedAt     string `json:"checkedAt"`
-	Error         string `json:"error,omitempty"`
-	Fingerprint   string `json:"-"`
+	Tools             string `json:"tools,omitempty"`
+	ToolSchemaVersion string `json:"toolSchemaVersion,omitempty"`
+	ToolError         string `json:"toolError,omitempty"`
+	PendingVision     bool   `json:"pendingVision,omitempty"`
+	Text              bool   `json:"text"`
+	Vision            bool   `json:"vision"`
+	CheckedAt         string `json:"checkedAt"`
+	Error             string `json:"error,omitempty"`
+	Fingerprint       string `json:"-"`
 }
 type AIConfig struct {
-	// Optional for old clients; nil means automatic chapter excerpts are off.
-	ChatIncludeChapter *bool                        `json:"chatIncludeChapter,omitempty"`
-	Primary            string                       `json:"primary"`
-	Models             map[string]string            `json:"models"`
-	Efforts            map[string]map[string]string `json:"efforts,omitempty"`
+	Primary string                       `json:"primary"`
+	Models  map[string]string            `json:"models"`
+	Efforts map[string]map[string]string `json:"efforts,omitempty"`
 	// Translation choices are independent of chat. An empty model means
 	// Reader picks the fast tier from the live catalog.
 	TranslationModels  map[string]string            `json:"translationModels,omitempty"`
@@ -64,11 +65,15 @@ type savedConfig struct {
 	Fingerprints map[string]string `json:"fingerprints"`
 }
 type AIInput struct {
-	Chat   *chatInput
-	Effort string
-	Prompt string
-	Image  []byte
-	Images [][]byte
+	SourceOnly    bool
+	ContextInfo   func(window, used int)
+	UsageSink     func(UsageCall) error
+	UsageProvider string
+	Chat          *chatInput
+	Effort        string
+	Prompt        string
+	Image         []byte
+	Images        [][]byte
 }
 
 func (in AIInput) images() [][]byte {
@@ -82,9 +87,10 @@ func (in AIInput) images() [][]byte {
 }
 
 type AIResult struct {
-	Text     string
-	Provider string
-	Fallback bool
+	Reasoning string
+	Text      string
+	Provider  string
+	Fallback  bool
 }
 
 func validAgent(p string) bool { return p == "codex" || p == "claude" || p == "kimi" || p == "api" }
@@ -115,6 +121,11 @@ func (s *Server) readAIConfig() AIConfig {
 	}
 	for k, v := range c.Capabilities {
 		v.Fingerprint = stored.Fingerprints[k]
+		if v.ToolSchemaVersion != documentToolSchemaVersion {
+			v.Tools = ""
+			v.ToolError = ""
+			v.ToolSchemaVersion = ""
+		}
 		c.Capabilities[k] = v
 	}
 	return c
@@ -277,9 +288,6 @@ func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old := s.readAIConfig()
-	if c.ChatIncludeChapter == nil {
-		c.ChatIncludeChapter = old.ChatIncludeChapter
-	}
 	if c.Efforts == nil {
 		c.Efforts = old.Efforts
 	}
@@ -368,6 +376,10 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 		p = apiCapabilityKey(model)
 	}
 	mode := r.URL.Query().Get("capability")
+	if mode == "tools" {
+		s.testDocumentToolConnection(w, r, p)
+		return
+	}
 	if mode != "" && mode != "text" && mode != "vision" || mode == "vision" && p == "text-api" {
 		fail(w, 400, "无效的检测能力")
 		return
@@ -375,6 +387,10 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 	c := s.aiConfig()
 	fingerprint := configPrint(c, p)
 	cap := Capability{CheckedAt: now(), Fingerprint: fingerprint}
+	if previous := c.Capabilities[p]; previous.Fingerprint == fingerprint {
+		cap.Tools, cap.ToolError = previous.Tools, previous.ToolError
+		cap.ToolSchemaVersion = previous.ToolSchemaVersion
+	}
 	if mode == "vision" {
 		if !capable(c, p, false) {
 			fail(w, 409, "请先完成文本检测")

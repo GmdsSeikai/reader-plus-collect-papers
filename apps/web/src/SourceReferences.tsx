@@ -7,6 +7,7 @@ import type {
   TOCItem,
 } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
+import { api } from "@reader/api";
 import {
   referenceCards,
   referenceLabel,
@@ -36,6 +37,14 @@ export function SourceReferences({
     setPending(card.id);
     setError("");
     try {
+      if (card.sourceId) {
+        await api.validateEvidence(
+          message.documentId,
+          message.id,
+          card.sourceId,
+        );
+        if (serial !== request.current) return;
+      }
       let target = card.location;
       if (!target) {
         // Search the original excerpt, not a model-generated paraphrase.

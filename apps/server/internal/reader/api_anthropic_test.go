@@ -1,7 +1,10 @@
 package reader
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -56,5 +59,61 @@ func TestAnthropicThinkingIsNotAnswerText(t *testing.T) {
 	result, err := readAnthropicStream(t.Context(), strings.NewReader(wire), APIConnection{}, func(e ProviderEvent) error { text += e.Text; return nil })
 	if err != nil || result.Text != "answer" || text != "answer" {
 		t.Fatalf("%+v %v %s", result, err, text)
+	}
+}
+
+func TestAnthropicDocumentRetrievalConversation(t *testing.T) {
+	s, _ := prepareConversationFixture(t)
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			respond(w, 200, map[string]any{"data": []any{map[string]string{"id": "test"}}})
+			return
+		}
+		calls++
+		if r.URL.Path != "/messages" {
+			t.Errorf("wrong protocol: %s", r.URL.Path)
+		}
+		var payload struct {
+			System   string
+			Messages []completionMessage
+			Tools    []any
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if len(payload.Tools) > 0 || payload.System == "" {
+			t.Error("invalid retrieval payload")
+		}
+		if !strings.Contains(jsonText(payload.Messages), "first-turn-marker") {
+			t.Error("lost conversation history")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, anthropicTestWire("answer"))
+	}))
+	defer upstream.Close()
+	configureDocumentAPI(t, s, upstream.URL)
+	c := s.aiConfig()
+	c.API.Protocol = "anthropic"
+	passModels(&c, map[string]bool{"test": false})
+	if err := s.writeAIConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	for _, question := range []string{"first-turn-marker", "继续"} {
+		r := conversationRequest(t, s, "api", question)
+		if strings.Count(r.Body.String(), "event: done") != 1 {
+			t.Fatal(r.Body)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("unexpected capability calls: %d", calls)
+	}
+	var raw string
+	if err := s.Store.DB.QueryRow("SELECT body FROM document_conversations WHERE document_id='doc'").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var state documentConversation
+	if err := json.Unmarshal([]byte(raw), &state); err != nil || len(state.Messages) != 5 {
+		t.Fatalf("conversation not persisted: %v %d", err, len(state.Messages))
 	}
 }
