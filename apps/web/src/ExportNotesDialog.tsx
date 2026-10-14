@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Download } from "lucide-react";
+import { Copy, Download, FileDown, LoaderCircle } from "lucide-react";
 import type { Annotation, Document, Message } from "@reader/core";
 import { api } from "@reader/api";
 import { Button } from "@reader/ui/components/button";
@@ -20,7 +20,8 @@ import {
   notesMarkdown,
   type ExportPart,
 } from "./notes-export";
-import { downloadText } from "./download";
+import { downloadText, fileTitle } from "./download";
+import { exportAnnotatedPDFWithToast } from "./annotated-pdf-export";
 
 const storageKey = "reader.notes-export";
 function savedParts(): ExportPart[] {
@@ -49,6 +50,7 @@ export function ExportNotesDialog({
 }) {
   const [parts, setParts] = useState<ExportPart[]>(savedParts);
   const [paperNote, setPaperNote] = useState<string | null>(null);
+  const [exportingPDF, setExportingPDF] = useState(false);
   useEffect(() => {
     let alive = true;
     void api
@@ -116,7 +118,7 @@ export function ExportNotesDialog({
             onClick={() => {
               downloadText(
                 markdown(),
-                `${doc.title.replace(/[/\\:*?"<>|]/g, "-").slice(0, 80)}-notes.md`,
+                `${fileTitle(doc.title)}-notes.md`,
                 "text/markdown",
               );
               onClose();
@@ -126,6 +128,30 @@ export function ExportNotesDialog({
             导出
           </Button>
         </div>
+        {doc.type === "pdf" && (
+          <div className="flex items-center gap-3 border-t pt-4">
+            <p className="flex-1 text-xs leading-5 text-muted-foreground">
+              或把高亮、下划线、笔记和问答写进 PDF
+              副本，可在其他阅读器中查看，原文件不变
+            </p>
+            <Button
+              variant="outline"
+              disabled={exportingPDF}
+              onClick={async () => {
+                setExportingPDF(true);
+                await exportAnnotatedPDFWithToast(doc);
+                setExportingPDF(false);
+              }}
+            >
+              {exportingPDF ? (
+                <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <FileDown />
+              )}
+              导出 PDF
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
