@@ -21,6 +21,7 @@ type documentConversation struct {
 	PassageCount    int                     `json:"passageCount"`
 	SourceOffset    int                     `json:"sourceOffset"`
 	ReadBlocks      []string                `json:"readBlocks,omitempty"`
+	ReadPages       []documentPageImage     `json:"readPages,omitempty"`
 	OverviewVersion string                  `json:"overviewVersion,omitempty"`
 	Messages        []toolCompletionMessage `json:"messages,omitempty"`
 	Compactions     int                     `json:"compactions"`
@@ -73,10 +74,14 @@ func (a *documentAgent) beginConversation(ctx context.Context, in AIInput, key s
 	if c.Revision != "" && c.Revision != a.corpus.Revision {
 		c.SourceOffset += c.PassageCount
 		c.ReadBlocks = nil
+		c.ReadPages = nil
 		c.SeenSources = map[string]bool{}
 	}
 	c.Revision = a.corpus.Revision
-	c.PassageCount = len(a.corpus.Passages)
+	c.PassageCount = len(a.corpus.Passages) + a.corpus.Coverage.TotalUnits
+	for _, image := range c.ReadPages {
+		a.Evidence = append(a.Evidence, pageEvidence(image))
+	}
 	seen := map[string]bool{}
 	for _, block := range c.ReadBlocks {
 		seen[block] = true
@@ -181,9 +186,14 @@ func (a *documentAgent) commitConversation(ctx context.Context, tx *sql.Tx, mess
 	c.NativeDirty = false
 	c.NativePending = ""
 	c.ReadBlocks = nil
+	c.ReadPages = nil
 	for _, e := range a.Evidence {
 		if e.Revision == a.corpus.Revision {
-			c.ReadBlocks = append(c.ReadBlocks, e.BlockID)
+			if e.PageImage != nil {
+				c.ReadPages = append(c.ReadPages, *e.PageImage)
+			} else {
+				c.ReadBlocks = append(c.ReadBlocks, e.BlockID)
+			}
 		}
 	}
 	// Preserve provider continuation fields in the private active API window.

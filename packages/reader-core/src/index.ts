@@ -435,6 +435,16 @@ export interface Provider {
   status: string;
 }
 export interface SourceReference {
+  /** Rendered page evidence, separate from extracted text. */
+  pageImage?: {
+    page: number;
+    width: number;
+    height: number;
+    bytes: number;
+    sourceId: string;
+    corpusRevision: string;
+    contentHash: string;
+  };
   /** Server-issued evidence from a completed document reading attempt. */
   sourceId?: string;
   corpusRevision?: string;

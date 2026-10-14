@@ -62,7 +62,15 @@ func serveBoundDocumentMCP(binding *documentToolBinding) (string, string, func()
 				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
 			}
 
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}}}, nil
+			content := []mcp.Content{&mcp.TextContent{Text: string(raw)}}
+			for _, page := range resultPageImages(raw) {
+				data, err := agent.pageImageData(page)
+				if err != nil {
+					return nil, err
+				}
+				content = append(content, &mcp.TextContent{Text: "[" + page.SourceID + "] " + pageEvidence(page).Text}, &mcp.ImageContent{Data: data, MIMEType: "image/png"})
+			}
+			return &mcp.CallToolResult{Content: content}, nil
 		})
 	}
 	token := id() + id()

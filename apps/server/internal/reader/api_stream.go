@@ -49,6 +49,8 @@ type completionMessage struct {
 // History holds earlier completed turns of the same conversation; the new user
 // turn is appended after it. Effort is omitted unless the model advertises it.
 type completionRequest struct {
+	Vision        bool
+	PageImageData func(documentPageImage) ([]byte, error)
 	ContextWindow int
 	Model, Effort string
 	History       []completionMessage

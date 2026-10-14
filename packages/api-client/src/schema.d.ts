@@ -1289,6 +1289,7 @@ export interface paths {
                             kind?: "selection" | "section";
                             location: components["schemas"]["DocumentLocation"];
                             sourceId?: string;
+                            pageImage?: components["schemas"]["PageImageEvidence"];
                             corpusRevision?: string;
                             contentHash?: string;
                             /** @enum {string} */
@@ -3371,6 +3372,15 @@ export interface components {
             annotations: number;
             warnings: string[];
         };
+        PageImageEvidence: {
+            page: number;
+            width: number;
+            height: number;
+            bytes: number;
+            sourceId: string;
+            corpusRevision: string;
+            contentHash: string;
+        };
         DocumentLocation: {
             /** @constant */
             type: "pdf";
@@ -3471,6 +3481,7 @@ export interface components {
                 kind?: "selection" | "section";
                 location: components["schemas"]["DocumentLocation"];
                 sourceId?: string;
+                pageImage?: components["schemas"]["PageImageEvidence"];
                 corpusRevision?: string;
                 contentHash?: string;
                 /** @enum {string} */

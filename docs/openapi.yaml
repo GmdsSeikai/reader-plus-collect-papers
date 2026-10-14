@@ -1565,6 +1565,10 @@
                                                   "$ref": "#/components/schemas/DocumentLocation",
                                                 },
                                               "sourceId": { "type": "string" },
+                                              "pageImage":
+                                                {
+                                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                                },
                                               "corpusRevision":
                                                 { "type": "string" },
                                               "contentHash":
@@ -4043,6 +4047,30 @@
               "required":
                 ["documentId", "status", "notes", "annotations", "warnings"],
             },
+          "PageImageEvidence":
+            {
+              "type": "object",
+              "required":
+                [
+                  "page",
+                  "width",
+                  "height",
+                  "bytes",
+                  "sourceId",
+                  "corpusRevision",
+                  "contentHash",
+                ],
+              "properties":
+                {
+                  "page": { "type": "integer", "minimum": 1 },
+                  "width": { "type": "integer" },
+                  "height": { "type": "integer" },
+                  "bytes": { "type": "integer" },
+                  "sourceId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                },
+            },
           "DocumentLocation":
             {
               "oneOf":
@@ -4300,6 +4328,10 @@
                                   "$ref": "#/components/schemas/DocumentLocation",
                                 },
                               "sourceId": { "type": "string" },
+                              "pageImage":
+                                {
+                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                },
                               "corpusRevision": { "type": "string" },
                               "contentHash": { "type": "string" },
                               "precision":

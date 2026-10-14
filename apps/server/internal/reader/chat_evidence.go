@@ -83,10 +83,11 @@ func (s *Server) validateChatEvidence(w http.ResponseWriter, r *http.Request) {
 	var message struct {
 		Role       string `json:"role"`
 		References []struct {
-			SourceID string `json:"sourceId"`
-			Revision string `json:"corpusRevision"`
-			Hash     string `json:"contentHash"`
-			Text     string `json:"text"`
+			PageImage *documentPageImage `json:"pageImage"`
+			SourceID  string             `json:"sourceId"`
+			Revision  string             `json:"corpusRevision"`
+			Hash      string             `json:"contentHash"`
+			Text      string             `json:"text"`
 		} `json:"references"`
 	}
 	if json.Unmarshal([]byte(body), &message) != nil || message.Role != "assistant" {
@@ -95,8 +96,13 @@ func (s *Server) validateChatEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	valid := false
 	for _, ref := range message.References {
-		if ref.SourceID == r.PathValue("source") && ref.Revision == revision && ref.Hash == sourceKey(ref.Text) {
-			valid = true
+		if ref.SourceID == r.PathValue("source") && ref.Revision == revision {
+			if ref.PageImage != nil {
+				_, image, err := s.cachedPageImage(d.ID, revision, ref.PageImage.Page)
+				valid = err == nil && image.Hash == ref.Hash && ref.PageImage.Revision == revision
+			} else {
+				valid = ref.Hash == sourceKey(ref.Text)
+			}
 			break
 		}
 	}

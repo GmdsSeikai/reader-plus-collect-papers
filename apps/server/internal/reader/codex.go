@@ -83,7 +83,8 @@ func startCodexSession(work, model string, overrides []string, token string) (*c
 		return nil, generationError(ErrorConfiguration, "无法启动 Codex App Server，请检查 CLI 安装及版本")
 	}
 	scan := bufio.NewScanner(stdout)
-	scan.Buffer(make([]byte, 4096), maxProviderFrame)
+	// MCP completion events can echo up to 32 MiB of page images as base64.
+	scan.Buffer(make([]byte, 4096), 48<<20)
 
 	return &codexSession{cmd: cmd, stdin: stdin, stdout: stdout, scan: scan, work: work, model: model, configOverrides: effectiveOverrides}, nil
 }

@@ -32,6 +32,11 @@ func conversationGroups(messages []toolCompletionMessage) ([][]toolCompletionMes
 			if len(wanted) > 0 {
 				return nil, generationError(ErrorProtocol, "工具调用尚未完成，不能压缩会话")
 			}
+			// The multimodal user envelope carries the just-completed tool output,
+			// not a new human question. Keep it with that protocol group.
+			if end < len(messages) && len(messages[end].PageImages) > 0 {
+				end++
+			}
 		}
 		groups = append(groups, messages[i:end])
 		i = end
@@ -39,12 +44,26 @@ func conversationGroups(messages []toolCompletionMessage) ([][]toolCompletionMes
 	return groups, nil
 }
 func conversationTokens(messages []toolCompletionMessage) int {
-	return estimateDocumentTokens(jsonText(messages))
+	tokens := estimateDocumentTokens(jsonText(messages))
+	for _, m := range messages {
+		tokens += len(m.PageImages) * pageImageTokens
+	}
+	return tokens
+}
+
+func conversationImageBytes(messages []toolCompletionMessage) int {
+	total := 0
+	for _, m := range messages {
+		for _, image := range m.PageImages {
+			total += image.Bytes
+		}
+	}
+	return total
 }
 
 func compactAPIConversation(ctx context.Context, c APIConnection, req completionRequest, a *documentAgent, messages []toolCompletionMessage) ([]toolCompletionMessage, error) {
-	limit := a.inputTokenLimit() - estimateDocumentTokens(jsonText(documentAPITools())) - 1024
-	if conversationTokens(messages) < limit && !a.needsCompaction {
+	limit := a.inputTokenLimit() - estimateDocumentTokens(jsonText(documentAPITools(a.canViewPages))) - 1024
+	if conversationTokens(messages) < limit && conversationImageBytes(messages) <= 32<<20 && !a.needsCompaction {
 		return messages, nil
 	}
 	if len(messages) < 3 {
@@ -71,16 +90,31 @@ func compactAPIConversation(ctx context.Context, c APIConnection, req completion
 	if used > limit/2 {
 		return nil, generationError(ErrorLimit, "本轮输入超过可用上下文，未截断原文")
 	}
+	// Never summarize fresh images before the model has had a chance to see them.
+	last := len(groups) - 1
+	if last >= 0 && !keep[last] && len(groups[last][len(groups[last])-1].PageImages) > 0 {
+		keep[last] = true
+		used += conversationTokens(groups[last])
+	}
+	if used > limit-4096 {
+		return nil, generationError(ErrorLimit, "本轮输入超过可用上下文，未截断原文")
+	}
+	imageBytes := 0
+	for i := range keep {
+		imageBytes += conversationImageBytes(groups[i])
+	}
 	for i := len(groups) - 1; i >= 0; i-- {
 		if keep[i] {
 			continue
 		}
 		n := conversationTokens(groups[i])
-		if used+n > tailBudget {
+		groupBytes := conversationImageBytes(groups[i])
+		if used+n > tailBudget || imageBytes+groupBytes > 32<<20 {
 			break
 		}
 		keep[i] = true
 		used += n
+		imageBytes += groupBytes
 	}
 	older := [][]toolCompletionMessage{}
 	tail := []toolCompletionMessage{}

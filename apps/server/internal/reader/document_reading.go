@@ -63,6 +63,13 @@ func (a *documentAgent) finishDocumentAnswer(ctx context.Context, result Generat
 	if a.continuous {
 		read = len(a.turnRead)
 	}
+	viewed := 0
+	for _, ev := range a.Evidence {
+		if ev.PageImage != nil && (!a.continuous || a.turnRead[ev.SourceID]) {
+			read--
+			viewed++
+		}
+	}
 	partial := a.corpus.Coverage.Status != "ready"
 	overviewOnly := len(a.Evidence) == 0 && a.overview != nil
 	providedSources := a.providedSources
@@ -84,6 +91,9 @@ func (a *documentAgent) finishDocumentAnswer(ctx context.Context, result Generat
 	}
 	if partial {
 		notice += "文档还存在无法检索的原文范围。"
+	}
+	if viewed > 0 {
+		notice += fmt.Sprintf("本轮另查看了 %d 页图像。", viewed)
 	}
 	if emit != nil {
 		if err := emit(ProviderEvent{Text: notice}); err != nil {

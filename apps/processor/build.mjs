@@ -36,6 +36,7 @@ await build({
     "src/repair-text.ts",
     "src/model.ts",
     "src/corpus.ts",
+    "src/render-pages.ts",
   ],
   bundle: true,
   platform: "node",

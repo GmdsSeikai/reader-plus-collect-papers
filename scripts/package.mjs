@@ -54,6 +54,10 @@ run(process.execPath, [
 ]);
 await cp(join(processor, "dist/main.mjs"), join(processor, "main.mjs"));
 await cp(join(processor, "dist/corpus.mjs"), join(processor, "corpus.mjs"));
+await cp(
+  join(processor, "dist/render-pages.mjs"),
+  join(processor, "render-pages.mjs"),
+);
 await cp(join(processor, "dist/model.mjs"), join(processor, "model.mjs"));
 await cp(join(processor, "dist/models"), join(processor, "models"), {
   recursive: true,

@@ -120,6 +120,7 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 		}
 		if m.ID == req.Model && m.Capability != nil {
 			req.Tools = m.Capability.Tools == "passed" && m.Capability.ToolSchemaVersion == documentToolSchemaVersion
+			req.Vision = m.Capability.Vision
 		}
 		if m.ID == req.Model && len(m.SupportedEfforts) > 0 && choice.level != "" {
 			req.Effort = nativeEffort("api", choice.level, m.ID, models)
