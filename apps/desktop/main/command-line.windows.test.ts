@@ -100,6 +100,6 @@ describe.runIf(process.platform === "win32")(
       const removed = (await readPath())!.data.split(";");
       expect(removed).not.toContain(bin);
       expect(removed).toContain(probe);
-    }, 60000);
+    }, 300000);
   },
 );

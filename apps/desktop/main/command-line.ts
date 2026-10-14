@@ -204,7 +204,8 @@ async function windowsUserPath(
         "base64",
       ),
     ],
-    { env: windowsEnvironment(env, write), windowsHide: true, timeout: 15000 },
+    // A cold PowerShell start can take well over 15 s on slow or scanned machines.
+    { env: windowsEnvironment(env, write), windowsHide: true, timeout: 60000 },
   );
   if (write !== undefined) return write;
   const value = JSON.parse(stdout.replace(/^\uFEFF/, "")) as { path?: unknown };
