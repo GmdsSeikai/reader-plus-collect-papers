@@ -99,6 +99,7 @@ func (a *documentAgent) resetAttempt(provider string) {
 	a.Traces = nil
 	a.Evidence = nil
 	a.bytes = 0
+	a.calls = 0
 	a.fatal = nil
 	a.readingStop = ""
 	a.readingRounds = 0

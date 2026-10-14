@@ -272,3 +272,17 @@ func TestReadPassageNeighborsFollowSourceOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentAttemptBudgetResetsForFallback(t *testing.T) {
+	_, a := originalDocumentFixture(t)
+	for i := 0; i < documentToolCalls; i++ {
+		if _, err := a.call(t.Context(), "search_document", json.RawMessage(jsonText(map[string]string{"query": strconv.Itoa(i)}))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.resetAttempt("text-api")
+	raw, err := a.call(t.Context(), "read_passage", json.RawMessage(jsonText(map[string]string{"blockId": a.corpus.Passages[1].ID})))
+	if err != nil || !strings.Contains(string(raw), "COBALT-19") || a.readingStopped() {
+		t.Fatal("fallback inherited the previous attempt's exhausted call budget", err, string(raw))
+	}
+}
