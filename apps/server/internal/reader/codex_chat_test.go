@@ -257,20 +257,23 @@ func TestCodexChatLimitsEffortAndClose(t *testing.T) {
 			}
 			old := s.codexChat.entry
 			work := old.work
+			followUp := ""
 			switch reason {
 			case "effort":
 				old.key = "old-effort"
 			case "turns":
 				old.turns = 64
 			case "sources":
-				old.sourceBytes = 256000
+				// Under budget on its own, but the new source would push it over.
+				old.sourceBytes = 250000
+				followUp = strings.Repeat("新", 80000/3)
 			case "close":
 				s.Close()
 			case "delete":
 				s.codexChat.deleteDocument("doc")
 			}
 			if reason != "close" && reason != "delete" {
-				if b := sendChat(t, s, "doc", "后续", ""); !strings.Contains(b, "event: done") {
+				if b := sendChat(t, s, "doc", "后续", followUp); !strings.Contains(b, "event: done") {
 					t.Fatal(b)
 				}
 				if s.codexChat.entry == old {

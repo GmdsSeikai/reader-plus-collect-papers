@@ -104,14 +104,174 @@ it("sends a whole long chapter beyond the old character cutoff", async () => {
   expect(result.context).toContain(chapter);
   expect(result.references).toEqual([{ ...quote, kind: "selection" }]);
 });
-it("rejects oversized full context instead of silently truncating it", async () => {
+it("keeps the pages around a quote when its chapter exceeds the limit", async () => {
+  const f = fixture();
+  // 40 dense pages of about 6 KB each, quoting one sentence on page 20.
+  f.getChapterContext.mockResolvedValue(
+    Array.from({ length: 40 }, (_, i) => ({
+      text: Array.from(
+        { length: 20 },
+        (_, j) => `第${i + 1}页第${j + 1}段` + "文".repeat(90),
+      ).join("\n"),
+      location: { type: "pdf" as const, page: i + 1 },
+    })),
+  );
+  const sentence: ReaderSelection = {
+    text: "第20页第10段文文文",
+    location: { type: "pdf", page: 20 },
+  };
+  const confirmOversize = vi.fn(async () => "trim" as const);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [sentence],
+    confirmOversize,
+  });
+  expect(confirmOversize).toHaveBeenCalledWith(
+    expect.objectContaining({ full: true, trim: true, quoted: true }),
+  );
+  expect(new TextEncoder().encode(result.context).length).toBeLessThanOrEqual(
+    64000,
+  );
+  expect(result.context).toContain(sentence.text);
+  expect(result.context).toContain("第20页第1段");
+  expect(result.context).toContain("第20页第20段");
+  expect(result.context).toContain("辅助章节原文（节选）");
+  expect(result.context).not.toContain("第1页第1段");
+  expect(result.context).not.toContain("第40页第20段");
+  expect(result.references).toEqual([{ ...sentence, kind: "selection" }]);
+});
+it("keeps the paragraphs around a quote in a long EPUB chapter", async () => {
+  const f = fixture();
+  const paragraphs = Array.from(
+    { length: 600 },
+    (_, i) => `段落${i}：` + "文".repeat(100),
+  );
+  f.getChapterContext.mockResolvedValue([
+    { text: paragraphs.join("\n\n"), location: quote.location },
+  ]);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [{ text: "段落300：文文", location: quote.location }],
+    confirmOversize: async () => "trim",
+  });
+  expect(new TextEncoder().encode(result.context).length).toBeLessThanOrEqual(
+    64000,
+  );
+  expect(result.context).toContain("段落299：");
+  expect(result.context).toContain("段落301：");
+  expect(result.context).not.toContain("段落0：");
+  expect(result.context).not.toContain("段落599：");
+});
+it("trims an EPUB chapter around the reading position without a quote", async () => {
+  const f = fixture();
+  const paragraphs = Array.from(
+    { length: 600 },
+    (_, i) => `段落${i}：` + "文".repeat(100),
+  );
+  const location = {
+    type: "epub" as const,
+    href: "chapter-2.xhtml",
+    progression: 0.75,
+  };
+  f.adapter.getLocation = () => location;
+  f.getChapterContext.mockResolvedValue([
+    { text: paragraphs.join("\n\n"), location },
+  ]);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [],
+    includeChapter: true,
+    confirmOversize: async () => "trim",
+  });
+  expect(result.context).toContain("段落450：");
+  expect(result.context).not.toContain("段落0：");
+});
+it("cuts a single oversized paragraph around the quote", async () => {
   const f = fixture();
   f.getChapterContext.mockResolvedValue([
-    { text: "文".repeat(22000), location: quote.location },
+    {
+      text: "前".repeat(30000) + "引用句" + "后".repeat(30000),
+      location: quote.location,
+    },
+  ]);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [{ text: "引用句", location: quote.location }],
+    confirmOversize: async () => "trim",
+  });
+  expect(new TextEncoder().encode(result.context).length).toBeLessThanOrEqual(
+    64000,
+  );
+  expect(result.context.match(/引用句/g)).toHaveLength(2);
+});
+it("sends a long chapter whole when the user confirms", async () => {
+  const f = fixture();
+  const chapter = "文".repeat(40000);
+  f.getChapterContext.mockResolvedValue([
+    { text: chapter, location: quote.location },
+  ]);
+  const confirmOversize = vi.fn(async () => "full" as const);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [quote],
+    confirmOversize,
+  });
+  expect(confirmOversize).toHaveBeenCalledOnce();
+  expect(result.context).toContain(chapter);
+  expect(result.context).not.toContain("节选");
+});
+it("cancels quietly when the user declines a long context", async () => {
+  const f = fixture();
+  f.getChapterContext.mockResolvedValue([
+    { text: "文".repeat(40000), location: quote.location },
   ]);
   await expect(
-    composeChatContext({ adapter: f.adapter, selected: [quote] }),
-  ).rejects.toThrow("无法完整发送");
+    composeChatContext({
+      adapter: f.adapter,
+      selected: [quote],
+      confirmOversize: async () => "cancel",
+    }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+});
+it("asks before sending a selection above 64 KB and never shortens it", async () => {
+  const f = fixture();
+  const text = "文".repeat(22000);
+  const confirmOversize = vi.fn(async () => "full" as const);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [{ text, location: quote.location }],
+    confirmOversize,
+  });
+  expect(confirmOversize).toHaveBeenCalledWith(
+    expect.objectContaining({ full: true, trim: false }),
+  );
+  expect(result.context).toContain(text);
+});
+it("offers only nearby text when a chapter exceeds the hard cap", async () => {
+  const f = fixture();
+  f.getChapterContext.mockResolvedValue([
+    { text: "文".repeat(90000), location: quote.location },
+  ]);
+  const confirmOversize = vi.fn(async () => "trim" as const);
+  await composeChatContext({
+    adapter: f.adapter,
+    selected: [quote],
+    confirmOversize,
+  });
+  expect(confirmOversize).toHaveBeenCalledWith(
+    expect.objectContaining({ full: false, trim: true }),
+  );
+});
+it("rejects selections above the hard cap without reading chapters", async () => {
+  const f = fixture();
+  await expect(
+    composeChatContext({
+      adapter: f.adapter,
+      selected: [{ text: "文".repeat(90000), location: quote.location }],
+      confirmOversize: async () => "full",
+    }),
+  ).rejects.toThrow("无法发送");
+  expect(f.getChapterContext).not.toHaveBeenCalled();
 });
 it("includes each quoted chapter once even after navigating elsewhere", async () => {
   const f = fixture();

@@ -18,6 +18,7 @@ function fixture(toc: TOCItem[], text = (page: number) => `原文页${page}`) {
   Object.assign(reader, {
     pdf: { numPages: 45, getPage },
     texts: new Map(),
+    blockData: [],
     location: { type: "pdf", page: 1 },
   });
   vi.spyOn(reader, "getTOC").mockResolvedValue(toc);
@@ -41,12 +42,35 @@ it("extracts the visible chapter across pages using its outline boundaries", asy
   );
   expect(f.getPage.mock.calls.map(([page]) => page)).toEqual([6, 7, 8, 9]);
 });
-it("preserves full chapter text beyond the previous character limit", async () => {
+it("sends the quoted page and its neighbours of a PDF without an outline", async () => {
   const f = fixture([], () => "文".repeat(25000));
   const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
-  expect(excerpts).toHaveLength(20);
-  expect(excerpts[0]!.location).toEqual({ type: "pdf", page: 21 });
+  expect(excerpts.map((e) => e.location)).toEqual(
+    [24, 25, 26].map((page) => ({ type: "pdf", page })),
+  );
   expect(excerpts[0]!.text).toHaveLength(25000);
-  expect(excerpts.at(-1)!.location).toEqual({ type: "pdf", page: 40 });
-  expect(f.getPage).toHaveBeenCalledTimes(20);
+  expect(f.getPage).toHaveBeenCalledTimes(3);
+});
+it("follows parsed headings once the PDF without an outline is parsed", async () => {
+  const f = fixture([]);
+  Object.assign(f.reader, {
+    blockData: [
+      ...Array.from({ length: 15 }, (_, i) => ({
+        id: `p${i + 20}`,
+        page: i + 20,
+        label: "text",
+        text: "正文",
+      })),
+      ...[21, 24, 30].map((page) => ({
+        id: `h${page}`,
+        page,
+        label: "paragraph_title",
+        text: `${page} 标题`,
+      })),
+    ],
+  });
+  const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
+  expect(excerpts.map((e) => e.location)).toEqual(
+    [24, 25, 26, 27, 28, 29].map((page) => ({ type: "pdf", page })),
+  );
 });

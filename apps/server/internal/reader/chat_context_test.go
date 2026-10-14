@@ -47,7 +47,7 @@ func TestChatKeepsLongSourceWithoutRepeatingIt(t *testing.T) {
 	if n := strings.Count(captured, "独有原文事实：维修费用471元。"); n != 1 {
 		t.Errorf("original source fact occurs %d times, want once", n)
 	}
-	if strings.Contains(captured, "\ufffd") {
+	if strings.Contains(captured, "�") {
 		t.Error("history damaged UTF-8")
 	}
 	if !strings.Contains(captured, "再次核对") {
@@ -68,8 +68,35 @@ func TestChatHistoryKeepsQuestionAnswerBoundaries(t *testing.T) {
 	if len(chat.Sources) != 1 || chat.Sources[0].Text != source {
 		t.Fatal("source was truncated or duplicated")
 	}
-	if strings.Contains(prompt, "\ufffd") {
+	if strings.Contains(prompt, "�") {
 		t.Fatal("damaged UTF-8")
+	}
+}
+
+func TestChatHistorySourcesStayWithinTotalBudget(t *testing.T) {
+	old := strings.Repeat("旧", 150000/3)
+	recent := strings.Repeat("近", 150000/3)
+	current := strings.Repeat("今", 150000/3)
+	messages := []Message{
+		{Role: "user", Content: "第一问", Context: old}, {Role: "assistant", Content: "答一"},
+		{Role: "user", Content: "第二问", Context: recent}, {Role: "assistant", Content: "答二"},
+	}
+	prompt, chat := makeChatInput("doc", "title", "", "第三问", current, "", messages)
+	total := 0
+	for _, source := range chat.Sources {
+		total += len(source.Text)
+		if source.Text == old {
+			t.Fatal("kept the oldest source past the budget")
+		}
+	}
+	if total > chatSourceBytes {
+		t.Fatalf("sources total %d bytes", total)
+	}
+	if len(chat.Sources) != 2 || chat.Sources[1].Text != current {
+		t.Fatal("dropped the current or most recent source")
+	}
+	if !strings.Contains(prompt, `"text":"第一问","sourceOmitted":true`) {
+		t.Fatal("omitted source is not marked")
 	}
 }
 
@@ -179,5 +206,33 @@ func TestEveryChatKindIncludesTitleAndSummary(t *testing.T) {
 				t.Fatal(payload)
 			}
 		})
+	}
+}
+
+func TestChatAcceptsConfirmedLongContextUpToHardCap(t *testing.T) {
+	s := testServer(t)
+	d := organizationDoc(t, s)
+	upstream, calls := fakeAPI(t, func(int, apiCall) string { return "回答" })
+	c := AIConfig{Primary: "api", API: APIConnection{URL: upstream.URL + "/v1", Key: "sk-test"}, Models: map[string]string{"api": "plain"}}
+	passModels(&c, map[string]bool{"plain": false})
+	if err := s.writeAIConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	body := func(context string) *strings.Reader {
+		b, _ := json.Marshal(map[string]string{"provider": "api", "prompt": "总结", "context": context})
+		return strings.NewReader(string(b))
+	}
+	// About 100 KB, above the old 64 KB limit.
+	long := strings.Repeat("证", 100000/3)
+	r := request(t, s, "POST", "/api/documents/"+d.ID+"/chat", body(long))
+	if !strings.Contains(r.Body.String(), "event: done") {
+		t.Fatal(r.Body)
+	}
+	if !strings.Contains(jsonText(calls()[0].Messages[1].Content), long) {
+		t.Fatal("long context was not sent whole")
+	}
+	r = request(t, s, "POST", "/api/documents/"+d.ID+"/chat", body(strings.Repeat("证", chatContextBytes/3+1)))
+	if r.Code != 400 {
+		t.Fatal(r.Code, r.Body)
 	}
 }

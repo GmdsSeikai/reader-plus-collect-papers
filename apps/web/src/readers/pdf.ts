@@ -1,5 +1,5 @@
 import { selectionAnchor, isSelectionToolbar } from "./selection-anchor";
-import { chapterRange } from "../translation/chapters";
+import { headingPages, quoteSectionRange } from "../translation/chapters";
 import { pdfQuotePoint } from "./pdf-reference-location";
 import { PDFBlockOverlay, referenceBlock } from "./pdf-blocks";
 import { PDFReadingNavigation } from "./pdf-navigation";
@@ -185,7 +185,10 @@ export class PDFReaderAdapter implements ReaderAdapter {
     ): Promise<TOCItem[]> =>
       Promise.all(
         items.map(async (item, i) => {
-          let page = 1;
+          const children = await map(item.items, `${prefix}${i}-`);
+          // A grouping entry without its own target opens its first child.
+          const first = children[0]?.location;
+          let page = first?.type === "pdf" ? first.page : 1;
           let dest = item.dest;
           try {
             if (typeof dest === "string")
@@ -203,7 +206,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
             id: `${prefix}${i}`,
             label: item.title,
             location: { type: "pdf" as const, page },
-            children: await map(item.items, `${prefix}${i}-`),
+            children,
           };
         }),
       );
@@ -503,10 +506,11 @@ export class PDFReaderAdapter implements ReaderAdapter {
     location: DocumentLocation,
   ): Promise<ReaderSelection[]> {
     if (!this.pdf || location.type !== "pdf") return [];
-    const range = chapterRange(
+    const range = quoteSectionRange(
       await this.getTOC(),
       location.page,
       this.pdf.numPages,
+      headingPages(this.blockData, true),
     );
     const excerpts: ReaderSelection[] = [];
     for (let page = range.fromPage; page <= range.toPage; page++) {
