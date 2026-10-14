@@ -162,6 +162,30 @@ it("keeps the paragraphs around a quote in a long EPUB chapter", async () => {
   expect(result.context).not.toContain("段落0：");
   expect(result.context).not.toContain("段落599：");
 });
+it("trims an EPUB chapter around the reading position without a quote", async () => {
+  const f = fixture();
+  const paragraphs = Array.from(
+    { length: 600 },
+    (_, i) => `段落${i}：` + "文".repeat(100),
+  );
+  const location = {
+    type: "epub" as const,
+    href: "chapter-2.xhtml",
+    progression: 0.75,
+  };
+  f.adapter.getLocation = () => location;
+  f.getChapterContext.mockResolvedValue([
+    { text: paragraphs.join("\n\n"), location },
+  ]);
+  const result = await composeChatContext({
+    adapter: f.adapter,
+    selected: [],
+    includeChapter: true,
+    confirmOversize: async () => "trim",
+  });
+  expect(result.context).toContain("段落450：");
+  expect(result.context).not.toContain("段落0：");
+});
 it("cuts a single oversized paragraph around the quote", async () => {
   const f = fixture();
   f.getChapterContext.mockResolvedValue([

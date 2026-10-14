@@ -54,12 +54,20 @@ it("sends the quoted page and its neighbours of a PDF without an outline", async
 it("follows parsed headings once the PDF without an outline is parsed", async () => {
   const f = fixture([]);
   Object.assign(f.reader, {
-    blockData: [21, 24, 30].map((page) => ({
-      id: `h${page}`,
-      page,
-      label: "paragraph_title",
-      text: `${page} 标题`,
-    })),
+    blockData: [
+      ...Array.from({ length: 15 }, (_, i) => ({
+        id: `p${i + 20}`,
+        page: i + 20,
+        label: "text",
+        text: "正文",
+      })),
+      ...[21, 24, 30].map((page) => ({
+        id: `h${page}`,
+        page,
+        label: "paragraph_title",
+        text: `${page} 标题`,
+      })),
+    ],
   });
   const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
   expect(excerpts.map((e) => e.location)).toEqual(

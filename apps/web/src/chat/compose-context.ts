@@ -265,10 +265,22 @@ function anchorUnit(
   const candidates = inExcerpt.length
     ? inExcerpt
     : units.map((unit, i) => ({ unit, i }));
-  const hit = candidates.find(
-    ({ unit }) => quoteIndex(unit.text, anchor.text) >= 0,
-  );
-  return (hit ?? candidates[0]!).i;
+  const quote = anchor.text ?? anchor.location.quote;
+  const hit = candidates.find(({ unit }) => quoteIndex(unit.text, quote) >= 0);
+  if (hit) return hit.i;
+  // Without a quote, an EPUB reading position locates the paragraph by how far
+  // through the chapter it is.
+  const progression =
+    anchor.location.type === "epub" ? anchor.location.progression : undefined;
+  if (progression !== undefined && progression > 0) {
+    const total = candidates.reduce((sum, c) => sum + c.unit.text.length, 0);
+    let seen = 0;
+    for (const c of candidates) {
+      seen += c.unit.text.length;
+      if (seen >= progression * total) return c.i;
+    }
+  }
+  return candidates[0]!.i;
 }
 
 /** Finds a quote's start despite PDF text-layer whitespace differences. */

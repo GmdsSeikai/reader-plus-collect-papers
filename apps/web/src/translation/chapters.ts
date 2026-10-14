@@ -5,18 +5,30 @@ export interface PageRange {
   toPage: number;
 }
 
+/** Section starts found by layout parsing, and the pages parsed so far. */
+export interface ParsedHeadings {
+  starts: number[];
+  parsed: number[];
+}
+
 /**
  * Pages where parsed headings start a section. Chapters skip numbered
  * subsections such as "2.1"; quotes keep them for a narrower section.
  */
-export function headingPages(blocks: PDFBlock[], subsections: boolean) {
-  return blocks
-    .filter(
-      (b) =>
-        (b.label === "paragraph_title" || b.label === "doc_title") &&
-        (subsections || !/^\s*[\dA-Z]+\.\d/.test(b.text)),
-    )
-    .map((b) => b.page);
+export function headingPages(
+  blocks: PDFBlock[],
+  subsections: boolean,
+): ParsedHeadings {
+  return {
+    starts: blocks
+      .filter(
+        (b) =>
+          (b.label === "paragraph_title" || b.label === "doc_title") &&
+          (subsections || !/^\s*[\dA-Z]+\.\d/.test(b.text)),
+      )
+      .map((b) => b.page),
+    parsed: blocks.map((b) => b.page),
+  };
 }
 
 /**
@@ -29,7 +41,7 @@ export function chapterRange(
   toc: TOCItem[],
   page: number,
   pages: number,
-  headings: number[] = [],
+  headings?: ParsedHeadings,
 ): PageRange {
   return outlineRange(toc, page, pages, headings, (item) => [item]);
 }
@@ -42,7 +54,7 @@ export function quoteSectionRange(
   toc: TOCItem[],
   page: number,
   pages: number,
-  headings: number[] = [],
+  headings?: ParsedHeadings,
 ): PageRange {
   return outlineRange(toc, page, pages, headings, (item) => [
     item,
@@ -54,27 +66,48 @@ function outlineRange(
   toc: TOCItem[],
   page: number,
   pages: number,
-  headings: number[],
+  headings: ParsedHeadings | undefined,
   expand: (item: TOCItem) => TOCItem[],
 ): PageRange {
   const entries = toc.length === 1 ? toc[0].children : toc;
-  const outline = entries
-    .flatMap(expand)
-    .flatMap((item) =>
-      item.location.type === "pdf" && !item.id.startsWith("page-")
-        ? [item.location.page]
-        : [],
-    );
-  const starts = [...new Set(outline.length ? outline : headings)].sort(
-    (a, b) => a - b,
-  );
+  const outline = [
+    ...new Set(
+      entries
+        .flatMap(expand)
+        .flatMap((item) =>
+          item.location.type === "pdf" && !item.id.startsWith("page-")
+            ? [item.location.page]
+            : [],
+        ),
+    ),
+  ].sort((a, b) => a - b);
   const current = Math.min(Math.max(1, page), pages);
-  if (!starts.length)
-    return {
-      fromPage: Math.max(1, current - 1),
-      toPage: Math.min(pages, current + 1),
-    };
-  const fromPage = starts.filter((start) => start <= current).at(-1) ?? 1;
+  if (outline.length) {
+    const fromPage = outline.filter((start) => start <= current).at(-1) ?? 1;
+    const next = outline.find((start) => start > current);
+    return { fromPage, toPage: next ? Math.max(fromPage, next - 1) : pages };
+  }
+  const nearby = {
+    fromPage: Math.max(1, current - 1),
+    toPage: Math.min(pages, current + 1),
+  };
+  // Headings bound a section only within the parsed pages around the reader;
+  // past them the next chapter may simply not be parsed yet.
+  const parsed = new Set(headings?.parsed);
+  if (!parsed.has(current)) return nearby;
+  let runStart = current;
+  let runEnd = current;
+  while (parsed.has(runStart - 1)) runStart--;
+  while (parsed.has(runEnd + 1)) runEnd++;
+  const starts = [...new Set(headings?.starts)]
+    .filter((start) => start >= runStart && start <= runEnd)
+    .sort((a, b) => a - b);
+  if (!starts.length) return nearby;
+  const fromPage =
+    starts.filter((start) => start <= current).at(-1) ?? nearby.fromPage;
   const next = starts.find((start) => start > current);
-  return { fromPage, toPage: next ? Math.max(fromPage, next - 1) : pages };
+  return {
+    fromPage,
+    toPage: Math.min(pages, next ? Math.max(fromPage, next - 1) : runEnd),
+  };
 }
