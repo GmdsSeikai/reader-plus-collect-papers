@@ -150,10 +150,13 @@ func (a *documentAgent) conversationInput(in AIInput, initial bool) string {
 		b.WriteString("文档概览（派生资料）：\n" + jsonText(a.overviewContext()) + "\n")
 		c.OverviewVersion = version
 	}
-	for _, source := range in.Chat.Sources {
-		if source.ID == in.Chat.SummarySource && !c.SeenSources[source.ID] {
-			b.WriteString("文章摘要（派生资料，不等于原文）：\n" + source.Text + "\n")
-			c.SeenSources[source.ID] = true
+	// A compiled overview already supplies the document background. Use the
+	// metadata abstract only when that overview is unavailable.
+	if a.overview == nil && in.Chat.Summary != "" {
+		key := sourceKey("metadata-summary\n" + in.Chat.Summary)
+		if !c.SeenSources[key] {
+			b.WriteString("文章摘要（派生资料，不等于原文）：\n" + in.Chat.Summary + "\n")
+			c.SeenSources[key] = true
 		}
 	}
 	if in.Chat.CurrentText != "" {

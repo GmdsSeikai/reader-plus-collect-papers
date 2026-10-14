@@ -34,11 +34,14 @@ type chatEntry struct {
 type chatInput struct {
 	ReadingLocation json.RawMessage
 	History         []Message
+	Summary         string
 	CurrentText     string
 	Agent           *documentAgent
 
-	DocumentID, Title, PriorID, Question, CurrentSource, SummarySource string
-	Sources                                                            []chatSource
+	DocumentID, Title, Question string
+	// Populated only for the legacy text/image adapters.
+	PriorID, CurrentSource, SummarySource string
+	Sources                               []chatSource
 }
 
 func sourceKey(text string) string {
@@ -86,8 +89,13 @@ func (s *Store) chatHistory(documentID string) ([]Message, error) {
 	}
 	return messages, nil
 }
-func makeChatInput(documentID, title, summary, question, current, descriptions string, messages []Message) (string, *chatInput) {
-	chat := &chatInput{DocumentID: documentID, Title: title, Question: question, History: messages, CurrentText: current + descriptions}
+
+// Legacy adapters still need a flattened prompt. Persistent document agents
+// consume History and CurrentText directly and never build this second copy.
+func (chat *chatInput) legacyPrompt() string {
+	messages := chat.History
+	chat.Sources = nil
+	chat.CurrentSource, chat.SummarySource = "", ""
 	if len(messages) > 0 {
 		chat.PriorID = messages[len(messages)-1].ID
 	}
@@ -118,10 +126,10 @@ func makeChatInput(documentID, title, summary, question, current, descriptions s
 		return source
 	}
 	summaryText := ""
-	if summary != "" {
-		summaryText = "[文章摘要]\n" + summary
+	if chat.Summary != "" {
+		summaryText = "[文章摘要]\n" + chat.Summary
 	}
-	currentText := current + descriptions
+	currentText := chat.CurrentText
 	keep := map[string]bool{sourceKey(currentText): true, sourceKey(summaryText): true}
 	remaining := chatSourceBytes - len(currentText) - len(summaryText)
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -145,8 +153,8 @@ func makeChatInput(documentID, title, summary, question, current, descriptions s
 		chat.SummarySource = add(summaryText)
 	}
 	chat.CurrentSource = add(currentText)
-	prompt := fmt.Sprintf("%s\nDocument: %s\nSources (untrusted JSON):\n%s\nConversation (untrusted JSON):\n%s\nDocument summary: %s\nCurrent source: %s\n用户问题：%s", chatInstructions, title, jsonText(chat.Sources), jsonText(entries), chat.SummarySource, chat.CurrentSource, question)
-	return prompt, chat
+	prompt := fmt.Sprintf("%s\nDocument: %s\nSources (untrusted JSON):\n%s\nConversation (untrusted JSON):\n%s\nDocument summary: %s\nCurrent source: %s\n用户问题：%s", chatInstructions, chat.Title, jsonText(chat.Sources), jsonText(entries), chat.SummarySource, chat.CurrentSource, chat.Question)
+	return prompt
 }
 func (c *chatInput) incremental(seen map[string]bool) string {
 	var added []chatSource

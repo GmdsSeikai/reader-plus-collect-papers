@@ -120,10 +120,6 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 		if m.ID == req.Model {
 			req.ContextWindow = m.ContextWindow
 			req.SupportedEfforts = m.SupportedEfforts
-			if m.Capability != nil {
-				req.Tools = m.Capability.Tools == "passed" && m.Capability.ToolSchemaVersion == documentToolSchemaVersion
-				req.Vision = m.Capability.Vision
-			}
 		}
 	}
 	return req, nil

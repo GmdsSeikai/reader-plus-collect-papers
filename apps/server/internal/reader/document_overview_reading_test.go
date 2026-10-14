@@ -88,3 +88,44 @@ func TestDocumentRepeatingToolStopsWithoutDiscardingOverview(t *testing.T) {
 		t.Fatal("identical requests loop forever")
 	}
 }
+
+func TestDocumentOverviewReplacesMetadataBackground(t *testing.T) {
+	for _, compiled := range []bool{false, true} {
+		t.Run(fmt.Sprint(compiled), func(t *testing.T) {
+			s, a := originalDocumentFixture(t)
+			if compiled {
+				calls, failAt := 0, -1
+				if err := s.compileOverview(t.Context(), overviewTestJob(t, s), overviewTestService(t, &calls, &failAt)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			in := AIInput{Prompt: "介绍文章", Chat: &chatInput{Title: "article", Summary: "METADATA-ABSTRACT-MARKER", Question: "介绍文章", Agent: a}}
+			if err := a.prepareReading(t.Context(), in); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.beginConversation(t.Context(), in, "test"); err != nil {
+				t.Fatal(err)
+			}
+			prompt := a.conversationInput(in, true)
+			if strings.Contains(prompt, "METADATA-ABSTRACT-MARKER") == compiled {
+				t.Fatal("redundant or missing document background", prompt)
+			}
+			if compiled && !strings.Contains(prompt, "generated_overview") {
+				t.Fatal("compiled overview omitted")
+			}
+			if a.providedSources {
+				t.Fatal("abstract mistaken for explicit original text")
+			}
+			next := a.conversationInput(in, false)
+			if strings.Contains(next, "METADATA-ABSTRACT-MARKER") || strings.Contains(next, "generated_overview") {
+				t.Fatal("unchanged background resent")
+			}
+			if compiled {
+				result, err := a.finishDocumentAnswer(t.Context(), GenerateResult{Text: "介绍主题。"}, nil)
+				if err != nil || !strings.Contains(result.Text, "未逐段核对原文") || strings.Contains(result.Text, "原文摘录") {
+					t.Fatal("overview-only answer mislabeled", err, result.Text)
+				}
+			}
+		})
+	}
+}

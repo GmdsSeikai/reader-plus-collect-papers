@@ -115,7 +115,7 @@ func (a *documentAgent) prepareReading(ctx context.Context, in AIInput) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.overview = overview
-	a.providedSources = in.Chat != nil && len(in.Chat.Sources) > 0
+	a.providedSources = in.Chat != nil && in.Chat.CurrentText != ""
 	a.contextOverride = a.server.documentContextOverride()
 	a.contextTokens, a.contextSource = resolveDocumentContext(0, a.contextOverride, "")
 	a.reservedTokens = estimateDocumentTokens(in.Prompt) + estimateDocumentTokens(jsonText(a.overviewContext())) + 2048

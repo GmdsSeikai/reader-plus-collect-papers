@@ -119,12 +119,10 @@ func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, document D
 		fail(w, 500, "无法读取聊天历史")
 		return
 	}
-	prompt, chat := makeChatInput(documentID, document.Title, document.Metadata.Abstract, question, textContext, descriptions.String(), messages)
-	chat.ReadingLocation = readingLocation
-	prompt += readingLocationPrompt(readingLocation)
+	chat := &chatInput{DocumentID: documentID, Title: document.Title, Summary: document.Metadata.Abstract, Question: question, CurrentText: textContext + descriptions.String(), History: messages, ReadingLocation: readingLocation}
 	if err := s.Store.saveMessage(Message{DocumentID: documentID, Role: "user", Content: question, Context: textContext, References: references, Attachments: attachments, ReadingLocation: readingLocation}); err != nil {
 		fail(w, 500, "无法保存对话")
 		return
 	}
-	s.streamChat(ctx, cancel, w, documentID, config, AIInput{Prompt: prompt, Images: images, Chat: chat})
+	s.streamChat(ctx, cancel, w, documentID, config, AIInput{Prompt: question, Images: images, Chat: chat})
 }

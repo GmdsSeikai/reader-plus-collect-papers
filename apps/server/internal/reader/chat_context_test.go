@@ -60,7 +60,8 @@ func TestChatKeepsLongSourceWithoutRepeatingIt(t *testing.T) {
 func TestChatHistoryKeepsQuestionAnswerBoundaries(t *testing.T) {
 	source := strings.Repeat("完整中文证据。", 6000)
 	messages := []Message{{Role: "assistant", Content: "不应出现的孤立回答"}, {Role: "user", Content: "需要保留的问题", Context: source}, {Role: "assistant", Content: strings.Repeat("很长的中文回答。", 6000)}}
-	prompt, chat := makeChatInput("doc", "title", "", "本轮问题", source, "", messages)
+	chat := &chatInput{DocumentID: "doc", Title: "title", Question: "本轮问题", CurrentText: source, History: messages}
+	prompt := chat.legacyPrompt()
 	if strings.Contains(prompt, "不应出现的孤立回答") {
 		t.Fatal("included an orphan answer")
 	}
@@ -83,7 +84,8 @@ func TestChatHistorySourcesStayWithinTotalBudget(t *testing.T) {
 		{Role: "user", Content: "第一问", Context: old}, {Role: "assistant", Content: "答一"},
 		{Role: "user", Content: "第二问", Context: recent}, {Role: "assistant", Content: "答二"},
 	}
-	prompt, chat := makeChatInput("doc", "title", "", "第三问", current, "", messages)
+	chat := &chatInput{DocumentID: "doc", Title: "title", Question: "第三问", CurrentText: current, History: messages}
+	prompt := chat.legacyPrompt()
 	total := 0
 	for _, source := range chat.Sources {
 		total += len(source.Text)
@@ -140,7 +142,8 @@ func TestChatAddsDocumentSummaryWithoutImplicitExcerpt(t *testing.T) {
 
 func TestChatSummaryIsSeparateFromExplicitSources(t *testing.T) {
 	source := "手动引用的完整原文"
-	prompt, chat := makeChatInput("doc", "文章", "已有摘要", "继续解释", source, "", []Message{{Role: "user", Content: "上一问", Context: source}})
+	chat := &chatInput{DocumentID: "doc", Title: "文章", Summary: "已有摘要", Question: "继续解释", CurrentText: source, History: []Message{{Role: "user", Content: "上一问", Context: source}}}
+	prompt := chat.legacyPrompt()
 	if strings.Count(prompt, source) != 1 || len(chat.Sources) != 2 || chat.CurrentSource == chat.SummarySource {
 		t.Fatalf("sources not deduplicated/separated: %s", prompt)
 	}
@@ -148,7 +151,8 @@ func TestChatSummaryIsSeparateFromExplicitSources(t *testing.T) {
 	if strings.Contains(next, "已有摘要") || !strings.Contains(next, "Document summary: "+chat.SummarySource) {
 		t.Fatal(next)
 	}
-	_, empty := makeChatInput("doc", "文章", "", "一般问题", "", "", nil)
+	empty := &chatInput{DocumentID: "doc", Title: "文章", Question: "一般问题"}
+	_ = empty.legacyPrompt()
 	if len(empty.Sources) != 0 || empty.CurrentSource != "" || empty.SummarySource != "" {
 		t.Fatalf("invented sources: %+v", empty)
 	}
