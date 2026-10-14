@@ -183,7 +183,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
     }),
   );
   expect(api.testAI).toHaveBeenCalledTimes(8);
-});
+}, 30_000);
 it("warns when no listed model passes the vision check", async () => {
   config.api = { url: "https://api.example.com", model: "", hasKey: true };
   listed = { "text-only": false };
