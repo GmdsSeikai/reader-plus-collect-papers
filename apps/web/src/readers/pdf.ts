@@ -508,9 +508,6 @@ export class PDFReaderAdapter implements ReaderAdapter {
     if (!this.pdf || location.type !== "pdf") return [];
     const range = quoteSectionRange(
       await this.getTOC(),
-      this.blockData
-        .filter((b) => b.label === "paragraph_title" || b.label === "doc_title")
-        .map((b) => b.page),
       location.page,
       this.pdf.numPages,
     );

@@ -47,26 +47,21 @@ it("quote sections split parts into their chapters", () => {
     entry("part-1", 1, [entry("0-0", 3), entry("0-1", 12)]),
     entry("part-2", 30, [entry("1-0", 31), entry("1-1", 44)]),
   ];
-  expect(quoteSectionRange(toc, [], 15, 80)).toEqual({
+  expect(quoteSectionRange(toc, 15, 80)).toEqual({
     fromPage: 12,
     toPage: 29,
   });
-  expect(quoteSectionRange(toc, [], 50, 80)).toEqual({
+  expect(quoteSectionRange(toc, 50, 80)).toEqual({
     fromPage: 44,
     toPage: 80,
   });
 });
 
-it("quote sections follow parsed headings when the PDF has no outline", () => {
+it("quote sections without an outline span the quoted page and its neighbours", () => {
   const pages = Array.from({ length: 20 }, (_, i) =>
     entry(`page-${i + 1}`, i + 1),
   );
-  expect(quoteSectionRange(pages, [1, 2, 2, 6, 9], 7, 20)).toEqual({
-    fromPage: 6,
-    toPage: 8,
-  });
-  expect(quoteSectionRange(pages, [], 7, 20)).toEqual({
-    fromPage: 7,
-    toPage: 7,
-  });
+  expect(quoteSectionRange(pages, 7, 20)).toEqual({ fromPage: 6, toPage: 8 });
+  expect(quoteSectionRange([], 1, 20)).toEqual({ fromPage: 1, toPage: 2 });
+  expect(quoteSectionRange([], 20, 20)).toEqual({ fromPage: 19, toPage: 20 });
 });

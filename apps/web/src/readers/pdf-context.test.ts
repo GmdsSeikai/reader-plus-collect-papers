@@ -42,24 +42,12 @@ it("extracts the visible chapter across pages using its outline boundaries", asy
   );
   expect(f.getPage.mock.calls.map(([page]) => page)).toEqual([6, 7, 8, 9]);
 });
-it("preserves full chapter text beyond the previous character limit", async () => {
+it("sends the quoted page and its neighbours of a PDF without an outline", async () => {
   const f = fixture([], () => "文".repeat(25000));
-  Object.assign(f.reader, {
-    blockData: [21, 24, 30].map((page) => ({
-      id: `h${page}`,
-      page,
-      label: "paragraph_title",
-      text: `标题${page}`,
-    })),
-  });
   const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
   expect(excerpts.map((e) => e.location)).toEqual(
-    [24, 25, 26, 27, 28, 29].map((page) => ({ type: "pdf", page })),
+    [24, 25, 26].map((page) => ({ type: "pdf", page })),
   );
   expect(excerpts[0]!.text).toHaveLength(25000);
-});
-it("sends only the quoted page of an unparsed PDF without an outline", async () => {
-  const f = fixture([]);
-  const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
-  expect(excerpts.map((e) => e.location)).toEqual([{ type: "pdf", page: 25 }]);
+  expect(f.getPage).toHaveBeenCalledTimes(3);
 });
