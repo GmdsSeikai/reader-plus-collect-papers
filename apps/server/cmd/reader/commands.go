@@ -422,10 +422,13 @@ func runRead(c *client, f *options, args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "\n%s\n", formatBlock(b.Label, body))
 		if f.side == "both" {
-			if b.Translation != "" {
-				fmt.Fprintf(out, "\n译：%s\n", b.Translation)
-			} else {
+			switch strings.TrimSpace(b.Translation) {
+			case "":
 				untranslated++
+			case strings.TrimSpace(b.Text):
+				// Names, emails and code come back unchanged; don't print them twice.
+			default:
+				fmt.Fprintf(out, "\n译：%s\n", b.Translation)
 			}
 		}
 	}

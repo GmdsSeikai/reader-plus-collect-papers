@@ -51,6 +51,7 @@ func fakeReader(t *testing.T) (dir string, requests *[]*http.Request) {
 			reply(documentText{DocumentID: testDocuments[0].ID, Type: "pdf", Units: 3, Parsed: true, Blocks: []textBlock{
 				{ID: "p2-b1", Unit: 2, Label: "paragraph_title", Text: "Evaluation", Translation: "评估"},
 				{ID: "p2-b2", Unit: 2, Label: "text", Text: "Oze wins.", Translation: ""},
+				{ID: "p2-b3", Unit: 2, Label: "text", Text: "ada@example.com", Translation: "ada@example.com"},
 				{ID: "p3-b1", Unit: 3, Label: "table", Text: "Table 1: Results.", Translation: "表 1：结果。"},
 			}})
 		case r.URL.Path == "/api/search":
@@ -193,6 +194,9 @@ func TestReadFormatsPagesAndTranslations(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
+	}
+	if strings.Count(out, "ada@example.com") != 1 {
+		t.Fatalf("unchanged translation printed twice:\n%s", out)
 	}
 	out, _ = runCLI(t, "read", "oze", "--side", "translation")
 	if strings.Contains(out, "Oze wins.") || !strings.Contains(out, "### 评估") {
