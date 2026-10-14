@@ -9,7 +9,9 @@ import {
   Check,
   ChartColumn,
   ArrowRightLeft,
+  FileDown,
 } from "lucide-react";
+import { exportAnnotatedPDFWithToast } from "./annotated-pdf-export";
 import type { Document, LibraryMode, Processing } from "@reader/core";
 import { api } from "@reader/api";
 import { toast } from "sonner";
@@ -334,6 +336,14 @@ export function LibraryDocuments({
                 <Pencil />
                 编辑文档信息
               </ContextMenuItem>
+              {doc.type === "pdf" && (
+                <ContextMenuItem
+                  onClick={() => void exportAnnotatedPDFWithToast(doc)}
+                >
+                  <FileDown />
+                  导出带批注的 PDF
+                </ContextMenuItem>
+              )}
               {onMove && (doc.type === "pdf" || doc.library === "papers") && (
                 <ContextMenuItem
                   onClick={() =>
