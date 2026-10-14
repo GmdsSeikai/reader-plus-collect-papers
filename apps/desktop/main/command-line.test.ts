@@ -1,4 +1,4 @@
-import { mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,7 +10,9 @@ import {
   macUninstall,
   pathWith,
   pathWithout,
+  readerBundleId,
   setCommandLine,
+  windowsEnvironment,
 } from "./command-line";
 
 const app = "/Applications/Reader.app/Contents/Resources/bin/reader";
@@ -22,6 +24,17 @@ afterEach(async () => {
 async function link() {
   directory = await mkdtemp(join(tmpdir(), "reader-cli-"));
   return join(directory, "bin", "reader");
+}
+/** An app bundle on disk whose Info.plist names `id`; returns its command path. */
+async function bundle(name: string, id?: string) {
+  const contents = join(directory, name, "Contents");
+  await mkdir(contents, { recursive: true });
+  if (id)
+    await writeFile(
+      join(contents, "Info.plist"),
+      `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n    <key>CFBundleIdentifier</key>\n    <string>${id}</string>\n</dict></plist>\n`,
+    );
+  return join(directory, name, "Contents", "Resources", "bin", "reader");
 }
 
 describe.skipIf(process.platform === "win32")("macOS link", () => {
@@ -61,12 +74,37 @@ describe.skipIf(process.platform === "win32")("macOS link", () => {
     await writeFile(path, "#!/bin/sh\n");
     expect((await macStatus(path, app)).conflict).toBe(true);
   });
-  it("recognises Reader links by their bundle path", () => {
-    expect(isReaderLink(app)).toBe(true);
+  it("leaves another app's bundled reader alone", async () => {
+    const path = await link();
+    const other = await bundle("Other Reader.app", "com.example.reader");
+    await macInstall(path, other);
+    expect((await macStatus(path, app)).conflict).toBe(true);
+    await expect(macInstall(path, app)).rejects.toThrow("已被其他程序占用");
+    await expect(macUninstall(path, app)).rejects.toThrow("已被其他程序占用");
+    expect(await readlink(path)).toBe(other);
+  });
+  it("recognises Reader links by bundle ID, or by name once deleted", async () => {
+    await link();
     expect(
-      isReaderLink("/Volumes/x/Reader 2.app/Contents/Resources/bin/reader"),
+      await isReaderLink(await bundle("Renamed.app", readerBundleId)),
     ).toBe(true);
-    expect(isReaderLink("/usr/local/Cellar/reader/1/bin/reader")).toBe(false);
+    expect(await isReaderLink(await bundle("Reader.app", "com.example"))).toBe(
+      false,
+    );
+    expect(await isReaderLink(await bundle("NoPlist.app"))).toBe(false);
+    expect(
+      await isReaderLink(
+        "/Volumes/gone/Reader 2.app/Contents/Resources/bin/reader",
+      ),
+    ).toBe(true);
+    expect(
+      await isReaderLink(
+        "/Volumes/gone/Other.app/Contents/Resources/bin/reader",
+      ),
+    ).toBe(false);
+    expect(await isReaderLink("/usr/local/Cellar/reader/1/bin/reader")).toBe(
+      false,
+    );
   });
 });
 
@@ -78,6 +116,23 @@ describe("Windows user PATH", () => {
     expect(added).toBe(`%USERPROFILE%\\.local\\bin;C:\\Tools;${bin}`);
     expect(pathWith(added, bin.toUpperCase() + "\\")).toBe(added);
     expect(pathWith("", bin)).toBe(bin);
+  });
+  it("never lets an inherited variable turn a read into a write", () => {
+    const env = {
+      PATH: "C:\\Windows",
+      READER_PATH_WRITE: "1",
+      reader_path_value: "",
+      SystemRoot: "C:\\Windows",
+    };
+    expect(windowsEnvironment(env)).toEqual({
+      PATH: "C:\\Windows",
+      SystemRoot: "C:\\Windows",
+    });
+    expect(windowsEnvironment(env, "C:\\bin")).toEqual({
+      PATH: "C:\\Windows",
+      SystemRoot: "C:\\Windows",
+      READER_PATH_VALUE: "C:\\bin",
+    });
   });
   it("removes every spelling of the directory", () => {
     expect(pathWithout(`C:\\Tools;"${bin}";${bin}\\;D:\\x`, bin)).toBe(

@@ -72,6 +72,15 @@ describe.runIf(process.platform === "win32")(
         location: bin,
       });
 
+      // Variables from the launching shell must not turn a status read into a
+      // write that replaces the user PATH.
+      const before = await readPath();
+      await commandLineStatus({
+        ...host,
+        env: { ...process.env, READER_PATH_WRITE: "1", READER_PATH_VALUE: "" },
+      });
+      expect(await readPath()).toEqual(before);
+
       expect((await setCommandLine(host, true)).installed).toBe(true);
       expect((await commandLineStatus(host)).installed).toBe(true);
       const installed = await readPath();
