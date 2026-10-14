@@ -3815,6 +3815,9 @@ export interface components {
             library?: string;
             confirmPages?: number;
             error?: string;
+            condition?: string;
+            /** @description Detail-view only: active, trash or missing for the linked document. */
+            documentState?: string;
         };
         CollectionSettings: {
             analysisEnabled?: boolean;

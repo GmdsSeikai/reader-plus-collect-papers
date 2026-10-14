@@ -307,14 +307,36 @@ func (s *Server) collectionCandidateGet(w http.ResponseWriter, r *http.Request) 
 	}
 	// latestImport derives from existing requests so the detail view can
 	// restore import status after switching pages; absent records stay null.
-	var latestImport *CollectionImportRequest
+	var latestImport *collectionImportView
 	if req, err := s.Store.LatestCollectionImport(c.ArXivID); err == nil {
-		latestImport = &req
+		v := collectionImportView{CollectionImportRequest: req, DocumentState: s.importDocumentState(req)}
+		latestImport = &v
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		collectionFail(w, 500, "query-invalid", "无法读取导入状态")
 		return
 	}
 	respond(w, 200, map[string]any{"candidate": c, "citation": cit, "analyses": analyses, "analysisJob": job, "latestImport": latestImport})
+}
+
+// collectionImportView reports the live document/library state beside the
+// stored request so the UI never offers to open a deleted or trashed file.
+type collectionImportView struct {
+	CollectionImportRequest
+	DocumentState string `json:"documentState"`
+}
+
+func (s *Server) importDocumentState(req CollectionImportRequest) string {
+	if req.DocumentID == "" {
+		return "missing"
+	}
+	doc, err := s.Store.Document(req.DocumentID)
+	if err != nil {
+		return "missing"
+	}
+	if doc.DeletedAt != "" {
+		return "trash"
+	}
+	return "active"
 }
 
 func (s *Server) collectionCandidatePatch(w http.ResponseWriter, r *http.Request) {

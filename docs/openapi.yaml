@@ -4066,6 +4066,8 @@
                   "library": { "type": "string" },
                   "confirmPages": { "type": "integer" },
                   "error": { "type": "string" },
+                  "condition": { "type": "string" },
+                  "documentState": { "type": "string", "description": "Detail-view only: active, trash or missing for the linked document." },
                 },
               "required": ["requestId", "arxivId", "downloadVersion", "status"],
             },

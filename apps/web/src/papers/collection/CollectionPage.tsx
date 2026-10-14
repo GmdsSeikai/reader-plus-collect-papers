@@ -205,12 +205,17 @@ export function CollectionPage({
   const [sort, setSort] = useState<"date" | "citations" | "relevance">("date");
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [imports, setImports] = useState<
-    Record<
-      string,
-      { requestId: string; status: string; error?: string; documentId?: string }
-    >
-  >({});
+  type ImportState = {
+    requestId: string;
+    status: string;
+    error?: string;
+    documentId?: string;
+    condition?: string;
+    confirmPages?: number;
+    downloadVersion?: number;
+    documentState?: string;
+  };
+  const [imports, setImports] = useState<Record<string, ImportState>>({});
   const requestSeq = useRef(0);
   const detailSeq = useRef(0);
 
@@ -218,7 +223,19 @@ export function CollectionPage({
     collectionApi
       .tasks()
       .then((items) => {
-        if (aliveRef.current) setTasks(items);
+        if (!aliveRef.current) return;
+        setTasks(items);
+        // Restore open runs after switching pages: the server derives
+        // activeRun from persisted runs, never from this page's memory.
+        setRunStates((old) => {
+          const next = { ...old };
+          for (const task of items) {
+            const run = (task as CollectionTask & { activeRun?: CollectionRun | null })
+              .activeRun;
+            if (run) next[task.id] = run;
+          }
+          return next;
+        });
       })
       .catch((e) => toast.error((e as Error).message));
   }, []);
@@ -353,13 +370,16 @@ export function CollectionPage({
       .activeImports()
       .then((reqs) => {
         if (!aliveRef.current) return;
-        const next: typeof imports = {};
+        const next: Record<string, ImportState> = {};
         for (const req of reqs) {
           next[req.arxivId] = {
             requestId: req.requestId,
             status: req.status,
             error: req.error,
             documentId: req.documentId,
+            condition: req.condition,
+            confirmPages: req.confirmPages,
+            downloadVersion: req.downloadVersion,
           };
           if (
             req.status === "queued" ||
@@ -394,6 +414,10 @@ export function CollectionPage({
             status: req.status,
             error: req.error,
             documentId: req.documentId,
+            condition: req.condition,
+            confirmPages: req.confirmPages,
+            downloadVersion: req.downloadVersion,
+            documentState: req.documentState,
           },
         }));
         // Long papers wait for the user's explicit confirmation; polling
@@ -428,19 +452,55 @@ export function CollectionPage({
       .catch((e) => toast.error((e as Error).message));
   };
 
-  // User action: cancel one queued or downloading request.
+  // User action: cancel one queued or downloading request. The response's
+  // real status wins — a committing import reports importing, not cancelled.
   const cancelImport = (arxivId: string) => {
     const state = imports[arxivId];
     if (!state) return;
     collectionApi
       .cancelImport(state.requestId)
-      .then(() => {
+      .then((res) => {
         setImports((s) => ({
           ...s,
-          [arxivId]: { ...state, status: "cancelled" },
+          [arxivId]: { ...state, status: res.status },
         }));
+        if (res.status !== "cancelled") {
+          toast.info(`请求仍在${statusLabel[res.status] || res.status}，未取消`);
+          void pollImport(arxivId, state.requestId);
+        }
       })
       .catch((e) => toast.error((e as Error).message));
+  };
+
+  // User action: retry one failed request as a fresh pinned-version import
+  // using the version and content hash the row already knows.
+  const retryImport = (arxivId: string) => {
+    const state = imports[arxivId];
+    const row = rows.find((r) => r.candidate.arxivId === arxivId);
+    if (!state || !row) return;
+    setBusy(true);
+    collectionApi
+      .importItems([
+        {
+          arxivId,
+          version: state.downloadVersion ?? row.candidate.latestVersion,
+          expectedContentHash: row.candidate.contentHash,
+        },
+      ])
+      .then((res) => {
+        const item = res.items[0];
+        if (!item || item.error) {
+          toast.error(item?.error || "重试失败");
+          return;
+        }
+        setImports((s) => ({
+          ...s,
+          [arxivId]: { requestId: item.requestId, status: "queued" },
+        }));
+        void pollImport(arxivId, item.requestId);
+      })
+      .catch((e) => toast.error((e as Error).message))
+      .finally(() => setBusy(false));
   };
 
   const openDetail = (row: CandidateRow) => {
@@ -456,6 +516,22 @@ export function CollectionPage({
           analyses: res.analyses,
           analysisJob: res.analysisJob,
         });
+        if (res.latestImport) {
+          const req = res.latestImport;
+          setImports((s) => ({
+            ...s,
+            [req.arxivId]: {
+              requestId: req.requestId,
+              status: req.status,
+              error: req.error,
+              documentId: req.documentId,
+              condition: req.condition,
+              confirmPages: req.confirmPages,
+              downloadVersion: req.downloadVersion,
+              documentState: req.documentState,
+            },
+          }));
+        }
       })
       .catch((e) => toast.error((e as Error).message));
   };
@@ -761,7 +837,11 @@ export function CollectionPage({
                             size="sm"
                             onClick={() => confirmImport(c.arxivId)}
                           >
-                            确认入库
+                            {state.condition === "trash-restore"
+                              ? "确认恢复回收站文档"
+                              : state.condition === "pages"
+                                ? `确认入库（${state.confirmPages ?? "?"} 页）`
+                                : "确认入库"}
                           </Button>
                         ) : null}
                         {state?.status === "queued" ||
@@ -774,7 +854,17 @@ export function CollectionPage({
                             取消
                           </Button>
                         ) : null}
-                        {state?.status === "imported" ? (
+                        {state?.status === "imported" &&
+                        state.documentState === "trash" ? (
+                          <span className="text-xs text-muted-foreground">
+                            文档在回收站
+                          </span>
+                        ) : state?.status === "imported" &&
+                          state.documentState === "missing" ? (
+                          <span className="text-xs text-muted-foreground">
+                            文档已删除
+                          </span>
+                        ) : state?.status === "imported" ? (
                           <Button
                             size="sm"
                             variant="secondary"
@@ -786,9 +876,19 @@ export function CollectionPage({
                           </Button>
                         ) : null}
                         {state?.status === "failed" ? (
-                          <span className="text-xs text-destructive">
-                            {state.error || "失败"}
-                          </span>
+                          <>
+                            <span className="text-xs text-destructive">
+                              {state.error || "失败"}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => retryImport(c.arxivId)}
+                            >
+                              重试
+                            </Button>
+                          </>
                         ) : null}
                       </div>
                     );

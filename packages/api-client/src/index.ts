@@ -540,7 +540,11 @@ export const collectionApi = {
       citation: CollectionCitation;
       analyses: CollectionAnalysis[];
       analysisJob: CollectionAnalysisJob | null;
-      latestImport: CollectionImportRequest | null;
+      latestImport:
+        | (CollectionImportRequest & {
+            documentState: "active" | "trash" | "missing";
+          })
+        | null;
     }>(`/api/collection/candidates/${encodeURIComponent(id)}`),
   analyze: (id: string) =>
     request<CollectionAnalysisJob>(`/api/collection/candidates/${encodeURIComponent(id)}/analysis`, {
@@ -577,9 +581,11 @@ export const collectionApi = {
   activeImports: () =>
     request<CollectionImportRequest[]>("/api/collection/imports"),
   importRequest: (id: string) =>
-    request<CollectionImportRequest>(
-      `/api/collection/imports/${encodeURIComponent(id)}`,
-    ),
+    request<
+      CollectionImportRequest & {
+        documentState: "active" | "trash" | "missing";
+      }
+    >(`/api/collection/imports/${encodeURIComponent(id)}`),
   confirmImport: (id: string) =>
     request<{ status: string }>(
       `/api/collection/imports/${encodeURIComponent(id)}/confirm`,

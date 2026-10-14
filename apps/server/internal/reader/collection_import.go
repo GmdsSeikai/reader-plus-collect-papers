@@ -205,7 +205,7 @@ func (s *Server) collectionImportGet(w http.ResponseWriter, r *http.Request) {
 		collectionFail(w, 404, "query-invalid", "导入请求不存在")
 		return
 	}
-	respond(w, 200, req)
+	respond(w, 200, collectionImportView{CollectionImportRequest: req, DocumentState: s.importDocumentState(req)})
 }
 
 func (s *Server) collectionImportList(w http.ResponseWriter, r *http.Request) {
