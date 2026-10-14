@@ -14,8 +14,9 @@ const chatHistoryBytes = 24000
 // Hard cap on one request's source context; apps/web contextHardLimit mirrors it.
 const chatContextBytes = 256000
 
-// Total evidence sent to the provider: the current source always fits, and
-// history sources fill the rest newest first, each kept whole or omitted.
+// Budget for history evidence. The current source and summary are always sent
+// whole (bounded by chatContextBytes and the summary limit); history sources
+// fill what remains of this budget newest first, each kept whole or omitted.
 const chatSourceBytes = 320000
 
 type chatSource struct {
