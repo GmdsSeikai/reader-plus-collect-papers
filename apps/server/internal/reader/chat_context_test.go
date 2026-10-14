@@ -47,7 +47,7 @@ func TestChatKeepsLongSourceWithoutRepeatingIt(t *testing.T) {
 	if n := strings.Count(captured, "独有原文事实：维修费用471元。"); n != 1 {
 		t.Errorf("original source fact occurs %d times, want once", n)
 	}
-	if strings.Contains(captured, "\ufffd") {
+	if strings.Contains(captured, "�") {
 		t.Error("history damaged UTF-8")
 	}
 	if !strings.Contains(captured, "再次核对") {
@@ -68,8 +68,35 @@ func TestChatHistoryKeepsQuestionAnswerBoundaries(t *testing.T) {
 	if len(chat.Sources) != 1 || chat.Sources[0].Text != source {
 		t.Fatal("source was truncated or duplicated")
 	}
-	if strings.Contains(prompt, "\ufffd") {
+	if strings.Contains(prompt, "�") {
 		t.Fatal("damaged UTF-8")
+	}
+}
+
+func TestChatHistorySourcesStayWithinTotalBudget(t *testing.T) {
+	old := strings.Repeat("旧", 150000/3)
+	recent := strings.Repeat("近", 150000/3)
+	current := strings.Repeat("今", 150000/3)
+	messages := []Message{
+		{Role: "user", Content: "第一问", Context: old}, {Role: "assistant", Content: "答一"},
+		{Role: "user", Content: "第二问", Context: recent}, {Role: "assistant", Content: "答二"},
+	}
+	prompt, chat := makeChatInput("doc", "title", "", "第三问", current, "", messages)
+	total := 0
+	for _, source := range chat.Sources {
+		total += len(source.Text)
+		if source.Text == old {
+			t.Fatal("kept the oldest source past the budget")
+		}
+	}
+	if total > chatSourceBytes {
+		t.Fatalf("sources total %d bytes", total)
+	}
+	if len(chat.Sources) != 2 || chat.Sources[1].Text != current {
+		t.Fatal("dropped the current or most recent source")
+	}
+	if !strings.Contains(prompt, `"text":"第一问","sourceOmitted":true`) {
+		t.Fatal("omitted source is not marked")
 	}
 }
 
