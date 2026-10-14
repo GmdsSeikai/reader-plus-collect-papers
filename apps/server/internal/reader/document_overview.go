@@ -55,7 +55,7 @@ type overviewJob struct{ DocumentID, ID, Status, Error string }
 func (s *Store) loadOverview(ctx context.Context, documentID string) (documentOverview, error) {
 	o := documentOverview{DocumentID: documentID, Status: "missing", Sections: []overviewSection{}, Coverage: corpusCoverage{Missing: []string{}, Warnings: []string{}}}
 	var body string
-	err := s.DB.QueryRowContext(ctx, "SELECT body FROM document_overviews WHERE document_id=?", documentID).Scan(&body)
+	err := s.DB.QueryRowContext(ctx, "SELECT body FROM document_overviews WHERE document_id=? AND json_type(body,'$.content')='object' UNION ALL SELECT body FROM document_overview_drafts WHERE document_id=? UNION ALL SELECT body FROM document_overviews WHERE document_id=? LIMIT 1", documentID, documentID, documentID).Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o, nil
 	}
@@ -112,6 +112,15 @@ func (s *Server) overviewState(ctx context.Context, documentID string) (document
 			}
 		}
 	}
+	var draft string
+	if e := s.Store.DB.QueryRowContext(ctx, "SELECT body FROM document_overview_drafts WHERE document_id=?", documentID).Scan(&draft); e == nil {
+		var progress documentOverview
+		if json.Unmarshal([]byte(draft), &progress) == nil {
+			o.CompiledPassages, o.TotalPassages = progress.CompiledPassages, progress.TotalPassages
+		}
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		return o, e
+	}
 	var status, message string
 	err = s.Store.DB.QueryRowContext(ctx, "SELECT status,error FROM document_overview_jobs WHERE document_id=?", documentID).Scan(&status, &message)
 	if err == nil && status != "complete" {
@@ -156,11 +165,16 @@ func (s *Server) requestDocumentOverview(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer tx.Rollback()
+	jobID := id()
 	if request.Regenerate {
-		_, err = tx.Exec("DELETE FROM document_overviews WHERE document_id=?", o.DocumentID)
+		// Reset only the working draft. The published overview remains readable
+		// through cancellation, upstream failures and later retries.
+		_, err = tx.Exec("INSERT INTO document_overview_drafts(document_id,job_id,body) VALUES(?,?,'{}') ON CONFLICT(document_id) DO UPDATE SET job_id=excluded.job_id,body=excluded.body", o.DocumentID, jobID)
+	} else {
+		_, err = tx.Exec("UPDATE document_overview_drafts SET job_id=? WHERE document_id=?", jobID, o.DocumentID)
 	}
 	if err == nil {
-		_, err = tx.Exec("INSERT INTO document_overview_jobs(document_id,job_id,status,error) VALUES(?,?,'queued','') ON CONFLICT(document_id) DO UPDATE SET job_id=excluded.job_id,status='queued',error=''", o.DocumentID, id())
+		_, err = tx.Exec("INSERT INTO document_overview_jobs(document_id,job_id,status,error) VALUES(?,?,'queued','') ON CONFLICT(document_id) DO UPDATE SET job_id=excluded.job_id,status='queued',error=''", o.DocumentID, jobID)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -210,6 +224,15 @@ func (s *Store) saveOverview(ctx context.Context, job overviewJob, o documentOve
 	if count != 1 {
 		return generationError(ErrorCanceled, "概要任务或原文版本已改变")
 	}
+	if o.Content == nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO document_overview_drafts(document_id,job_id,body) VALUES(?,?,?) ON CONFLICT(document_id) DO UPDATE SET job_id=excluded.job_id,body=excluded.body", o.DocumentID, job.ID, string(body)); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM document_overview_drafts WHERE document_id=?", o.DocumentID); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO document_overviews(document_id,body) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET body=excluded.body", o.DocumentID, string(body)); err != nil {
 		return err
 	}
@@ -240,7 +263,7 @@ func queueImportedOverview(db overviewExecutor, documentID, settings string) err
 	return err
 }
 func (s *Server) listOverviewStatuses(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT j.document_id,j.status,j.error,COALESCE(o.body,'') FROM document_overview_jobs j JOIN documents d ON d.id=j.document_id LEFT JOIN document_overviews o ON o.document_id=j.document_id WHERE d.deleted_at=''`)
+	rows, err := s.Store.DB.QueryContext(r.Context(), `SELECT j.document_id,j.status,j.error,COALESCE(draft.body,o.body,'') FROM document_overview_jobs j JOIN documents d ON d.id=j.document_id LEFT JOIN document_overviews o ON o.document_id=j.document_id LEFT JOIN document_overview_drafts draft ON draft.document_id=j.document_id WHERE d.deleted_at=''`)
 	if err != nil {
 		fail(w, 500, "无法读取概要任务")
 		return

@@ -134,7 +134,9 @@ export function DocumentOverviewDialog({
       setData(
         await api.generateOverview(
           doc.id,
-          data?.status === "complete" || !!data?.stale,
+          data?.status === "complete" ||
+            (data?.status === "partial" && !!data.content) ||
+            !!data?.stale,
         ),
       );
     } catch (e) {

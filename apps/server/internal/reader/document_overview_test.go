@@ -169,3 +169,108 @@ func TestOverviewHTTPJobsAndSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestOverviewRegenerationPreservesPublishedUntilSuccess(t *testing.T) {
+	for _, stop := range []string{"failure", "cancel"} {
+		t.Run(stop, func(t *testing.T) {
+			s, a := originalDocumentFixture(t)
+			_, _ = s.Store.DB.Exec(`INSERT INTO settings VALUES('reader','{"documentContextTokens":8192}')`)
+			c := a.corpus
+			c.Passages = nil
+			for i := 0; i < 6; i++ {
+				c.Passages = append(c.Passages, documentPassage{ID: fmt.Sprint(i), Section: fmt.Sprint(i), Label: fmt.Sprint(i), Text: strings.Repeat("original evidence ", 350), Location: json.RawMessage(`{"type":"epub","href":"a.xhtml"}`)})
+			}
+			c.Revision = "regeneration-corpus"
+			_, _ = s.Store.DB.Exec("UPDATE document_corpora SET revision=?,body=? WHERE document_id='doc'", c.Revision, jsonText(c))
+			original := documentOverview{DocumentID: "doc", Revision: c.Revision, Version: overviewVersion, Status: "complete", Coverage: c.Coverage, Content: &overviewContent{Summary: "published summary"}, TotalPassages: 6, CompiledPassages: 6}
+			old := overviewTestJob(t, s)
+			if err := s.Store.saveOverview(t.Context(), old, original); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = s.Store.DB.Exec("UPDATE document_overview_jobs SET status='complete'")
+			assertPublished := func() {
+				t.Helper()
+				o, err := s.currentOverview(t.Context(), c)
+				if err != nil || o == nil || o.Content.Summary != "published summary" {
+					t.Fatalf("published overview lost: %+v %v", o, err)
+				}
+				var indexed string
+				if err = s.Store.DB.QueryRow("SELECT content FROM document_overviews_fts WHERE document_id='doc'").Scan(&indexed); err != nil || !strings.Contains(indexed, "published summary") {
+					t.Fatal("published search index lost", err, indexed)
+				}
+			}
+			r := request(t, s, "POST", "/api/documents/doc/overview", strings.NewReader(`{"regenerate":true}`))
+			if r.Code != 202 {
+				t.Fatal(r.Body)
+			}
+			assertPublished()
+			var job overviewJob
+			job.DocumentID = "doc"
+			_ = s.Store.DB.QueryRow("SELECT job_id FROM document_overview_jobs WHERE document_id='doc'").Scan(&job.ID)
+			_, _ = s.Store.DB.Exec("UPDATE document_overview_jobs SET status='running'")
+			calls, failAt := 0, 2
+			if err := s.compileOverview(t.Context(), job, overviewTestService(t, &calls, &failAt)); err == nil {
+				t.Fatal("injected failure succeeded")
+			}
+			assertPublished()
+			if stop == "cancel" {
+				request(t, s, "DELETE", "/api/documents/doc/overview/job", nil)
+			} else {
+				_, _ = s.Store.DB.Exec("UPDATE document_overview_jobs SET status='failed'")
+			}
+			// A late completion from the old attempt cannot replace the published copy.
+			if err := s.Store.saveOverview(t.Context(), job, original); errorKind(err) != ErrorCanceled {
+				t.Fatal("late writer accepted", err)
+			}
+			assertPublished()
+			r = request(t, s, "POST", "/api/documents/doc/overview", strings.NewReader(`{"regenerate":false}`))
+			if r.Code != 202 {
+				t.Fatal(r.Body)
+			}
+			_ = s.Store.DB.QueryRow("SELECT job_id FROM document_overview_jobs WHERE document_id='doc'").Scan(&job.ID)
+			_, _ = s.Store.DB.Exec("UPDATE document_overview_jobs SET status='running'")
+			reopened, err := OpenStore(s.Store.Root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.DB.Close()
+			resumed := NewServer(reopened, "test-secret", "")
+			defer resumed.Close()
+			failAt = -1
+			if err = resumed.compileOverview(t.Context(), job, overviewTestService(t, &calls, &failAt)); err != nil {
+				t.Fatal(err)
+			}
+			o, err := s.currentOverview(t.Context(), c)
+			if err != nil || o == nil || o.Content.Summary == "published summary" || calls != 8 {
+				t.Fatalf("did not publish/resume correctly: %+v %v calls=%d", o, err, calls)
+			}
+			var n int
+			_ = s.Store.DB.QueryRow("SELECT count(*) FROM document_overview_drafts").Scan(&n)
+			if n != 0 {
+				t.Fatal("published draft retained")
+			}
+		})
+	}
+}
+
+func TestPartialOverviewRegenerationCallsModel(t *testing.T) {
+	s, a := originalDocumentFixture(t)
+	a.corpus.Coverage.Status = "partial"
+	_, _ = s.Store.DB.Exec("UPDATE document_corpora SET body=? WHERE document_id='doc'", jsonText(a.corpus))
+	job := overviewTestJob(t, s)
+	calls, failAt := 0, -1
+	g := overviewTestService(t, &calls, &failAt)
+	if err := s.compileOverview(t.Context(), job, g); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.Store.DB.Exec("UPDATE document_overview_jobs SET status='complete'")
+	r := request(t, s, "POST", "/api/documents/doc/overview", strings.NewReader(`{"regenerate":true}`))
+	if r.Code != 202 {
+		t.Fatal(r.Body)
+	}
+	_ = s.Store.DB.QueryRow("SELECT job_id FROM document_overview_jobs WHERE document_id='doc'").Scan(&job.ID)
+	_, _ = s.Store.DB.Exec("UPDATE document_overview_jobs SET status='running'")
+	if err := s.compileOverview(t.Context(), job, g); err != nil || calls != 2 {
+		t.Fatal("regeneration reused prior sections", err, calls)
+	}
+}

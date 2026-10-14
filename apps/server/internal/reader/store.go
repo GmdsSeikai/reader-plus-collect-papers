@@ -105,6 +105,7 @@ func OpenStore(root string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS document_corpora(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,fingerprint TEXT NOT NULL,revision TEXT NOT NULL,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS document_corpus_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,status TEXT NOT NULL);
  CREATE VIRTUAL TABLE IF NOT EXISTS document_passages_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,block_id UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS document_overview_drafts(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS document_overviews(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS document_overview_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '');
  CREATE VIRTUAL TABLE IF NOT EXISTS document_overviews_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,content,tokenize='unicode61');

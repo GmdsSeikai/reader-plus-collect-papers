@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -127,6 +128,15 @@ func (s *Server) compileOverview(ctx context.Context, job overviewJob, g *Genera
 	o, err := s.Store.loadOverview(ctx, d.ID)
 	if err != nil {
 		return err
+	}
+	var draft string
+	if e := s.Store.DB.QueryRowContext(ctx, "SELECT body FROM document_overview_drafts WHERE document_id=? AND job_id=?", d.ID, job.ID).Scan(&draft); e == nil {
+		o = documentOverview{}
+		if err = json.Unmarshal([]byte(draft), &o); err != nil {
+			return err
+		}
+	} else if !errors.Is(e, sql.ErrNoRows) {
+		return e
 	}
 	if o.Revision != c.Revision || o.Version != overviewVersion {
 		o = documentOverview{DocumentID: d.ID, Revision: c.Revision, Version: overviewVersion, Status: "partial", Sections: []overviewSection{}, Coverage: c.Coverage, TotalPassages: len(c.Passages)}

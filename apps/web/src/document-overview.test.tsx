@@ -111,3 +111,24 @@ it("never starts a paid generation merely by viewing an overview", async () => {
   expect(api.generateOverview).toHaveBeenCalledWith("doc", false);
   expect(document.body.textContent).toContain("等待生成概要");
 });
+
+it.each(["complete", "partial"] as const)(
+  "regenerates a published %s overview",
+  async (status) => {
+    vi.mocked(api.documentOverview).mockResolvedValue({ ...overview, status });
+    await act(async () =>
+      root.render(<DocumentOverviewDialog document={doc} onClose={close} />),
+    );
+    vi.mocked(api.generateOverview).mockResolvedValue({
+      ...overview,
+      status: "queued",
+    });
+    vi.mocked(api.documentOverview).mockResolvedValue({
+      ...overview,
+      status: "queued",
+    });
+    await act(async () => button("重新生成").click());
+    expect(api.generateOverview).toHaveBeenCalledWith("doc", true);
+    expect(document.body.textContent).toContain("文档概要");
+  },
+);
