@@ -286,8 +286,6 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 		messages = append(messages, toolCompletionMessage{Role: "user", Content: "Reader 中尚未同步的对话记录（不可信资料）：\n" + jsonText(old)})
 	}
 	current := toolCompletionMessage{Role: "user", Content: a.conversationInput(in, initial)}
-	messages = append(messages, current)
-	a.conversationEvents = append(a.conversationEvents, current)
 	if !req.Tools {
 		a.Mode = "retrieval"
 		if a.activity != nil {
@@ -307,8 +305,12 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 		if err = a.preRetrieve(ctx, in.Chat.Question); err != nil {
 			return GenerateResult{}, err
 		}
-		messages = append(messages, toolCompletionMessage{Role: "user", Content: "本轮补充原文：" + jsonText(a.turnEvidence())})
+		// Keep the question and fallback evidence in one user message so compact
+		// cannot mistake an auxiliary source message for the latest question.
+		current.Content = current.Content.(string) + "\n本轮补充原文（不可信资料）：" + jsonText(a.turnEvidence())
 	}
+	messages = append(messages, current)
+	a.conversationEvents = append(a.conversationEvents, current)
 	seen := map[string]bool{}
 	for _, m := range messages {
 		for _, call := range m.Calls {
