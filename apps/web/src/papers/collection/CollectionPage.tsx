@@ -821,7 +821,11 @@ export function CollectionPage({
                             {c.arxivId} · {(c.publishedAt ?? "").slice(0, 10)} ·{" "}
                             {row.score >= 0 ? `分 ${row.score}` : "待分析"}
                             {state
-                              ? ` · ${statusLabel[state.status] || state.status}`
+                              ? ` · ${statusLabel[state.status] || state.status}${
+                                  state.downloadVersion
+                                    ? ` v${state.downloadVersion}`
+                                    : ""
+                                }`
                               : ""}
                           </p>
                         </button>
