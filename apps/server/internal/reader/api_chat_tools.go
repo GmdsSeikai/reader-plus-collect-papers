@@ -54,6 +54,9 @@ type toolStreamCallbacks struct {
 }
 
 func readToolCompletion(ctx context.Context, r io.Reader, callbacks ...toolStreamCallbacks) (toolCompletionResult, error) {
+	return readToolCompletionWithConnection(ctx, r, APIConnection{}, callbacks...)
+}
+func readToolCompletionWithConnection(ctx context.Context, r io.Reader, c APIConnection, callbacks ...toolStreamCallbacks) (toolCompletionResult, error) {
 	draft := func(text string, reset bool) error {
 		if len(callbacks) > 0 && callbacks[0].Draft != nil {
 			return callbacks[0].Draft(text, reset)
@@ -80,6 +83,9 @@ func readToolCompletion(ctx context.Context, r io.Reader, callbacks ...toolStrea
 			return false, generationError(ErrorProtocol, "API 工具流 UTF-8 无效")
 		}
 		var chunk struct {
+			Base struct {
+				Code int `json:"status_code"`
+			} `json:"base_resp"`
 			Error   json.RawMessage  `json:"error"`
 			Model   string           `json:"model"`
 			Usage   *completionUsage `json:"usage"`
@@ -106,8 +112,8 @@ func readToolCompletion(ctx context.Context, r io.Reader, callbacks ...toolStrea
 		if json.Unmarshal([]byte(data), &chunk) != nil {
 			return false, generationError(ErrorProtocol, "API 工具事件无效")
 		}
-		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
-			return false, generationError(ErrorUpstream, "API 工具请求失败")
+		if len(chunk.Error) > 0 && string(chunk.Error) != "null" || chunk.Base.Code != 0 {
+			return false, providerFailure(ctx, c, 200, nil, []byte(data), "stream")
 		}
 		if chunk.Model != "" {
 			result.Model = chunk.Model
@@ -250,9 +256,13 @@ func toolCompletion(ctx context.Context, c APIConnection, req completionRequest,
 	defer response.Body.Close()
 	media, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if media != "text/event-stream" {
+		b, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		if hasAPIError(b) {
+			return toolCompletionResult{}, providerFailure(ctx, c, response.StatusCode, response.Header, b, "http")
+		}
 		return toolCompletionResult{}, generationError(ErrorProtocol, "API 未返回工具调用 SSE")
 	}
-	return readToolCompletion(ctx, response.Body, callbacks...)
+	return readToolCompletionWithConnection(ctx, response.Body, c, callbacks...)
 }
 func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionRequest, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
 	a := in.Chat.Agent

@@ -121,6 +121,10 @@ func TestHTTP200BusinessErrorIsNotSuccess(t *testing.T) {
 			if result.Text != "" || errorKind(err) != ErrorConfiguration {
 				t.Fatalf("%+v %v", result, err)
 			}
+			document, err := toolCompletion(t.Context(), APIConnection{URL: upstream.URL}, completionRequest{Model: "test", Effort: "high"}, []toolCompletionMessage{{Role: "user", Content: "private"}}, documentAPITools())
+			if document.Text != "" || errorKind(err) != ErrorConfiguration {
+				t.Fatalf("document: %+v %v", document, err)
+			}
 		})
 	}
 }
@@ -144,5 +148,17 @@ func TestBroadRequestErrorPreservesHTTPClassification(t *testing.T) {
 				t.Errorf("status=%d field=%s: %v want %s", tt.status, field, err, tt.want)
 			}
 		}
+	}
+}
+
+func TestToolStreamRejectsBusinessErrorBeforeOutput(t *testing.T) {
+	wire := "data: " + `{"base_resp":{"status_code":2013,"status_msg":"Invalid reasoning_effort private paper"},"choices":[{"index":0,"delta":{"content":"must not save"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	emitted := false
+	result, err := readToolCompletionWithConnection(t.Context(), strings.NewReader(wire), APIConnection{URL: "https://api.minimax.io/v1"}, toolStreamCallbacks{Draft: func(string, bool) error { emitted = true; return nil }})
+	if err == nil || errorKind(err) != ErrorConfiguration || emitted || result.Text != "" {
+		t.Fatalf("accepted unsuccessful provider response: %+v %v emitted=%v", result, err, emitted)
+	}
+	if strings.Contains(err.Error(), "private paper") {
+		t.Fatal("leaked upstream content")
 	}
 }
