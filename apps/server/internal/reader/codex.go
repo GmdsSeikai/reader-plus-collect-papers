@@ -30,6 +30,13 @@ type codexSession struct {
 	documentMCP                        string
 	documentMCPName                    string
 	contextWindow                      int
+	persistent                         bool
+	finalMessagesOnly                  bool
+	configOverrides                    map[string]any
+	onThread                           func(string) error
+	onTurn                             func(string) error
+	onUsage                            func(*TokenCounts) error
+	lastTurnID                         string
 }
 
 func (s *codexSession) close() {
@@ -40,6 +47,7 @@ func newCodexSession(work, model string) (*codexSession, error) {
 }
 func startCodexSession(work, model string, overrides []string, token string) (*codexSession, error) {
 	args := []string{"app-server", "--listen", "stdio://"}
+	effectiveOverrides := map[string]any{}
 	for _, setting := range []string{
 		`approval_policy="never"`, `sandbox_mode="read-only"`,
 		`features.shell_tool=false`, `features.unified_exec=false`,
@@ -49,10 +57,12 @@ func startCodexSession(work, model string, overrides []string, token string) (*c
 		`web_search="disabled"`, `mcp_servers={}`, `notify=[]`, `project_doc_max_bytes=0`,
 	} {
 		args = append(args, "-c", setting)
+		addCodexOverride(effectiveOverrides, setting)
 	}
 	cmd := exec.Command("codex", args...)
 	for _, setting := range overrides {
 		cmd.Args = append(cmd.Args, "-c", setting)
+		addCodexOverride(effectiveOverrides, setting)
 	}
 	if token != "" {
 		cmd.Env = append(os.Environ(), "READER_DOCUMENT_MCP_TOKEN="+token)
@@ -75,7 +85,7 @@ func startCodexSession(work, model string, overrides []string, token string) (*c
 	scan := bufio.NewScanner(stdout)
 	scan.Buffer(make([]byte, 4096), maxProviderFrame)
 
-	return &codexSession{cmd: cmd, stdin: stdin, stdout: stdout, scan: scan, work: work, model: model}, nil
+	return &codexSession{cmd: cmd, stdin: stdin, stdout: stdout, scan: scan, work: work, model: model, configOverrides: effectiveOverrides}, nil
 }
 
 func invokeCodex(ctx context.Context, work, model string, in AIInput, delta func(string), metrics ...func([]ModelTokens)) (string, error) {
@@ -106,6 +116,10 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 
 	var answer strings.Builder
 	items := map[string]*strings.Builder{}
+	phases := map[string]string{}
+	pending := map[string]*strings.Builder{}
+	lastCandidate := ""
+	toolSerial, candidateToolSerial := 0, 0
 	threadID, turnID := s.threadID, ""
 	completed := false
 	providerError := errors.New("Codex 未完成回答，请检查登录、网络、模型或额度")
@@ -132,6 +146,22 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		}
 		return nil
 	}
+	routeText := func(itemID, part string) error {
+		if !s.finalMessagesOnly || phases[itemID] == "final_answer" || phases[itemID] == "partial_answer" {
+			return appendText(itemID, part)
+		}
+		if phases[itemID] == "commentary" {
+			return nil
+		}
+		if pending[itemID] == nil {
+			pending[itemID] = &strings.Builder{}
+		}
+		if pending[itemID].Len()+len(part) > 1<<20 {
+			return generationError(ErrorLimit, "Codex 消息过长")
+		}
+		pending[itemID].WriteString(part)
+		return nil
+	}
 	type message = codexRPCMessage
 	// Notifications can interleave with RPC responses, including turn/start.
 	handle := func(msg message) error {
@@ -149,9 +179,10 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 			Delta     string `json:"delta"`
 			WillRetry bool   `json:"willRetry"`
 			Item      struct {
-				ID   string `json:"id"`
-				Type string `json:"type"`
-				Text string `json:"text"`
+				ID    string `json:"id"`
+				Type  string `json:"type"`
+				Text  string `json:"text"`
+				Phase string `json:"phase"`
 			} `json:"item"`
 			Turn struct {
 				ID     string `json:"id"`
@@ -189,6 +220,12 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 					s.total = total
 					emitMetrics(metrics, []ModelTokens{{Tokens: counts}})
 				}
+				if validTokens(total) && s.onUsage != nil {
+					s.total = total
+					if err := s.onUsage(total); err != nil {
+						return err
+					}
+				}
 			}
 			return nil
 		}
@@ -201,14 +238,52 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		}
 		lifecycle.setCancel(map[string]any{"id": 99, "method": "turn/interrupt", "params": map[string]string{"threadId": threadID, "turnId": id}})
 		switch msg.Method {
+		case "item/started":
+			if p.Item.Type == "agentMessage" {
+				phases[p.Item.ID] = p.Item.Phase
+			}
+			if p.Item.Type == "mcpToolCall" {
+				toolSerial++
+			}
+			if p.Item.Type == "contextCompaction" && in.Chat != nil && in.Chat.Agent != nil {
+				if c := in.Chat.Agent.conversation; c != nil {
+					c.SeenSources = map[string]bool{}
+					c.OverviewVersion = ""
+				}
+				if in.Chat.Agent.activity != nil {
+					return in.Chat.Agent.activity("reading", "", "正在整理对话上下文")
+				}
+			}
 		case "item/agentMessage/delta":
 			turnID = id
-			return appendText(p.ItemID, p.Delta)
+			return routeText(p.ItemID, p.Delta)
 		case "item/completed":
 			if p.Item.Type != "agentMessage" {
 				return nil
 			}
 			turnID = id
+			lastCandidate = p.Item.ID
+			candidateToolSerial = toolSerial
+			if p.Item.Phase != "" {
+				phases[p.Item.ID] = p.Item.Phase
+			}
+			if s.finalMessagesOnly {
+				if phases[p.Item.ID] == "commentary" {
+					delete(pending, p.Item.ID)
+					return nil
+				}
+				if phases[p.Item.ID] == "" {
+					pending[p.Item.ID] = &strings.Builder{}
+					pending[p.Item.ID].WriteString(p.Item.Text)
+					return nil
+				}
+				if buffered := pending[p.Item.ID]; buffered != nil {
+					if err := appendText(p.Item.ID, buffered.String()); err != nil {
+						return err
+					}
+					delete(pending, p.Item.ID)
+				}
+			}
 			// Completion repeats the accumulated text. Only forward a missing
 			// suffix, and reject rewrites that an append-only SSE client cannot apply.
 			previous := ""
@@ -230,6 +305,13 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 			turnID = id
 			if p.Turn.Status != "completed" {
 				return providerError
+			}
+			if s.finalMessagesOnly && phases[lastCandidate] == "" && candidateToolSerial == toolSerial {
+				if b := pending[lastCandidate]; b != nil {
+					if err := appendText(lastCandidate, b.String()); err != nil {
+						return err
+					}
+				}
 			}
 			completed = true
 		}
@@ -255,7 +337,7 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		if instructions == "" {
 			instructions = readerSystemPrompt
 		}
-		params := map[string]any{"cwd": work, "ephemeral": true, "sandbox": "read-only", "approvalPolicy": "never", "baseInstructions": instructions}
+		params := map[string]any{"cwd": work, "ephemeral": !s.persistent, "sandbox": "read-only", "approvalPolicy": "never", "baseInstructions": instructions}
 		if model != "" {
 			params["model"] = model
 		}
@@ -274,6 +356,11 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		}
 		threadID = thread.Thread.ID
 		s.threadID, s.actualModel = threadID, thread.Model
+		if s.onThread != nil {
+			if err = s.onThread(threadID); err != nil {
+				return "", err
+			}
+		}
 		if s.baseInstructions != "" {
 			if _, err = s.verifyDocumentConfig(ctx); err != nil {
 				return "", err
@@ -308,6 +395,12 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		return "", generationError(ErrorProtocol, "Codex 回答编号无效")
 	}
 	turnID = turn.Turn.ID
+	s.lastTurnID = turnID
+	if s.onTurn != nil {
+		if err = s.onTurn(turnID); err != nil {
+			return "", err
+		}
+	}
 	lifecycle.setCancel(map[string]any{"id": 99, "method": "turn/interrupt", "params": map[string]string{"threadId": threadID, "turnId": turnID}})
 	for !completed {
 		msg, err := read()
@@ -394,4 +487,26 @@ func (s *codexSession) initializeRPC(ctx context.Context, life *rpcLifecycle, ha
 	}
 	s.initialized = true
 	return nil
+}
+
+func addCodexOverride(dst map[string]any, setting string) {
+	key, value, ok := strings.Cut(setting, "=")
+	if !ok {
+		return
+	}
+	var parsed any
+	if json.Unmarshal([]byte(value), &parsed) != nil {
+		return
+	}
+	parts := strings.Split(key, ".")
+	node := dst
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := node[part].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			node[part] = next
+		}
+		node = next
+	}
+	node[parts[len(parts)-1]] = parsed
 }

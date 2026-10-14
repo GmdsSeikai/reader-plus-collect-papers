@@ -107,6 +107,7 @@ func OpenStore(root string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS document_overview_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '');
  CREATE VIRTUAL TABLE IF NOT EXISTS document_overviews_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,content,tokenize='unicode61');
  CREATE TRIGGER IF NOT EXISTS document_overview_delete AFTER DELETE ON document_overviews BEGIN DELETE FROM document_overviews_fts WHERE document_id=old.document_id; END;
+ CREATE TABLE IF NOT EXISTS document_conversations(document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,provider TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(document_id,provider));
  CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);`)
 	if err != nil {
 		db.Close()

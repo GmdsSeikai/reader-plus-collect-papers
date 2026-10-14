@@ -62,8 +62,8 @@ func TestChatHistoryKeepsQuestionAnswerBoundaries(t *testing.T) {
 	if strings.Contains(prompt, "不应出现的孤立回答") {
 		t.Fatal("included an orphan answer")
 	}
-	if !strings.Contains(prompt, "需要保留的问题") || !strings.Contains(prompt, "历史回答已截短") {
-		t.Fatal("missing paired question or truncation marker")
+	if !strings.Contains(prompt, "需要保留的问题") || strings.Contains(prompt, "历史回答已截短") {
+		t.Fatal("history was truncated or lost its paired question")
 	}
 	if len(chat.Sources) != 1 || chat.Sources[0].Text != source {
 		t.Fatal("source was truncated or duplicated")

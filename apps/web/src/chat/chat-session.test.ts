@@ -63,6 +63,36 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("chat request lifecycle", () => {
+  it("streams a candidate then commits the answer without duplicate text", async () => {
+    const h = setup();
+    await h.session.load();
+    const send = h.session.send(input);
+    h.emit({ event: "draft", data: { text: "准备查找", reset: false } });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    expect(h.session.getSnapshot().pending).toMatchObject({
+      content: "",
+      draft: "准备查找",
+    });
+    h.emit({ event: "draft", data: { text: "", reset: true } });
+    h.emit({ event: "draft", data: { text: "正式", reset: false } });
+    h.emit({ event: "draft", data: { text: "答案", reset: false } });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    expect(h.session.getSnapshot().pending?.draft).toBe("正式答案");
+    h.emit({ event: "delta", data: { text: "正式答案" } });
+    h.emit({ event: "done", data: { ok: true } });
+    h.messages.mockResolvedValue([
+      message("u", "user", "question"),
+      message("a", "assistant", "正式答案"),
+    ]);
+    h.wait.resolve();
+    await send;
+    expect(h.session.getSnapshot().pending).toMatchObject({
+      content: "正式答案",
+      draft: "",
+      phase: "saved",
+    });
+  });
+
   it("keeps tool activity outside the answer and clears it when final text arrives", async () => {
     const h = setup();
     await h.session.load();

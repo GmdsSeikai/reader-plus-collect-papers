@@ -46,9 +46,7 @@ func TestDocumentAgentFailureNeverCommitsAnAnswer(t *testing.T) {
 				case "round-limit":
 					writeToolReply(w, "not_a_reader_tool", "{}")
 				default:
-					if calls == 1 {
-						writeAPIReply(w, "ready")
-					} else if mode == "forged-source" {
+					if mode == "forged-source" {
 						writeAPIReply(w, "unread source [S999]")
 					} else {
 						writeAPIReply(w, "No evidence available")

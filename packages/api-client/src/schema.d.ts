@@ -3485,6 +3485,13 @@ export interface components {
         };
         /** @description Decoded SSE event union for documentation and generated types only. Wire uses event: NAME and data: JSON lines; no envelope is transmitted. Append delta text verbatim. Only done confirms successful persistence. EOF is not completion. After error/done ignore late data. No automatic POST replay. */
         ChatStreamEvent: {
+            /** @constant */
+            event: "draft";
+            data: {
+                text: string;
+                reset: boolean;
+            };
+        } | {
             /** @enum {string} */
             event: "status";
             data: {

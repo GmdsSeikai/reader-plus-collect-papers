@@ -28,5 +28,11 @@
     "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: delta\ndata: {\"text\":\"部分正文\"}\n\n",
     "text": "部分正文",
     "terminal": null
+  },
+  {
+    "name": "document-draft",
+    "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: draft\ndata: {\"reset\":false,\"text\":\"正在查找\"}\n\nevent: draft\ndata: {\"reset\":true,\"text\":\"\"}\n\nevent: draft\ndata: {\"reset\":false,\"text\":\"答案\"}\n\nevent: delta\ndata: {\"text\":\"答案\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "text": "答案",
+    "terminal": "done"
   }
 ]

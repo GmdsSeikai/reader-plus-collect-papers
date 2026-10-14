@@ -18,17 +18,17 @@ func TestOverviewReadingDoesNotRequireOriginal(t *testing.T) {
 	if err := a.prepareReading(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(documentReadingPrompt(in), "generated_overview") {
+	if _, err := a.beginConversation(t.Context(), in, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(a.conversationInput(in, true), "generated_overview") {
 		t.Fatal("overview not seeded")
 	}
 	a.stopReading("预留最终回答时间")
-	if err := a.finishReading(t.Context(), nil); err != nil {
-		t.Fatal("overview-only answer rejected", err)
-	}
-	final := a.finalInput(in)
-	if !strings.Contains(final.Prompt, "概要属于生成资料") || len(a.Evidence) != 0 {
+	if len(a.Evidence) != 0 {
 		t.Fatal("overview forged original evidence")
 	}
+
 	result, err := a.finishDocumentAnswer(t.Context(), GenerateResult{Text: "介绍研究问题。"}, nil)
 	if err != nil || !strings.Contains(result.Text, "未逐段核对原文") {
 		t.Fatal("missing provenance", result, err)

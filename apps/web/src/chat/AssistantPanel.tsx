@@ -78,7 +78,9 @@ export function AssistantPanel({
           {!state.messages.length && !pending && state.loaded && empty}
           {chatRows(state).map(({ key, message, pending: answer }) => {
             const assistant = answer || message?.role === "assistant",
-              content = answer?.content ?? message?.content ?? "";
+              content = answer
+                ? answer.content + (answer.draft || "")
+                : (message?.content ?? "");
             const waiting = answer?.phase === "generating" && !content;
             const timestamp = message?.createdAt
               ? new Date(message.createdAt)

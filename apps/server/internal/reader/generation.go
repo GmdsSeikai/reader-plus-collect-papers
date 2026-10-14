@@ -49,9 +49,11 @@ func errorKind(err error) ErrorKind {
 }
 
 type ProviderEvent struct {
-	Text     string
-	Fallback string
-	Metrics  []ModelTokens
+	Draft      string
+	ResetDraft bool
+	Text       string
+	Fallback   string
+	Metrics    []ModelTokens
 }
 type GenerateRequest struct{ Input AIInput }
 type GenerateResult struct {
@@ -156,7 +158,7 @@ func (a configuredCLIAdapter) streamWith(ctx context.Context, req GenerateReques
 	first.Input.Effort = nativeEffort(a.provider, a.level, cli.model, models)
 	var visible, emitFailed atomic.Bool
 	result, err := run(cli, first, func(e ProviderEvent) error {
-		if e.Text != "" {
+		if e.Text != "" || e.Draft != "" {
 			visible.Store(true)
 		}
 		if emit == nil {
@@ -247,7 +249,7 @@ func runAttempt(ctx context.Context, adapter Adapter, in AIInput, emit func(Prov
 			emitErr = generationError(ErrorProtocol, "适配器事件无效")
 		} else if text.Len()+len(e.Text) > 1<<20 {
 			emitErr = generationError(ErrorLimit, "回答超过 1 MiB 限制")
-		} else if e.Text != "" || len(e.Metrics) > 0 {
+		} else if e.Text != "" || e.Draft != "" || e.ResetDraft || len(e.Metrics) > 0 {
 			text.WriteString(e.Text)
 			if emit != nil {
 				emitErr = emit(e)
@@ -312,6 +314,9 @@ func (g *GenerationService) generate(ctx context.Context, in AIInput, interactiv
 	if timeout <= 0 {
 		timeout = 3 * time.Minute
 	}
+	if in.Chat != nil && in.Chat.Agent != nil {
+		timeout = 10 * time.Minute
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if !validAgent(g.primary) {
@@ -321,14 +326,14 @@ func (g *GenerationService) generate(ctx context.Context, in AIInput, interactiv
 	primary := g.connections[g.primary]
 	visible := false
 	send := func(e ProviderEvent) error {
-		if e.Text == "" && e.Fallback == "" {
+		if e.Text == "" && e.Fallback == "" && e.Draft == "" && !e.ResetDraft {
 			return nil
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if emit != nil {
-			if e.Text != "" && exposeText {
+			if (e.Text != "" || e.Draft != "") && exposeText {
 				visible = true
 			}
 			if err := emit(e); err != nil {

@@ -96,16 +96,15 @@ func TestDeepSeekDocumentAgentOverHTTP(t *testing.T) {
 		case 5:
 			writeToolReply(w, "read_passage", jsonText(map[string]any{"blockId": block()}))
 		case 6:
-			writeAPIReply(w, "Evidence ready")
-		case 7:
-			if len(request.Tools) != 0 {
-				t.Error("final synthesis has tools")
+			if len(request.Tools) == 0 {
+				t.Error("answer was forced through a separate synthesis request")
 			}
 			joined := jsonText(request.Messages)
 			if !strings.Contains(joined, "COBALT-19") || !strings.Contains(joined, "serial transactions") || !strings.Contains(joined, "37 transactions") {
-				t.Error("raw evidence not supplied")
+				t.Error("original evidence lost in same-turn answer")
 			}
 			writeAPIReply(w, "COBALT-19, serial transactions [S2]. Experiment: 37 [S6].")
+
 		default:
 			t.Error("unbounded calls")
 			w.WriteHeader(500)
@@ -122,7 +121,7 @@ func TestDeepSeekDocumentAgentOverHTTP(t *testing.T) {
 		t.Fatal(e)
 	}
 	w := request(t, s, "POST", "/api/documents/doc/chat", strings.NewReader(`{"provider":"api","prompt":"Compare nonce, condition and experiment","context":""}`))
-	if calls != 7 || strings.Contains(w.Body.String(), "intermediate tool prose") || strings.Count(w.Body.String(), "event: done") != 1 {
+	if calls != 6 || strings.Contains(w.Body.String(), "event: delta\ndata: {\"text\":\"intermediate tool prose") || strings.Count(w.Body.String(), "event: done") != 1 {
 		t.Fatalf("calls=%d stream=%s", calls, w.Body.String())
 	}
 	if strings.Contains(w.Body.String(), `"phase":"indexing"`) || !strings.Contains(w.Body.String(), "正在检索“COBALT-19”") {

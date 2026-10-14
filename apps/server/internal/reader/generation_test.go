@@ -63,7 +63,7 @@ func TestGenerationAttemptBoundaries(t *testing.T) {
 	})
 }
 func TestGenerationFallbackPolicy(t *testing.T) {
-	for _, mode := range []string{"before", "after", "background", "cancel", "timeout", "emit-failure"} {
+	for _, mode := range []string{"before", "after", "draft", "background", "cancel", "timeout", "emit-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -75,7 +75,9 @@ func TestGenerationFallbackPolicy(t *testing.T) {
 			backups := 0
 			var visible string
 			primary := adapterFunc(func(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
-				if mode != "before" {
+				if mode == "draft" {
+					_ = emit(ProviderEvent{Draft: "partial"})
+				} else if mode != "before" {
 					_ = emit(ProviderEvent{Text: "partial"})
 				}
 				if mode == "cancel" {

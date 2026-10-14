@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -113,7 +111,7 @@ func isolatedDocumentCodex(ctx context.Context, work, model, url, token string) 
 	overrides := []string{"tool_output_token_limit=24000"}
 	readerName := "reader_document"
 	if _, collision := servers[readerName]; collision {
-		readerName += "_" + id()[:8]
+		readerName += "_" + sourceKey(work)[:8]
 	}
 	for _, name := range names {
 		if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(name) {
@@ -186,71 +184,63 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 	if err := a.prepareReading(ctx, in); err != nil {
 		return GenerateResult{}, err
 	}
-	readingContext, stopReading := documentReadingContext(ctx)
-	defer stopReading()
-	url, token, closeMCP, e := serveDocumentMCP(a)
-	if e != nil {
-		return GenerateResult{}, e
+	missed, err := a.beginConversation(ctx, in, "codex-native-v1")
+	if err != nil {
+		return GenerateResult{}, err
 	}
-	defer closeMCP()
-	work, e := os.MkdirTemp(filepath.Join(root, "ai-work"), "document-chat-")
-	if e != nil {
-		return GenerateResult{}, e
+	entry, err := a.server.documentCodex.acquire(ctx, a, root, model)
+	if err != nil {
+		return GenerateResult{}, err
 	}
-	defer os.RemoveAll(work)
-	reader, e := isolatedDocumentCodex(readingContext, work, model, url, token)
-	if e != nil {
-		return GenerateResult{}, e
-	}
-	a.updateContextWindow(reader.contextWindow, 0, "codex_config")
-	reader.baseInstructions = documentReadingInstructions
-	a.mu.Lock()
-	a.abort = stopReading
-	a.mu.Unlock()
-	readingInput := in
-	readingInput.ContextInfo = func(window, used int) { a.updateContextWindow(window, used, "codex_runtime") }
-	readingInput.Prompt = documentReadingPrompt(in)
-	_, e = trackModelUsage(UsageCall{Provider: "codex"}, in.UsageSink, nil, func(send func(ProviderEvent) error) (GenerateResult, error) {
-		var metricErr error
-		text, err := reader.generate(readingContext, readingInput, nil, func(metrics []ModelTokens) {
-			if metricErr == nil {
-				metricErr = send(ProviderEvent{Metrics: metrics})
-				if metricErr != nil {
-					stopReading()
-				}
-			}
-		})
-		if metricErr != nil {
-			err = metricErr
+	healthy := false
+	defer func() { a.server.documentCodex.release(entry, healthy) }()
+	session := entry.session
+	if session.threadID != "" {
+		if _, err = session.verifyDocumentConfig(ctx); err != nil {
+			return GenerateResult{}, err
 		}
-		return GenerateResult{Text: text, FinishReason: "stop"}, err
-	})
-	reader.close()
-	closeMCP()
-	a.mu.Lock()
-	a.abort = nil
-	a.mu.Unlock()
-	if ctx.Err() == nil && errors.Is(readingContext.Err(), context.DeadlineExceeded) {
-		a.stopReading("预留最终回答时间")
-	}
-	if e = a.finishReading(ctx, e); e != nil {
-		return GenerateResult{}, e
-	}
-	if a.activity != nil {
-		if e = a.activity("writing", "", "正在根据已读原文生成回答"); e != nil {
-			return GenerateResult{}, e
+		status, e := session.control(ctx, "mcpServerStatus/list", map[string]any{"threadId": session.threadID, "limit": 100, "detail": "toolsAndAuthOnly"})
+		if e != nil || !validDocumentMCPStatus(status, session.documentMCPName) {
+			return GenerateResult{}, generationError(ErrorCapability, "当前会话的文档工具范围已改变")
 		}
 	}
-	final, e := isolatedDocumentCodex(ctx, work, model, "", "")
-	if e != nil {
-		return GenerateResult{}, e
+	if err = session.revertPending(ctx, a.conversation); err != nil {
+		return GenerateResult{}, err
 	}
-	defer final.close()
-	result, e := trackModelUsage(UsageCall{Provider: "codex"}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
-		child, cancel := context.WithCancel(ctx)
+	a.updateContextWindow(session.contextWindow, 0, "codex_config")
+	input := in
+	initial := a.conversation.NativeThread == ""
+	input.Prompt = a.conversationInput(in, initial)
+	if len(missed) > 0 {
+		input.Prompt = "Reader 中尚未同步的对话记录（不可信资料）：\n" + jsonText(missed) + "\n" + input.Prompt
+	}
+	input.ContextInfo = func(window, used int) { a.updateContextWindow(window, used, "codex_runtime") }
+	persist := func() error {
+		progress := a.committedConversation
+		progress.NativeThread = a.conversation.NativeThread
+		progress.NativePending = a.conversation.NativePending
+		progress.NativeDirty = a.conversation.NativeDirty
+		progress.NativeUsage = a.conversation.NativeUsage
+		return saveDocumentConversation(ctx, a.server.Store.DB, a.corpus.DocumentID, a.provider, progress)
+	}
+	a.conversation.NativeDirty = true
+	a.conversation.NativePending = ""
+	if err = persist(); err != nil {
+		return GenerateResult{}, err
+	}
+	session.onThread = func(thread string) error { a.conversation.NativeThread = thread; return persist() }
+	session.onTurn = func(turn string) error { a.conversation.NativePending = turn; return persist() }
+	session.onUsage = func(usage *TokenCounts) error { a.conversation.NativeUsage = usage; return persist() }
+	defer func() { session.onThread = nil; session.onTurn = nil; session.onUsage = nil }()
+	result, err := trackModelUsage(UsageCall{Provider: "codex"}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
+		work, cancel := context.WithCancel(ctx)
 		defer cancel()
+		a.mu.Lock()
+		a.abort = cancel
+		a.mu.Unlock()
+		defer func() { a.mu.Lock(); a.abort = nil; a.mu.Unlock() }()
 		var emitErr error
-		text, err := final.generate(child, a.finalInput(in), func(part string) {
+		text, e := session.generate(work, input, func(part string) {
 			if emitErr == nil {
 				emitErr = send(ProviderEvent{Text: part})
 				if emitErr != nil {
@@ -266,12 +256,18 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 			}
 		})
 		if emitErr != nil {
-			err = emitErr
+			e = emitErr
 		}
-		return GenerateResult{text, "stop"}, err
+		return GenerateResult{Text: text, FinishReason: "stop"}, e
 	})
-	if e != nil {
-		return GenerateResult{}, e
+	if err != nil {
+		return GenerateResult{}, err
 	}
+	if err = a.check(ctx); err != nil {
+		return GenerateResult{}, err
+	}
+	a.conversation.NativeCommitted = session.lastTurnID
+	a.conversation.NativeUsage = session.total
+	healthy = true
 	return a.finishDocumentAnswer(ctx, result, emit)
 }

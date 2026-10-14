@@ -187,6 +187,7 @@ func (s *Server) Close() {
 	}
 	s.documentMu.Unlock()
 	s.codexChat.close()
+	s.documentCodex.close()
 	for _, task := range tasks {
 		<-task.done
 	}

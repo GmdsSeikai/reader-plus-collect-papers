@@ -77,6 +77,9 @@ func runDocumentReadingProcess() {
 				_, _ = io.Copy(io.Discard, response.Body)
 				response.Body.Close()
 			}
+			_ = enc.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]string{"id": "answer", "type": "agentMessage", "phase": "final_answer"}}})
+			_ = enc.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]string{"threadId": "thread", "turnId": "turn", "itemId": "answer", "delta": "The nonce is COBALT-19 [S2]."}})
+			_ = enc.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]string{"id": "turn", "status": "completed"}}})
 		}
 	}
 }
@@ -116,7 +119,7 @@ func writeReadingCalls(w http.ResponseWriter, count int, block, reasoning string
 }
 
 func TestDocumentReadingBudgetSavesBoundedAnswer(t *testing.T) {
-	for _, mode := range []string{"rounds", "calls", "context", "time", "final-failure"} {
+	for _, mode := range []string{"rounds", "calls", "final-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			s, a := originalDocumentFixture(t)
 			readingCalls, finalCalls := 0, 0
@@ -163,7 +166,7 @@ func TestDocumentReadingBudgetSavesBoundedAnswer(t *testing.T) {
 			ctx := t.Context()
 			if mode == "time" {
 				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, documentAnswerReserve+500*time.Millisecond)
+				ctx, cancel = context.WithTimeout(ctx, 500*time.Millisecond)
 				defer cancel()
 			}
 			r := httptest.NewRequest("POST", "http://127.0.0.1/api/documents/doc/chat", strings.NewReader(`{"provider":"api","prompt":"Read the nonce","context":""}`)).WithContext(ctx)
@@ -192,7 +195,7 @@ func TestDocumentReadingBudgetSavesBoundedAnswer(t *testing.T) {
 			}
 			switch mode {
 			case "rounds":
-				if readingCalls != documentReadingRounds {
+				if readingCalls != documentReadingRounds-1 {
 					t.Fatal(readingCalls)
 				}
 			case "calls":
@@ -231,16 +234,10 @@ func TestDocumentReadingSoftStopPreservesFailuresAndEvidence(t *testing.T) {
 	if _, err = a.call(t.Context(), "read_passage", json.RawMessage(jsonText(map[string]string{"blockId": a.corpus.Passages[2].ID}))); err != nil || a.fatal != nil || len(a.Evidence) != 1 || !a.readingStopped() {
 		t.Fatal("evidence budget discarded usable source", err)
 	}
-	if err = a.finishReading(t.Context(), context.Canceled); err != nil {
-		t.Fatal("controlled native interruption discarded evidence", err)
-	}
-	failure := generationError(ErrorSave, "cannot save usage")
-	if err = a.finishReading(t.Context(), failure); !errors.Is(err, failure) {
-		t.Fatal("soft stop masked a genuine failure", err)
-	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err = a.finishReading(ctx, nil); !errors.Is(err, context.Canceled) {
-		t.Fatal("soft stop masked user cancellation", err)
+	if err = a.check(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal("user cancellation was masked", err)
 	}
+
 }

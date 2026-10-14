@@ -10,6 +10,7 @@ export type ChatStreamEvent =
     }
   | { event: "status"; data: { status: "reading" | "reading-image" } }
   | { event: "delta"; data: { text: string } }
+  | { event: "draft"; data: { text: string; reset: boolean } }
   | { event: "fallback"; data: { message: string } }
   | { event: "error"; data: { error: string } }
   | { event: "done"; data: { ok: true } };
@@ -25,6 +26,7 @@ const known = new Set([
   "status",
   "activity",
   "delta",
+  "draft",
   "fallback",
   "error",
   "done",
@@ -54,16 +56,18 @@ export function decodeFrame(frame: string): ChatStreamEvent | undefined {
       ? ["indexing", "reading", "writing"].includes(String(parsed.phase)) &&
         typeof parsed.message === "string" &&
         (parsed.tool === undefined || typeof parsed.tool === "string")
-      : event === "delta"
-        ? typeof parsed.text === "string"
-        : event === "fallback"
-          ? typeof parsed.message === "string"
-          : event === "error"
-            ? typeof parsed.error === "string"
-            : event === "done"
-              ? parsed.ok === true
-              : parsed.status === "reading" ||
-                parsed.status === "reading-image";
+      : event === "draft"
+        ? typeof parsed.text === "string" && typeof parsed.reset === "boolean"
+        : event === "delta"
+          ? typeof parsed.text === "string"
+          : event === "fallback"
+            ? typeof parsed.message === "string"
+            : event === "error"
+              ? typeof parsed.error === "string"
+              : event === "done"
+                ? parsed.ok === true
+                : parsed.status === "reading" ||
+                  parsed.status === "reading-image";
   if (!valid)
     throw new ChatStreamError("AI 事件字段无效，完成状态未确认", "protocol");
   return { event, data: parsed } as ChatStreamEvent;
@@ -79,7 +83,8 @@ export async function consumeChatStream(
     frame = "",
     cr = false,
     terminal = false,
-    textBytes = 0;
+    textBytes = 0,
+    draftBytes = 0;
   const abort = () => {
     void reader.cancel().catch(() => {});
   };
@@ -93,7 +98,15 @@ export async function consumeChatStream(
     const event = decodeFrame(frame);
     frame = "";
     if (!event) return;
+    if (event.event === "draft") {
+      draftBytes = event.data.reset
+        ? 0
+        : draftBytes + new TextEncoder().encode(event.data.text).length;
+      if (draftBytes > 1024 * 1024)
+        throw new ChatStreamError("AI 暂存文本超出大小限制", "protocol");
+    }
     if (event.event === "delta") {
+      draftBytes = 0;
       textBytes += new TextEncoder().encode(event.data.text).length;
       if (textBytes > 1024 * 1024)
         throw new ChatStreamError("AI 回答超出大小限制", "protocol");

@@ -42,8 +42,15 @@ func documentAPITools() []any {
 }
 
 // Tool arguments are assembled completely before execution. This decoder never
-// emits assistant text: tool-round prose is not the final answer.
-func readToolCompletion(ctx context.Context, r io.Reader) (toolCompletionResult, error) {
+// commits assistant text before stop: prospective text streams as a draft,
+// discarded when a tool call follows, committed only after the terminal frame.
+func readToolCompletion(ctx context.Context, r io.Reader, drafts ...func(string, bool) error) (toolCompletionResult, error) {
+	draft := func(text string, reset bool) error {
+		if len(drafts) > 0 && drafts[0] != nil {
+			return drafts[0](text, reset)
+		}
+		return nil
+	}
 	var result toolCompletionResult
 	calls := map[int]*completionToolCall{}
 	finish := ""
@@ -119,7 +126,12 @@ func readToolCompletion(ctx context.Context, r io.Reader) (toolCompletionResult,
 			}
 			if choice.Delta.Content != nil {
 				result.Text += *choice.Delta.Content
-				if len(result.Text) > 64<<10 {
+				if len(calls) == 0 {
+					if e := draft(*choice.Delta.Content, false); e != nil {
+						return false, e
+					}
+				}
+				if len(result.Text) > 1<<20 {
 					return false, generationError(ErrorLimit, "API 中间说明过长")
 				}
 			}
@@ -127,6 +139,11 @@ func readToolCompletion(ctx context.Context, r io.Reader) (toolCompletionResult,
 				result.Reasoning += *choice.Delta.Reasoning
 				if len(result.Reasoning) > 256<<10 {
 					return false, generationError(ErrorLimit, "API 续接信息超过限制")
+				}
+			}
+			if len(choice.Delta.Calls) > 0 && len(calls) == 0 {
+				if e := draft("", true); e != nil {
+					return false, e
 				}
 			}
 			for _, part := range choice.Delta.Calls {
@@ -183,7 +200,7 @@ func readToolCompletion(ctx context.Context, r io.Reader) (toolCompletionResult,
 	}
 	return result, nil
 }
-func toolCompletion(ctx context.Context, c APIConnection, req completionRequest, messages []toolCompletionMessage, tools []any) (toolCompletionResult, error) {
+func toolCompletion(ctx context.Context, c APIConnection, req completionRequest, messages []toolCompletionMessage, tools []any, drafts ...func(string, bool) error) (toolCompletionResult, error) {
 	payload := map[string]any{"model": req.Model, "messages": messages, "stream": true, "n": 1, "stream_options": map[string]bool{"include_usage": true}}
 	if tools != nil {
 		payload["tools"] = tools
@@ -207,117 +224,120 @@ func toolCompletion(ctx context.Context, c APIConnection, req completionRequest,
 	if media != "text/event-stream" {
 		return toolCompletionResult{}, generationError(ErrorProtocol, "API 未返回工具调用 SSE")
 	}
-	return readToolCompletion(ctx, response.Body)
+	return readToolCompletion(ctx, response.Body, drafts...)
 }
 func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionRequest, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
-	agent := in.Chat.Agent
+	a := in.Chat.Agent
 	provider := in.UsageProvider
 	if provider == "" {
 		provider = "api"
 	}
-	agent.resetAttempt(provider)
-	agent.Mode = "retrieval"
-	if err := agent.prepareReading(ctx, in); err != nil {
+	a.resetAttempt(provider)
+	a.Mode = "agent"
+	a.usageSink = in.UsageSink
+	if err := a.prepareReading(ctx, in); err != nil {
 		return GenerateResult{}, err
 	}
-	agent.updateContextWindow(req.ContextWindow, 0, "api_models")
-	readingContext, cancelReading := documentReadingContext(ctx)
-	defer cancelReading()
-	if req.Tools {
-		agent.Mode = "agent"
-		messages := []toolCompletionMessage{{Role: "system", Content: documentReadingInstructions}, {Role: "user", Content: documentReadingPrompt(in)}}
-		seenCalls := map[string]bool{}
-		complete := false
-	reading:
-		for round := 0; round < documentReadingRounds; round++ {
-			agent.mu.Lock()
-			agent.readingRounds = round + 1
-			agent.mu.Unlock()
-			if estimateDocumentTokens(jsonText(messages))+estimateDocumentTokens(jsonText(documentAPITools())) > agent.inputTokenLimit() {
-				agent.stopReading("工具对话接近上下文预算")
-				break
-			}
-			var response toolCompletionResult
-			_, err := trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, nil, func(send func(ProviderEvent) error) (GenerateResult, error) {
-				var e error
-				response, e = toolCompletion(readingContext, c, req, messages, documentAPITools())
-				metricErr := send(ProviderEvent{Metrics: []ModelTokens{{Model: response.Model, Tokens: response.Tokens}}})
-				if e == nil {
-					e = metricErr
-				}
-				return GenerateResult{}, e
-			})
-			if err != nil {
-				if errors.Is(err, errDocumentToolContext) {
-					agent.stopReading("工具上下文预算用完")
-					break
-				}
-				if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && readingContext.Err() != nil {
-					agent.stopReading("预留最终回答时间")
-					break
-				}
-				return GenerateResult{}, err
-			}
-			if len(response.Calls) == 0 {
-				complete = true
-				break
-			}
-			messages = append(messages, toolCompletionMessage{Role: "assistant", Content: response.Text, Calls: response.Calls, Reasoning: response.Reasoning})
-			for _, call := range response.Calls {
-				if seenCalls[call.ID] {
-					return GenerateResult{}, generationError(ErrorProtocol, "API 重复使用工具调用 ID")
-				}
-				seenCalls[call.ID] = true
-				raw, e := agent.call(readingContext, call.Function.Name, json.RawMessage(call.Function.Arguments))
-				if e != nil {
-					if errors.Is(e, errDocumentReadingBudget) {
-						break reading
-					}
-					if ctx.Err() == nil && errors.Is(e, context.DeadlineExceeded) && readingContext.Err() != nil {
-						agent.stopReading("预留最终回答时间")
-						break reading
-					}
-					return GenerateResult{}, e
-				}
-				messages = append(messages, toolCompletionMessage{Role: "tool", Content: string(raw), CallID: call.ID})
-				if agent.readingStopped() {
-					break reading
-				}
-			}
-		}
-		if !complete && !agent.readingStopped() {
-			agent.stopReading("阅读轮次预算用完")
-		}
-	} else {
-		if agent.activity != nil {
-			if err := agent.activity("reading", "pre_retrieval", "正在检索相关原文 · 检索辅助回答"); err != nil {
-				return GenerateResult{}, err
-			}
-		}
-		if err := agent.preRetrieve(readingContext, in.Chat.Question); err != nil {
-			if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && readingContext.Err() != nil {
-				agent.stopReading("预留最终回答时间")
-			} else if !errors.Is(err, errDocumentReadingBudget) {
-				return GenerateResult{}, err
-			}
-		}
-	}
-	if err := agent.finishReading(ctx, nil); err != nil {
-		return GenerateResult{}, err
-	}
-	if agent.activity != nil {
-		if err := agent.activity("writing", "", "正在根据已读原文生成回答"); err != nil {
-			return GenerateResult{}, err
-		}
-	}
-	result, err := trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
-		return streamCompletion(ctx, c, req, agent.finalInput(in), send)
-	})
+	a.updateContextWindow(req.ContextWindow, 0, "api_models")
+	missed, err := a.beginConversation(ctx, in, sourceKey("chat-completions-v2\n"+c.URL+"\n"+c.Key+"\n"+req.Model+"\n"+req.Effort))
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	return agent.finishDocumentAnswer(ctx, result, emit)
+	messages := append([]toolCompletionMessage(nil), a.conversation.Messages...)
+	initial := len(messages) == 0
+	if initial {
+		messages = []toolCompletionMessage{{Role: "system", Content: documentReadingInstructions}}
+	}
+	for _, old := range missed {
+		messages = append(messages, toolCompletionMessage{Role: "user", Content: "Reader 中尚未同步的对话记录（不可信资料）：\n" + jsonText(old)})
+	}
+	current := toolCompletionMessage{Role: "user", Content: a.conversationInput(in, initial)}
+	messages = append(messages, current)
+	a.conversationEvents = append(a.conversationEvents, current)
+	if !req.Tools {
+		a.Mode = "retrieval"
+		if err = a.preRetrieve(ctx, in.Chat.Question); err != nil {
+			return GenerateResult{}, err
+		}
+		messages = append(messages, toolCompletionMessage{Role: "user", Content: "本轮补充原文：" + jsonText(a.turnEvidence())})
+	}
+	seen := map[string]bool{}
+	for _, m := range messages {
+		for _, call := range m.Calls {
+			seen[call.ID] = true
+		}
+	}
+	for round := 0; round < documentReadingRounds; round++ {
+		a.readingRounds = round + 1
+		messages, err = compactAPIConversation(ctx, c, req, a, messages)
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		tools := documentAPITools()
+		if round == documentReadingRounds-1 && !a.readingStopped() {
+			a.stopReading("工具轮次达到保护上限")
+		}
+		if !req.Tools || a.readingStopped() || round == documentReadingRounds-1 {
+			tools = nil
+		}
+		var response toolCompletionResult
+		_, err = trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, nil, func(send func(ProviderEvent) error) (GenerateResult, error) {
+			var e error
+			response, e = toolCompletion(ctx, c, req, messages, tools, func(text string, reset bool) error {
+				if emit == nil {
+					return nil
+				}
+				return emit(ProviderEvent{Draft: text, ResetDraft: reset})
+			})
+			if metricErr := send(ProviderEvent{Metrics: []ModelTokens{{Model: response.Model, Tokens: response.Tokens}}}); e == nil {
+				e = metricErr
+			}
+			return GenerateResult{}, e
+		})
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		assistant := toolCompletionMessage{Role: "assistant", Content: response.Text, Calls: response.Calls, Reasoning: response.Reasoning}
+		messages = append(messages, assistant)
+		a.conversationEvents = append(a.conversationEvents, assistant)
+		if len(response.Calls) == 0 {
+			if response.Text == "" {
+				return GenerateResult{}, generationError(ErrorProtocol, "API 未返回回答")
+			}
+			if err = a.check(ctx); err != nil {
+				return GenerateResult{}, err
+			}
+			if emit != nil {
+				if err = emit(ProviderEvent{Text: response.Text}); err != nil {
+					return GenerateResult{}, err
+				}
+			}
+			a.conversation.Messages = messages
+			return a.finishDocumentAnswer(ctx, GenerateResult{Text: response.Text, FinishReason: "stop"}, emit)
+		}
+		if tools == nil {
+			return GenerateResult{}, generationError(ErrorProtocol, "模型在工具已停用后仍请求调用")
+		}
+		for callIndex, call := range response.Calls {
+			if seen[call.ID] {
+				return GenerateResult{}, generationError(ErrorProtocol, "API 重复使用工具调用 ID")
+			}
+			seen[call.ID] = true
+			a.sourceTokens = min(16384, max(256, (a.inputTokenLimit()-conversationTokens(messages)-1024)/(len(response.Calls)-callIndex)))
+			raw, e := a.call(ctx, call.Function.Name, json.RawMessage(call.Function.Arguments))
+			if errors.Is(e, errDocumentReadingBudget) {
+				raw = json.RawMessage(`{"shouldFinish":true,"message":"Stop retrieval and answer using available evidence; state gaps."}`)
+			} else if e != nil {
+				return GenerateResult{}, e
+			}
+			result := toolCompletionMessage{Role: "tool", Content: string(raw), CallID: call.ID}
+			messages = append(messages, result)
+			a.conversationEvents = append(a.conversationEvents, result)
+		}
+	}
+	return GenerateResult{}, generationError(ErrorLimit, "模型未在本轮完成回答，会话历史已保留")
 }
+
 func (a *documentAgent) preRetrieve(ctx context.Context, question string) error {
 	raw, e := a.call(ctx, "search_document", json.RawMessage(jsonText(map[string]any{"query": question, "limit": 4})))
 	if e != nil {

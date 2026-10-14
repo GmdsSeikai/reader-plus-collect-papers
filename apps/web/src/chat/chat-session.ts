@@ -9,6 +9,7 @@ export type ChatInput = {
   attachments: ImageAttachment[];
 };
 export type PendingAnswer = {
+  draft?: string;
   key: string;
   content: string;
   phase:
@@ -168,7 +169,19 @@ export class ChatSession {
     const emit = (event: ChatStreamEvent) => {
       if (!this.current(serial) || controller.signal.aborted || terminal)
         return;
+      if (event.event === "draft") {
+        pending.draft = event.data.reset
+          ? ""
+          : (pending.draft || "") + event.data.text;
+        if (pending.draft) {
+          pending.notice = "";
+          pending.activity = undefined;
+        }
+        if (!this.frame) this.frame = requestAnimationFrame(this.flush);
+        return;
+      }
       if (event.event === "delta") {
+        pending.draft = "";
         pending.content += event.data.text;
         pending.notice = "";
         pending.activity = undefined;

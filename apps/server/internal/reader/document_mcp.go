@@ -3,38 +3,65 @@ package reader
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
+type documentToolBinding struct {
+	mu      sync.Mutex
+	agent   *documentAgent
+	attempt string
+}
+
+func (b *documentToolBinding) bind(a *documentAgent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.agent = a
+	b.attempt = ""
+	if a != nil {
+		b.attempt = a.ID
+	}
+}
+func (b *documentToolBinding) current() (*documentAgent, string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.agent, b.attempt
+}
 func serveDocumentMCP(agent *documentAgent) (string, string, func(), error) {
-	attempt := agent.ID
+	return serveBoundDocumentMCP(&documentToolBinding{agent: agent, attempt: agent.ID})
+}
+func serveBoundDocumentMCP(binding *documentToolBinding) (string, string, func(), error) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "reader_document", Version: "1.0.0"}, &mcp.ServerOptions{Instructions: documentReadingInstructions})
 	for _, definition := range documentToolDefinitions {
 		d := definition
 		server.AddTool(&mcp.Tool{Name: d.Name, Description: d.Description, InputSchema: d.Schema, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			agent, attempt := binding.current()
+			if agent == nil {
+				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "No active Reader turn"}}}, nil
+			}
 			ctx, cancel := context.WithCancel(ctx)
 			stop := context.AfterFunc(agent.ctx, cancel)
 			defer cancel()
 			defer stop()
 			raw, err := agent.callAttempt(ctx, attempt, d.Name, req.Params.Arguments)
-			if err != nil || agent.readingStopped() {
-				agent.mu.Lock()
-				var abort context.CancelFunc
-				if agent.ID == attempt {
-					abort = agent.abort
+			if err != nil {
+				if errors.Is(err, errDocumentReadingBudget) {
+					return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"shouldFinish":true,"message":"Stop retrieving and answer using available context; disclose any gaps."}`}}}, nil
 				}
+				agent.mu.Lock()
+				abort := agent.abort
 				agent.mu.Unlock()
 				if abort != nil {
 					abort()
 				}
-				if err != nil {
-					return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
-				}
+				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
 			}
+
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}}}, nil
 		})
 	}
@@ -49,7 +76,11 @@ func serveDocumentMCP(agent *documentAgent) (string, string, func(), error) {
 			http.NotFound(w, r)
 			return
 		}
-		if agent.ctx.Err() != nil || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(token)) != 1 {
+		if agent, _ := binding.current(); agent != nil && agent.ctx.Err() != nil {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", 401)
 			return
 		}

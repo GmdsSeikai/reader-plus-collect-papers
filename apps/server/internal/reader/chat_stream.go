@@ -39,7 +39,7 @@ func (s *chatStreamWriter) send(event string, value any) error {
 		s.terminal = true
 		s.cancel()
 	}
-	if err == nil && event == "delta" && s.firstFlush.IsZero() {
+	if err == nil && (event == "delta" || event == "draft") && s.firstFlush.IsZero() {
 		s.firstFlush = time.Now()
 	}
 	return err
@@ -133,6 +133,12 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	}
 	service.usageSink = s.processingUsageSink(documentID, "chat", requestID)
 	result, err := service.Generate(ctx, in, true, func(e ProviderEvent) error {
+		if e.Draft != "" || e.ResetDraft {
+			if firstText.IsZero() && e.Draft != "" {
+				firstText = time.Now()
+			}
+			return out.send("draft", map[string]any{"text": e.Draft, "reset": e.ResetDraft})
+		}
 		if e.Fallback != "" {
 			return out.send("fallback", map[string]string{"message": e.Fallback})
 		}

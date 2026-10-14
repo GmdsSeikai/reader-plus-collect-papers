@@ -39,6 +39,7 @@ type Server struct {
 	annotationMu           sync.Mutex
 	annotationHistory      []annotationChange
 	codexChat              codexChatCache
+	documentCodex          documentCodexCache
 	corpusMu               sync.Mutex
 	overviewMu             sync.Mutex
 	overviewActive         map[string]context.CancelFunc

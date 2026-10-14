@@ -64,10 +64,6 @@ func resolveDocumentContext(reported, override int, source string) (int, string)
 	}
 	return defaultDocumentContextTokens, "fallback_estimate"
 }
-func (s *Server) documentContextTokens() int {
-	n, _ := resolveDocumentContext(0, s.documentContextOverride(), "")
-	return n
-}
 func codexConfiguredWindow(raw []byte) int {
 	var v struct {
 		Config struct {

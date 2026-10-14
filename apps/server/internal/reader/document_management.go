@@ -114,6 +114,7 @@ func (s *Server) purgeDocument(ctx context.Context, id string) (int, string) {
 		}
 	}
 	s.codexChat.deleteDocument(id)
+	s.documentCodex.deleteDocument(id)
 	tx, err := s.Store.DB.Begin()
 	if err != nil {
 		return 500, "无法删除文档"

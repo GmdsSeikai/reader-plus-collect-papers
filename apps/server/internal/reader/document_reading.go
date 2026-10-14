@@ -2,9 +2,7 @@ package reader
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 )
 
 // Secondary runaway guards; source/context budget and deadline govern reading.
@@ -13,20 +11,9 @@ const documentReadingRounds = 64
 
 // Transport ceiling, independent of the estimated token allowance.
 const documentEvidenceBytes = 2 << 20
-const documentAnswerReserve = time.Minute
 
-var errDocumentReadingBudget = generationError(ErrorLimit, "本轮阅读预算已用完，尚未取得可用原文")
+var errDocumentReadingBudget = generationError(ErrorLimit, "本轮检索已收束，请基于已有资料回答")
 var errDocumentToolContext = generationError(ErrorLimit, "API 工具上下文超过限制")
-
-// Reading and final synthesis share the request deadline. Keep time available
-// for the answer instead of letting the reading loop consume the entire turn.
-func documentReadingContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	deadline := time.Now().Add(2 * time.Minute)
-	if end, ok := ctx.Deadline(); ok && end.Add(-documentAnswerReserve).Before(deadline) {
-		deadline = end.Add(-documentAnswerReserve)
-	}
-	return context.WithDeadline(ctx, deadline)
-}
 
 func (a *documentAgent) stopReading(reason string) {
 	a.mu.Lock()
@@ -42,40 +29,21 @@ func (a *documentAgent) readingStopped() bool {
 	return a.readingStop != ""
 }
 
-// Called after the reading adapter stops. Budget exhaustion can produce a
-// bounded answer; cancellation, stale sources and provider failures still fail.
-func (a *documentAgent) finishReading(ctx context.Context, readingErr error) error {
-	if err := a.check(ctx); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.fatal != nil {
-		return a.fatal
-	}
-	if a.readingStop != "" {
-		if readingErr != nil && !errors.Is(readingErr, errDocumentReadingBudget) && !errors.Is(readingErr, errDocumentToolContext) && !errors.Is(readingErr, context.Canceled) && !errors.Is(readingErr, context.DeadlineExceeded) {
-			return readingErr
-		}
-		if len(a.Evidence) > 0 || a.overview != nil {
-			return nil
-		}
-		return errDocumentReadingBudget
-	}
-	return readingErr
-}
-
 // Callers hold a.mu. Feedback lets the model stop voluntarily before the host
 // ends reading. It is included before item sizing and refreshed after reads.
 func (a *documentAgent) readingBudget() any {
+	remaining := max(0, a.sourceTokenLimit()-a.evidenceTokens)
+	if a.continuous {
+		remaining = max(0, a.sourceTokenLimit())
+	}
 	budget := map[string]any{
 		"remainingCalls":           max(0, documentToolCalls-a.calls),
 		"remainingEvidenceBytes":   max(0, documentEvidenceBytes-a.bytes),
-		"estimatedRemainingTokens": max(0, a.sourceTokenLimit()-a.evidenceTokens),
+		"estimatedRemainingTokens": remaining,
 		"contextSource":            a.contextSource,
 		"runtimeUsedTokens":        a.runtimeUsedTokens,
 		"contextWindowTokens":      a.contextTokens,
-		"shouldFinish":             a.repeatedCalls >= 2 || a.calls >= documentToolCalls-2 || a.bytes >= documentEvidenceBytes-2400 || a.sourceTokenLimit()-a.evidenceTokens < 1024 || a.readingRounds >= documentReadingRounds-2,
+		"shouldFinish":             a.repeatedCalls >= 2 || a.calls >= documentToolCalls-2 || (!a.continuous && a.bytes >= documentEvidenceBytes-2400) || remaining < 1024 || a.readingRounds >= documentReadingRounds-2,
 	}
 	if a.readingRounds > 0 {
 		budget["remainingModelRounds"] = max(0, documentReadingRounds-a.readingRounds)
@@ -92,8 +60,11 @@ func (a *documentAgent) finishDocumentAnswer(ctx context.Context, result Generat
 	}
 	a.mu.Lock()
 	reason, read, total := a.readingStop, len(a.Evidence), len(a.corpus.Passages)
+	if a.continuous {
+		read = len(a.turnRead)
+	}
 	partial := a.corpus.Coverage.Status != "ready"
-	overviewOnly := read == 0 && a.overview != nil
+	overviewOnly := len(a.Evidence) == 0 && a.overview != nil
 	providedSources := a.providedSources
 	a.mu.Unlock()
 	if reason == "" && !overviewOnly {
