@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import type { TOCItem } from "@reader/core";
-import { chapterRange, quoteSectionRange } from "./chapters";
+import type { PDFBlock, TOCItem } from "@reader/core";
+import { chapterRange, headingPages, quoteSectionRange } from "./chapters";
 
 const entry = (
   id: string,
@@ -64,4 +64,38 @@ it("quote sections without an outline span the quoted page and its neighbours", 
   expect(quoteSectionRange(pages, 7, 20)).toEqual({ fromPage: 6, toPage: 8 });
   expect(quoteSectionRange([], 1, 20)).toEqual({ fromPage: 1, toPage: 2 });
   expect(quoteSectionRange([], 20, 20)).toEqual({ fromPage: 19, toPage: 20 });
+});
+
+it("parsed headings mark sections when the PDF has no outline", () => {
+  const heading = (page: number, text: string): PDFBlock => ({
+    id: `${page}-${text}`,
+    page,
+    label: "paragraph_title",
+    bounds: { x: 0, y: 0, width: 1, height: 1 },
+    text,
+  });
+  const blocks = [
+    heading(1, "Abstract"),
+    heading(2, "1 Introduction"),
+    heading(4, "2 Method"),
+    heading(6, "2.1 Data"),
+    heading(9, "3 Results"),
+    { ...heading(5, "Figure 1"), label: "figure_title" },
+  ];
+  expect(headingPages(blocks, true)).toEqual([1, 2, 4, 6, 9]);
+  expect(headingPages(blocks, false)).toEqual([1, 2, 4, 9]);
+  // Translation keeps the whole chapter; quotes stop at the subsection.
+  expect(chapterRange([], 7, 20, headingPages(blocks, false))).toEqual({
+    fromPage: 4,
+    toPage: 8,
+  });
+  expect(quoteSectionRange([], 7, 20, headingPages(blocks, true))).toEqual({
+    fromPage: 6,
+    toPage: 8,
+  });
+  // An outline takes precedence over parsed headings.
+  expect(chapterRange([entry("1", 3), entry("2", 12)], 7, 20, [5])).toEqual({
+    fromPage: 3,
+    toPage: 11,
+  });
 });

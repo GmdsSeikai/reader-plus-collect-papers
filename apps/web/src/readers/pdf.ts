@@ -1,5 +1,5 @@
 import { selectionAnchor, isSelectionToolbar } from "./selection-anchor";
-import { quoteSectionRange } from "../translation/chapters";
+import { headingPages, quoteSectionRange } from "../translation/chapters";
 import { pdfQuotePoint } from "./pdf-reference-location";
 import { PDFBlockOverlay, referenceBlock } from "./pdf-blocks";
 import { PDFReadingNavigation } from "./pdf-navigation";
@@ -510,6 +510,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
       await this.getTOC(),
       location.page,
       this.pdf.numPages,
+      headingPages(this.blockData, true),
     );
     const excerpts: ReaderSelection[] = [];
     for (let page = range.fromPage; page <= range.toPage; page++) {

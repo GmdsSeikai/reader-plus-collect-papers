@@ -1,4 +1,4 @@
-import type { TOCItem } from "@reader/core";
+import type { PDFBlock, TOCItem } from "@reader/core";
 
 export interface PageRange {
   fromPage: number;
@@ -6,16 +6,32 @@ export interface PageRange {
 }
 
 /**
+ * Pages where parsed headings start a section. Chapters skip numbered
+ * subsections such as "2.1"; quotes keep them for a narrower section.
+ */
+export function headingPages(blocks: PDFBlock[], subsections: boolean) {
+  return blocks
+    .filter(
+      (b) =>
+        (b.label === "paragraph_title" || b.label === "doc_title") &&
+        (subsections || !/^\s*[\dA-Z]+\.\d/.test(b.text)),
+    )
+    .map((b) => b.page);
+}
+
+/**
  * The outline chapter containing `page`, as an inclusive page range. A single
  * root entry (the book title) is skipped for its children. Without an outline
- * (the PDF adapter then lists every page) the page and its neighbours are used.
+ * (the PDF adapter then lists every page) parsed headings mark the chapters,
+ * and an unparsed PDF uses the page and its neighbours.
  */
 export function chapterRange(
   toc: TOCItem[],
   page: number,
   pages: number,
+  headings: number[] = [],
 ): PageRange {
-  return outlineRange(toc, page, pages, (item) => [item]);
+  return outlineRange(toc, page, pages, headings, (item) => [item]);
 }
 
 /**
@@ -26,28 +42,32 @@ export function quoteSectionRange(
   toc: TOCItem[],
   page: number,
   pages: number,
+  headings: number[] = [],
 ): PageRange {
-  return outlineRange(toc, page, pages, (item) => [item, ...item.children]);
+  return outlineRange(toc, page, pages, headings, (item) => [
+    item,
+    ...item.children,
+  ]);
 }
 
 function outlineRange(
   toc: TOCItem[],
   page: number,
   pages: number,
+  headings: number[],
   expand: (item: TOCItem) => TOCItem[],
 ): PageRange {
   const entries = toc.length === 1 ? toc[0].children : toc;
-  const starts = [
-    ...new Set(
-      entries
-        .flatMap(expand)
-        .flatMap((item) =>
-          item.location.type === "pdf" && !item.id.startsWith("page-")
-            ? [item.location.page]
-            : [],
-        ),
-    ),
-  ].sort((a, b) => a - b);
+  const outline = entries
+    .flatMap(expand)
+    .flatMap((item) =>
+      item.location.type === "pdf" && !item.id.startsWith("page-")
+        ? [item.location.page]
+        : [],
+    );
+  const starts = [...new Set(outline.length ? outline : headings)].sort(
+    (a, b) => a - b,
+  );
   const current = Math.min(Math.max(1, page), pages);
   if (!starts.length)
     return {

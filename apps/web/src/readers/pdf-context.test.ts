@@ -51,3 +51,18 @@ it("sends the quoted page and its neighbours of a PDF without an outline", async
   expect(excerpts[0]!.text).toHaveLength(25000);
   expect(f.getPage).toHaveBeenCalledTimes(3);
 });
+it("follows parsed headings once the PDF without an outline is parsed", async () => {
+  const f = fixture([]);
+  Object.assign(f.reader, {
+    blockData: [21, 24, 30].map((page) => ({
+      id: `h${page}`,
+      page,
+      label: "paragraph_title",
+      text: `${page} 标题`,
+    })),
+  });
+  const excerpts = await f.reader.getChapterContext({ type: "pdf", page: 25 });
+  expect(excerpts.map((e) => e.location)).toEqual(
+    [24, 25, 26, 27, 28, 29].map((page) => ({ type: "pdf", page })),
+  );
+});
