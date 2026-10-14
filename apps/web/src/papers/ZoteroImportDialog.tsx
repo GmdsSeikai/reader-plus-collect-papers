@@ -223,6 +223,7 @@ export function ZoteroImportDialog({
                   <Input
                     id="zotero-linked-base"
                     value={linkedBase}
+                    placeholder="留空自动识别，或手动指定目录"
                     disabled={busy}
                     onChange={(event) => setLinkedBase(event.target.value)}
                   />

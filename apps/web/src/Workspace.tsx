@@ -1,3 +1,4 @@
+import { AnnotationHoverCard } from "./AnnotationHoverCard";
 import { AnnotationQuote } from "./AnnotationQuote";
 import {
   useEffect,
@@ -39,7 +40,6 @@ import {
   type Annotation,
   type Document as ReaderDocument,
   type DocumentLocation,
-  type SourceReference,
   type ReaderAdapter,
   type ReaderSelection,
   type ReaderAnnotationTarget,
@@ -94,7 +94,12 @@ import { SourceReferences } from "./SourceReferences";
 import { ChatSession } from "./chat/chat-session";
 import { AssistantPanel } from "./chat/AssistantPanel";
 import { ImagePreview, imageLabel } from "./ImagePreview";
-import { contextReferences } from "./references";
+import {
+  composeChatContext,
+  type OversizeChoice,
+  type OversizeContext,
+} from "./chat/compose-context";
+import { ContextSizeDialog } from "./chat/ContextSizeDialog";
 import { ReferenceNavigation } from "./reference-navigation";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AnnotationToolbar, annotationLabels } from "./AnnotationToolbar";
@@ -107,7 +112,8 @@ import {
   highlightPalette,
 } from "./annotations";
 import { ColorSwatches } from "./ColorSwatches";
-import { copyText } from "./chat/clipboard";
+import { useSelectionClipboard } from "./useSelectionClipboard";
+import { copyImage, copyText } from "./chat/clipboard";
 import { NotesPanel } from "./NotesPanel";
 import { ExportNotesDialog } from "./ExportNotesDialog";
 import { EPUBReadingView } from "./translation/EPUBReadingView";
@@ -269,7 +275,7 @@ export function Workspace({
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const annotationSaving = useRef(false);
   const [noteSaving, setNoteSaving] = useState(false);
-  const lastCopiedSelection = useRef<string | null>(null);
+  const selectionClipboard = useSelectionClipboard(theme.autoCopySelection);
   const [annotationTarget, setAnnotationTarget] =
     useState<ReaderAnnotationTarget | null>(null);
   const { deleting, remove: removeAnnotation } = useAnnotationDeletion(
@@ -376,6 +382,10 @@ export function Workspace({
   const chat = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const sendSerial = useRef(0);
   const [sending, setSending] = useState(false);
+  const [oversize, setOversize] = useState<{
+    request: OversizeContext;
+    resolve: (choice: OversizeChoice) => void;
+  }>();
   const [pageInput, setPageInput] = useState("");
   const abort = useRef<AbortController | null>(null);
   const searchSerial = useRef(0);
@@ -530,24 +540,26 @@ export function Workspace({
     () => !annotationsLoaded || annotationSaving.current || noteOpen,
   );
 
+  const [hoveredAnnotation, setHoveredAnnotation] =
+    useState<ReaderAnnotationTarget | null>(null);
   const selectedAnnotation = annotationTarget
     ? activeAnnotation(annotations, annotationTarget.ids)
     : undefined;
   const selectAnnotation = (target: ReaderAnnotationTarget | null) => {
+    setHoveredAnnotation(null);
     setAnnotationTarget(target);
     const annotation = target
       ? activeAnnotation(annotations, target.ids)
       : undefined;
-    if (annotation?.quote) void copyText(annotation.quote, "已复制");
+    selectionClipboard.annotation(annotation);
   };
   const selectText = (next: ReaderSelection | null) => {
+    if (next) setHoveredAnnotation(null);
     setSelection(next);
-    const key = next ? JSON.stringify([next.text, next.location]) : null;
-    if (next?.text && key !== lastCopiedSelection.current)
-      void copyText(next.text, "已复制");
-    lastCopiedSelection.current = key;
+    selectionClipboard.selection(next);
   };
   const editAnnotationNote = (annotation: Annotation) => {
+    setHoveredAnnotation(null);
     setNoteKind(annotation.kind === "question" ? "question" : "note");
     setEditingAnnotation(annotation);
     setNoteSelection({ text: annotation.quote, location: annotation.location });
@@ -699,33 +711,16 @@ export function Workspace({
     abort.current = controller;
     const serial = ++sendSerial.current;
     try {
-      let context = selected
-        .map(
-          (s, i) => `[选区 ${i + 1} · ${locationLabel(s.location)}]\n${s.text}`,
-        )
-        .join("\n\n");
-      let references: SourceReference[] = selected.map(
-        ({ text, location }) => ({
-          text,
-          location,
-          kind: "selection",
-        }),
-      );
-      if (useSection || !context) {
-        const sourceLocation = adapter?.getLocation();
-        context = (await adapter?.getContext()) || "";
-        references = sourceLocation
-          ? contextReferences(context.slice(0, 21000), sourceLocation)
-          : [];
-      }
+      const { context, references } = await composeChatContext({
+        adapter,
+        selected,
+        includeChapter: aiConfig?.chatIncludeChapter,
+        useSection,
+        marks: annotationContext(annotations, 4000, palette),
+        confirmOversize: (request) =>
+          new Promise((resolve) => setOversize({ request, resolve })),
+      });
       if (controller.signal.aborted) return;
-      // The reader's marks go last so they never displace the passage itself.
-      const marks = annotationContext(annotations, 4000, palette);
-      const passage = context.slice(
-        0,
-        marks ? 21000 - marks.length - 2 : 21000,
-      );
-      context = marks ? `${passage}\n\n${marks}` : passage;
       if (!directImage) setPrompt("");
       await session.send({
         provider,
@@ -761,6 +756,15 @@ export function Workspace({
     }
   };
   const blockAction = (block: PDFBlock, action: PDFBlockAction) => {
+    if (action === "copy") {
+      if (block.image)
+        void copyImage(
+          blockImageURL(doc.id, block.id),
+          (block.caption || block.text).trim(),
+        );
+      else void copyText(block.text.trim(), "已复制");
+      return;
+    }
     if (!block.image) {
       if (action === "explain")
         void send("请解释这段原文的含义，区分原文结论与你的补充说明。", [
@@ -1238,6 +1242,14 @@ export function Workspace({
                     location: saveLocation,
                     selection: selectText,
                     annotation: selectAnnotation,
+                    annotationHover: (target) =>
+                      setHoveredAnnotation((current) =>
+                        current &&
+                        target &&
+                        current.ids.join(",") === target.ids.join(",")
+                          ? current
+                          : target,
+                      ),
                     linkPreview: setLinkPreview,
                     internalLink: (origin) => {
                       navigationRef.current?.remember(origin);
@@ -1406,9 +1418,9 @@ export function Workspace({
                         <ArrowLeft className="ml-auto rotate-180" />
                       </Button>
                       <p className="privacy-note">
-                        对话发送所选文字或当前
-                        {doc.type === "epub" ? "章节" : "页面"}给 AI。PDF
-                        图表按主 Agent 设置自动预处理。
+                        {aiConfig?.chatIncludeChapter
+                          ? "提问时附带标题、已有摘要和本章原文。"
+                          : "提问默认附带标题和已有摘要，引用选区时补充所在章节。"}
                       </p>
                     </div>
                   }
@@ -1523,6 +1535,11 @@ export function Workspace({
         </ResizablePanel>
       </ResizablePanelGroup>
 
+      <AnnotationHoverCard
+        target={!selection && !noteOpen ? hoveredAnnotation : null}
+        annotations={annotations}
+        onEdit={editAnnotationNote}
+      />
       <Popover
         open={!!linkPreview}
         onOpenChange={(open) => !open && setLinkPreview(null)}
@@ -1658,6 +1675,13 @@ export function Workspace({
       <ProcessingUsageDialog
         document={usageOpen ? doc : null}
         onClose={() => setUsageOpen(false)}
+      />
+      <ContextSizeDialog
+        request={oversize?.request}
+        onChoose={(choice) => {
+          oversize?.resolve(choice);
+          setOversize(undefined);
+        }}
       />
     </div>
   );

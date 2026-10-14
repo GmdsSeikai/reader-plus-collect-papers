@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -19,11 +20,16 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"golang.org/x/sync/singleflight"
+
+	"reader.local/server/internal/diagnostics"
 	"reader.local/server/internal/scholar"
 )
 
 type Server struct {
+	Diagnostics            *diagnostics.Store
 	connectorMu            sync.Mutex
 	connectorAvailable     bool
 	connectorReason        string
@@ -52,6 +58,9 @@ type Server struct {
 	modelCache             map[string]modelCatalogEntry
 	scholarMu              sync.Mutex
 	scholar                *scholar.Client
+	journalRankMu          sync.Mutex
+	journalRankLast        time.Time
+	journalRankRequests    singleflight.Group
 }
 
 func NewServer(s *Store, token, web string) *Server { return &Server{Store: s, Token: token, Web: web} }
@@ -62,6 +71,10 @@ func respond(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func fail(w http.ResponseWriter, status int, message string) {
+	if out, ok := w.(*diagnosticResponse); ok {
+		// UI explanations can contain private titles or bare hostnames.
+		out.server.diagnosticEvent(slog.LevelError, "http.failure", "requestId", out.requestID, "status", status, "errorCode", fmt.Sprintf("http_%d", status))
+	}
 	respond(w, status, map[string]string{"error": message})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -76,10 +89,13 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/diagnostics/events", s.recordDiagnostic)
+	mux.HandleFunc("GET /api/diagnostics/export", s.exportDiagnostics)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /api/documents", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Store.Documents()
 		if e != nil {
+			s.diagnosticEvent(slog.LevelError, "database.read_failed", "requestId", requestID(r.Context()), "cause", e.Error())
 			fail(w, 500, "无法读取书库")
 			return
 		}
@@ -91,6 +107,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tag-boards/{id}", s.deleteTagBoard)
 	mux.HandleFunc("GET /api/import/zotero", s.zoteroDefaults)
 	mux.HandleFunc("GET /api/connector/status", s.connectorStatus)
+	mux.HandleFunc("GET /api/journal-ranks/config", s.getJournalRankConfig)
+	mux.HandleFunc("PUT /api/journal-ranks/config", s.putJournalRankConfig)
+	mux.HandleFunc("GET /api/documents/{id}/journal-rank", s.documentJournalRank)
 	mux.HandleFunc("GET /api/connector/revision", s.connectorRevisionStatus)
 	mux.HandleFunc("GET /api/documents/{id}/snapshot", s.connectorSnapshotStatus)
 	mux.HandleFunc("POST /api/import/zotero/scan", s.scanZotero)
@@ -136,6 +155,8 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(204)
 	}))
 	mux.HandleFunc("GET /api/documents/{id}/search", s.search)
+	mux.HandleFunc("GET /api/documents/{id}/text", s.documentText)
+	mux.HandleFunc("GET /api/search", s.librarySearch)
 	mux.HandleFunc("GET /api/documents/{id}/messages", s.messages)
 	mux.HandleFunc("POST /api/documents/{id}/chat", s.chat)
 	mux.HandleFunc("GET /api/providers", s.providers)
@@ -179,9 +200,9 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /pub/{cap}/{id}/{resource...}", s.resource)
 	if s.Web != "" {
-		mux.Handle("/", http.FileServer(http.Dir(s.Web)))
+		mux.Handle("/", webAssets(s.Web))
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.diagnosticHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil {
 			host = r.Host
@@ -208,7 +229,35 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
+	}))
+}
+
+// webAssets serves the built renderer. Chromium only runs an ES module or a
+// module worker when the response carries a JavaScript MIME type, and host MIME
+// databases map ".mjs" to "text/plain" often enough that Go special-cases ".js"
+// alone (golang/go#32350), so the types the bundle depends on are pinned here
+// instead of being looked up.
+func webAssets(root string) http.Handler {
+	files := http.FileServer(http.Dir(root))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if contentType := webContentType(r.URL.Path); contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		files.ServeHTTP(w, r)
 	})
+}
+func webContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".js", ".mjs":
+		return "text/javascript; charset=utf-8"
+	case ".wasm":
+		return "application/wasm"
+	}
+	return ""
 }
 func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
@@ -260,6 +309,11 @@ func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, status, err.Error())
 		return
+	}
+	if status < 300 {
+		// Open windows reload the library when the revision changes, so files
+		// imported from the command line appear without a restart.
+		s.connectorRevision.Add(1)
 	}
 	respond(w, status, d)
 }

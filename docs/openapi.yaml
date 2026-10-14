@@ -4,6 +4,217 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/diagnostics/events":
+        {
+          "post":
+            {
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": ["level", "event"],
+                              "properties":
+                                {
+                                  "level":
+                                    {
+                                      "type": "string",
+                                      "enum": ["info", "warn", "error"],
+                                    },
+                                  "event":
+                                    {
+                                      "type": "string",
+                                      "maxLength": 80,
+                                      "pattern": "^[a-z][a-z0-9_.-]{0,79}$",
+                                    },
+                                  "detail":
+                                    { "type": "string", "maxLength": 512 },
+                                  "stack":
+                                    { "type": "string", "maxLength": 8000 },
+                                  "requestId":
+                                    { "type": "string", "maxLength": 512 },
+                                  "route":
+                                    { "type": "string", "maxLength": 512 },
+                                  "method":
+                                    { "type": "string", "maxLength": 512 },
+                                  "status": { "type": "number", "minimum": 0 },
+                                  "durationMs":
+                                    { "type": "number", "minimum": 0 },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "204": { "description": "Local diagnostic event recorded" },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/diagnostics/export":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "ZIP containing all retained local logs with redaction and a manifest",
+                      "content":
+                        {
+                          "application/zip":
+                            {
+                              "schema":
+                                { "type": "string", "format": "binary" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/journal-ranks/config":
+        {
+          "get":
+            {
+              "summary": "Read local easyScholar settings without the SecretKey",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Settings and known datasets",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "put":
+            {
+              "summary": "Save easyScholar settings; omitted key preserves the saved key",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "enabled": { "type": "boolean" },
+                                  "filterMode":
+                                    {
+                                      "type": "string",
+                                      "enum": ["include", "exclude"],
+                                    },
+                                  "selected":
+                                    {
+                                      "type": "array",
+                                      "items": { "type": "string" },
+                                    },
+                                  "key": { "type": "string" },
+                                },
+                              "required": ["enabled", "selected"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Saved settings",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/journal-rank":
+        {
+          "get":
+            {
+              "summary": "Query or read cached journal indicators for one paper",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "refresh",
+                    "in": "query",
+                    "schema": { "type": "string", "enum": ["1"] },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Journal indicator result",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankResult",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/connector/status":
         {
           "get":
@@ -1008,6 +1219,145 @@
                     "name": "q",
                     "required": true,
                     "schema": { "type": "string" },
+                  },
+                ],
+            },
+        },
+      "/api/documents/{id}/text":
+        {
+          "get":
+            {
+              "description": "Readable text in reading order for the command line. PDFs have text only after layout parsing; units are pages for a PDF and reading-order chapters for an EPUB.",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/DocumentText" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "from",
+                    "required": false,
+                    "schema": { "type": "integer", "minimum": 1 },
+                  },
+                  {
+                    "in": "query",
+                    "name": "to",
+                    "required": false,
+                    "schema": { "type": "integer", "minimum": 1 },
+                  },
+                  {
+                    "in": "query",
+                    "name": "side",
+                    "required": false,
+                    "schema":
+                      {
+                        "type": "string",
+                        "enum": ["source", "translation", "both"],
+                        "default": "source",
+                      },
+                  },
+                ],
+            },
+        },
+      "/api/search":
+        {
+          "get":
+            {
+              "description": "Search the source and translated text of every document. A block matches when it contains all whitespace-separated terms, ignoring case.",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/LibrarySearchHit",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "query",
+                    "name": "q",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "library",
+                    "required": false,
+                    "schema": { "type": "string", "enum": ["books", "papers"] },
+                  },
+                  {
+                    "in": "query",
+                    "name": "document",
+                    "required": false,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "limit",
+                    "required": false,
+                    "schema":
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 20,
+                      },
                   },
                 ],
             },
@@ -3233,6 +3583,73 @@
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "JournalRankConfig":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "enabled": { "type": "boolean" },
+                  "hasKey": { "type": "boolean" },
+                  "filterMode":
+                    { "type": "string", "enum": ["include", "exclude"] },
+                  "selected":
+                    { "type": "array", "items": { "type": "string" } },
+                  "available":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                            },
+                          "required": ["key", "name"],
+                        },
+                    },
+                },
+              "required":
+                ["enabled", "hasKey", "filterMode", "selected", "available"],
+            },
+          "JournalRankResult":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "found",
+                          "notFound",
+                          "notApplicable",
+                          "noVenue",
+                          "disabled",
+                        ],
+                    },
+                  "checkedAt": { "type": "string" },
+                  "badges":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                              "value": { "type": "string" },
+                              "subject": { "type": "string" },
+                              "year": { "type": "string" },
+                            },
+                          "required": ["key", "name", "value"],
+                        },
+                    },
+                },
+              "required": ["status", "badges"],
+            },
           "ZoteroEntry":
             {
               "type": "object",
@@ -3497,6 +3914,93 @@
                       },
                   },
                 ],
+            },
+          "DocumentText":
+            {
+              "type": "object",
+              "required": ["documentId", "type", "units", "parsed", "blocks"],
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "type": { "type": "string", "enum": ["epub", "pdf"] },
+                  "units":
+                    {
+                      "type": "integer",
+                      "description": "Page count of a PDF or chapter count of an EPUB.",
+                    },
+                  "parsed":
+                    {
+                      "type": "boolean",
+                      "description": "False for a PDF without a layout index; it then has no blocks.",
+                    },
+                  "parsedPages":
+                    {
+                      "type": "array",
+                      "items": { "type": "integer" },
+                      "description": "Parsed pages of a partly parsed book; absent means all.",
+                    },
+                  "blocks":
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TextBlock" },
+                    },
+                },
+            },
+          "TextBlock":
+            {
+              "type": "object",
+              "required": ["id", "unit", "label", "text"],
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "unit":
+                    {
+                      "type": "integer",
+                      "description": "Page or chapter, starting at 1.",
+                    },
+                  "href":
+                    {
+                      "type": "string",
+                      "description": "EPUB chapter resource.",
+                    },
+                  "label": { "type": "string" },
+                  "text":
+                    {
+                      "type": "string",
+                      "description": "Source text, or a figure caption; empty on the translation side.",
+                    },
+                  "translation":
+                    {
+                      "type": "string",
+                      "description": "Completed translation, when requested.",
+                    },
+                },
+            },
+          "LibrarySearchHit":
+            {
+              "type": "object",
+              "required":
+                [
+                  "documentId",
+                  "title",
+                  "type",
+                  "unit",
+                  "blockId",
+                  "side",
+                  "excerpt",
+                ],
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "title": { "type": "string" },
+                  "type": { "type": "string", "enum": ["epub", "pdf"] },
+                  "unit": { "type": "integer" },
+                  "href": { "type": "string" },
+                  "blockId": { "type": "string" },
+                  "side":
+                    { "type": "string", "enum": ["source", "translation"] },
+                  "excerpt": { "type": "string" },
+                },
             },
           "SearchResult":
             {
@@ -3798,6 +4302,12 @@
               "type": "object",
               "properties":
                 {
+                  "protocol":
+                    {
+                      "type": "string",
+                      "enum": ["auto", "openai", "anthropic"],
+                      "default": "auto",
+                    },
                   "url": { "type": "string" },
                   "model": { "type": "string" },
                   "key": { "type": "string", "writeOnly": true },
@@ -3811,6 +4321,25 @@
               "required": ["id", "name", "description", "isDefault"],
               "properties":
                 {
+                  "effortInfo":
+                    {
+                      "type": "object",
+                      "required": ["mode", "note"],
+                      "properties":
+                        {
+                          "mode":
+                            {
+                              "type": "string",
+                              "enum": ["levels", "budget", "fixed", "unknown"],
+                            },
+                          "note": { "type": "string" },
+                          "mappings":
+                            {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" },
+                            },
+                        },
+                    },
                   "id": { "type": "string" },
                   "name": { "type": "string" },
                   "description": { "type": "string" },
@@ -3845,6 +4374,11 @@
               "type": "object",
               "properties":
                 {
+                  "chatIncludeChapter":
+                    {
+                      "type": "boolean",
+                      "description": "Automatically attach current chapter text to ordinary chat. Defaults to false. Omitted updates preserve the saved value.",
+                    },
                   "primary": { "type": "string" },
                   "models":
                     {
