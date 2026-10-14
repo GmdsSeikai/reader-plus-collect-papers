@@ -30,7 +30,14 @@ type overviewSection struct {
 	PassageCount int             `json:"passageCount"`
 	Content      overviewContent `json:"content"`
 }
+type overviewSource struct {
+	BlockID  string          `json:"blockId"`
+	Label    string          `json:"label"`
+	Location json.RawMessage `json:"location"`
+}
 type documentOverview struct {
+	Stale            bool              `json:"stale"`
+	Sources          []overviewSource  `json:"sources,omitempty"`
 	DocumentID       string            `json:"documentId"`
 	Revision         string            `json:"corpusRevision"`
 	Version          string            `json:"compilerVersion"`
@@ -81,11 +88,28 @@ func (s *Server) overviewState(ctx context.Context, documentID string) (document
 		return o, err
 	}
 	if o.Revision != "" {
-		var revision, fingerprint string
-		e := s.Store.DB.QueryRowContext(ctx, "SELECT revision,fingerprint FROM document_corpora WHERE document_id=?", documentID).Scan(&revision, &fingerprint)
+		var revision, fingerprint, corpusBody string
+		e := s.Store.DB.QueryRowContext(ctx, "SELECT revision,fingerprint,body FROM document_corpora WHERE document_id=?", documentID).Scan(&revision, &fingerprint, &corpusBody)
 		current, fe := s.corpusFingerprint(d)
 		if e != nil || fe != nil || o.Revision != revision || fingerprint != current || o.Version != overviewVersion {
 			o.Status = "stale"
+			o.Stale = true
+		}
+		if !o.Stale && o.Content != nil {
+			wanted := map[string]bool{}
+			for _, point := range append(append([]overviewPoint{}, o.Content.Findings...), o.Content.Limitations...) {
+				for _, block := range point.BlockIDs {
+					wanted[block] = true
+				}
+			}
+			var c documentCorpus
+			if json.Unmarshal([]byte(corpusBody), &c) == nil {
+				for _, p := range c.Passages {
+					if wanted[p.ID] {
+						o.Sources = append(o.Sources, overviewSource{p.ID, p.Label, p.Location})
+					}
+				}
+			}
 		}
 	}
 	var status, message string
@@ -114,6 +138,8 @@ func (s *Server) requestDocumentOverview(w http.ResponseWriter, r *http.Request)
 	if !decode(w, r, &request) {
 		return
 	}
+	s.overviewMu.Lock()
+	defer s.overviewMu.Unlock()
 	o, err := s.overviewState(r.Context(), r.PathValue("id"))
 	if err != nil {
 		fail(w, 404, "文档不可用")

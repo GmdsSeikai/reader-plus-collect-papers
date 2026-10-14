@@ -21,7 +21,7 @@ func serveDocumentMCP(agent *documentAgent) (string, string, func(), error) {
 			defer cancel()
 			defer stop()
 			raw, err := agent.callAttempt(ctx, attempt, d.Name, req.Params.Arguments)
-			if err != nil {
+			if err != nil || agent.readingStopped() {
 				agent.mu.Lock()
 				var abort context.CancelFunc
 				if agent.ID == attempt {
@@ -31,7 +31,9 @@ func serveDocumentMCP(agent *documentAgent) (string, string, func(), error) {
 				if abort != nil {
 					abort()
 				}
-				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
+				if err != nil {
+					return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
+				}
 			}
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}}}, nil
 		})

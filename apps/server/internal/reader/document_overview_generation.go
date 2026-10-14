@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -27,6 +28,16 @@ func overviewBatches(c *documentCorpus, budget int) []overviewBatch {
 	size := 0
 	flush := func() {
 		if len(current.Passages) > 0 {
+			first, last := current.Passages[0], current.Passages[len(current.Passages)-1]
+			var a, b struct {
+				Type string `json:"type"`
+				Page int    `json:"page"`
+			}
+			_ = json.Unmarshal(first.Location, &a)
+			_ = json.Unmarshal(last.Location, &b)
+			if a.Type == "pdf" && strings.HasPrefix(current.Title, "第 ") && strings.HasSuffix(current.Title, " 页") {
+				current.Title = fmt.Sprintf("第 %d—%d 页", a.Page, b.Page)
+			}
 			current.Key = sourceKey(overviewVersion + jsonText(current.Passages))
 			batches = append(batches, current)
 			current = overviewBatch{}
@@ -35,7 +46,7 @@ func overviewBatches(c *documentCorpus, budget int) []overviewBatch {
 	}
 	for _, p := range c.Passages {
 		n := estimateDocumentTokens(jsonText(p)) + 16
-		if len(current.Passages) > 0 && (size+n > budget || current.Passages[0].Section != p.Section) {
+		if len(current.Passages) > 0 && (size+n > budget || overviewSectionBoundary(current.Passages[0], p)) {
 			flush()
 		}
 		if len(current.Passages) == 0 {
@@ -95,7 +106,7 @@ func generateOverviewContent(ctx context.Context, g *GenerationService, title st
 	if estimateDocumentTokens(prompt) > inputBudget {
 		return overviewContent{}, generationError(ErrorLimit, "概要输入超过文档上下文预算，请调高设置或缩小处理范围")
 	}
-	result, err := g.Generate(ctx, AIInput{Prompt: prompt}, false, nil)
+	result, err := g.Generate(ctx, AIInput{Prompt: prompt, SourceOnly: true}, false, nil)
 	if err != nil {
 		return overviewContent{}, err
 	}
@@ -126,7 +137,8 @@ func (s *Server) compileOverview(ctx context.Context, job overviewJob, g *Genera
 	if len(c.Passages) == 0 {
 		return generationError(ErrorConfiguration, "没有可用于生成概要的原文")
 	}
-	inputBudget := documentSourceBudget(s.documentContextTokens())
+	window, _ := s.overviewContextWindow(ctx)
+	inputBudget := documentSourceBudget(window)
 	batches := overviewBatches(c, max(1024, inputBudget-estimateDocumentTokens(overviewInstruction)-2048))
 	allowed := map[string]bool{}
 	for _, p := range c.Passages {
@@ -282,4 +294,18 @@ func (s *Server) overviewWorker(ctx context.Context) {
 			log.Printf("cannot finish overview job: %v", err)
 		}
 	}
+}
+
+// PDF corpus sections can be physical pages. Pack those together instead of
+// issuing one model request per page; honor named chapter boundaries if known.
+func overviewSectionBoundary(first, next documentPassage) bool {
+	var location struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(next.Location, &location)
+	if location.Type == "pdf" {
+		generic := strings.HasPrefix(next.Label, "第 ") && strings.HasSuffix(next.Label, " 页")
+		return !generic && first.Label != next.Label
+	}
+	return first.Section != next.Section
 }

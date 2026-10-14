@@ -89,8 +89,8 @@ func TestDocumentToolsScopeBudgetsAndInvalidation(t *testing.T) {
 	if len(a.Evidence) != 0 {
 		t.Fatal("invalid arguments read evidence")
 	}
-	for i := a.calls; i < 16; i++ {
-		if _, e := a.call(t.Context(), "get_outline", json.RawMessage(`{}`)); e != nil {
+	for i := a.calls; i < documentToolCalls; i++ {
+		if _, e := a.call(t.Context(), "search_document", json.RawMessage(jsonText(map[string]string{"query": strconv.Itoa(i)}))); e != nil {
 			t.Fatal(e)
 		}
 	}

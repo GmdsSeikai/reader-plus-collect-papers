@@ -64,6 +64,8 @@ type savedConfig struct {
 	Fingerprints map[string]string `json:"fingerprints"`
 }
 type AIInput struct {
+	SourceOnly    bool
+	ContextInfo   func(window, used int)
 	UsageSink     func(UsageCall) error
 	UsageProvider string
 	Chat          *chatInput

@@ -50,6 +50,7 @@ func (s *codexSession) documentConfig(ctx context.Context) (map[string]codexMCPC
 	if e != nil {
 		return nil, e
 	}
+	s.contextWindow = codexConfiguredWindow(raw)
 	var result struct {
 		Config struct {
 			Servers  map[string]codexMCPConfig `json:"mcp_servers"`
@@ -108,7 +109,8 @@ func isolatedDocumentCodex(ctx context.Context, work, model, url, token string) 
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	overrides := []string{}
+	// Keep the native harness from truncating Reader's bounded range results.
+	overrides := []string{"tool_output_token_limit=24000"}
 	readerName := "reader_document"
 	if _, collision := servers[readerName]; collision {
 		readerName += "_" + id()[:8]
@@ -181,6 +183,11 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 	a := in.Chat.Agent
 	a.resetAttempt("codex")
 	a.Mode = "agent"
+	if err := a.prepareReading(ctx, in); err != nil {
+		return GenerateResult{}, err
+	}
+	readingContext, stopReading := documentReadingContext(ctx)
+	defer stopReading()
 	url, token, closeMCP, e := serveDocumentMCP(a)
 	if e != nil {
 		return GenerateResult{}, e
@@ -191,17 +198,17 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 		return GenerateResult{}, e
 	}
 	defer os.RemoveAll(work)
-	reader, e := isolatedDocumentCodex(ctx, work, model, url, token)
+	reader, e := isolatedDocumentCodex(readingContext, work, model, url, token)
 	if e != nil {
 		return GenerateResult{}, e
 	}
+	a.updateContextWindow(reader.contextWindow, 0, "codex_config")
 	reader.baseInstructions = documentReadingInstructions
-	readingContext, stopReading := context.WithCancel(ctx)
-	defer stopReading()
 	a.mu.Lock()
 	a.abort = stopReading
 	a.mu.Unlock()
 	readingInput := in
+	readingInput.ContextInfo = func(window, used int) { a.updateContextWindow(window, used, "codex_runtime") }
 	readingInput.Prompt = documentReadingPrompt(in)
 	_, e = trackModelUsage(UsageCall{Provider: "codex"}, in.UsageSink, nil, func(send func(ProviderEvent) error) (GenerateResult, error) {
 		var metricErr error
@@ -213,7 +220,7 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 				}
 			}
 		})
-		if err == nil {
+		if metricErr != nil {
 			err = metricErr
 		}
 		return GenerateResult{Text: text, FinishReason: "stop"}, err
@@ -222,15 +229,11 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 	closeMCP()
 	a.mu.Lock()
 	a.abort = nil
-	fatal := a.fatal
 	a.mu.Unlock()
-	if fatal != nil {
-		return GenerateResult{}, fatal
+	if ctx.Err() == nil && errors.Is(readingContext.Err(), context.DeadlineExceeded) {
+		a.stopReading("预留最终回答时间")
 	}
-	if e != nil {
-		return GenerateResult{}, e
-	}
-	if e = a.check(ctx); e != nil {
+	if e = a.finishReading(ctx, e); e != nil {
 		return GenerateResult{}, e
 	}
 	if a.activity != nil {
@@ -243,7 +246,7 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 		return GenerateResult{}, e
 	}
 	defer final.close()
-	return trackModelUsage(UsageCall{Provider: "codex"}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
+	result, e := trackModelUsage(UsageCall{Provider: "codex"}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
 		child, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var emitErr error
@@ -267,4 +270,8 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 		}
 		return GenerateResult{text, "stop"}, err
 	})
+	if e != nil {
+		return GenerateResult{}, e
+	}
+	return a.finishDocumentAnswer(ctx, result, emit)
 }

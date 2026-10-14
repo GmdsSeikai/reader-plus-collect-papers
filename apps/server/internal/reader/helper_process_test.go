@@ -19,6 +19,8 @@ func TestMain(m *testing.M) {
 			runTranslationSessionProcess()
 		case "chat-session":
 			runChatSessionProcess()
+		case "document-reading":
+			runDocumentReadingProcess()
 		case "corpus-worker":
 			runMissingPageCorpusProcess()
 		case "models":

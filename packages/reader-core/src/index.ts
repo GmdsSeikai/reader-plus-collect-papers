@@ -306,7 +306,7 @@ export interface HighlightColor {
 export const defaultTheme: ReaderTheme = {
   autoTranslatePDF: true,
   autoGenerateOverview: false,
-  documentContextTokens: 65536,
+  documentContextTokens: 0,
   appearance: "system",
   mode: "light",
   fontSize: 1.15,
@@ -556,6 +556,8 @@ export interface AIConfig {
   capabilities: Record<string, AICapability>;
 }
 export interface AgentModel {
+  contextWindow?: number;
+  maxOutputTokens?: number;
   id: string;
   name: string;
   description: string;
@@ -666,6 +668,8 @@ export interface OverviewJob {
   totalPassages: number;
 }
 export interface DocumentOverview extends OverviewJob {
+  stale: boolean;
+  sources?: { blockId: string; label: string; location: DocumentLocation }[];
   corpusRevision: string;
   compilerVersion: string;
   content?: OverviewContent;

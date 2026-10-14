@@ -3285,6 +3285,14 @@ export interface components {
             content: components["schemas"]["OverviewContent"];
         };
         DocumentOverview: {
+            stale?: boolean;
+            sources?: {
+                blockId: string;
+                label: string;
+                location: {
+                    [key: string]: unknown;
+                };
+            }[];
             documentId: string;
             corpusRevision: string;
             compilerVersion: string;
@@ -3588,6 +3596,9 @@ export interface components {
             hasKey: boolean;
         };
         AgentModel: {
+            /** @description Provider-reported context capacity; omitted when unavailable */
+            contextWindow?: number;
+            maxOutputTokens?: number;
             id: string;
             name: string;
             description: string;

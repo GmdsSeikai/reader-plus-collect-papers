@@ -75,7 +75,7 @@ func TestDocumentAgentFailureNeverCommitsAnAnswer(t *testing.T) {
 			if count != 0 {
 				t.Fatal("failed run committed as complete")
 			}
-			if mode == "round-limit" && calls != 8 {
+			if mode == "round-limit" && calls != documentReadingRounds {
 				t.Fatalf("loop not bounded: %d", calls)
 			}
 		})

@@ -29,6 +29,7 @@ type codexSession struct {
 	baseInstructions                   string
 	documentMCP                        string
 	documentMCPName                    string
+	contextWindow                      int
 }
 
 func (s *codexSession) close() {
@@ -78,7 +79,13 @@ func startCodexSession(work, model string, overrides []string, token string) (*c
 }
 
 func invokeCodex(ctx context.Context, work, model string, in AIInput, delta func(string), metrics ...func([]ModelTokens)) (string, error) {
-	session, err := newCodexSession(work, model)
+	var session *codexSession
+	var err error
+	if in.SourceOnly {
+		session, err = isolatedDocumentCodex(ctx, work, model, "", "")
+	} else {
+		session, err = newCodexSession(work, model)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -160,10 +167,22 @@ func (s *codexSession) generate(ctx context.Context, in AIInput, delta func(stri
 		if msg.Method == "thread/tokenUsage/updated" {
 			var usage struct {
 				TokenUsage struct {
-					Total json.RawMessage `json:"total"`
+					Total  json.RawMessage `json:"total"`
+					Last   json.RawMessage `json:"last"`
+					Window int             `json:"modelContextWindow"`
 				} `json:"tokenUsage"`
 			}
 			if json.Unmarshal(msg.Params, &usage) == nil {
+				if n := validContextWindow(usage.TokenUsage.Window); n > 0 {
+					s.contextWindow = n
+					if in.ContextInfo != nil {
+						used := 0
+						if last := codexTokens(usage.TokenUsage.Last); last != nil {
+							used = int(last.TotalTokens)
+						}
+						in.ContextInfo(n, used)
+					}
+				}
 				total := codexTokens(usage.TokenUsage.Total)
 				if counts := codexUsageDelta(total, previousTotal); counts != nil && codexUsageDelta(total, s.total) != nil {
 					usageReceived = true

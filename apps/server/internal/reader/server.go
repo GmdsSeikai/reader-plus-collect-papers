@@ -193,8 +193,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		if value, exists := v["documentContextTokens"]; exists {
 			n, ok := value.(float64)
-			if !ok || n < 8192 || n > 1048576 || n != float64(int(n)) {
-				fail(w, 400, "文档上下文预算须为 8192—1048576 的整数")
+			if !ok || (n != 0 && n < 8192) || n > 1048576 || n != float64(int(n)) {
+				fail(w, 400, "文档上下文上限须为 0（自动）或 8192—1048576 的整数")
 				return
 			}
 		}

@@ -48,7 +48,7 @@ func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, 
 func (s *Server) saveFailedDocumentRun(a *documentAgent, provider string, cause error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	body, _ := json.Marshal(map[string]any{"id": a.ID, "provider": provider, "mode": a.Mode, "status": "failed", "errorCode": errorKind(cause), "corpusRevision": a.corpus.Revision, "tools": a.Traces, "evidence": a.Evidence})
+	body, _ := json.Marshal(map[string]any{"id": a.ID, "provider": provider, "mode": a.Mode, "status": "failed", "errorCode": errorKind(cause), "readingCoverage": a.readingCoverage(), "corpusRevision": a.corpus.Revision, "tools": a.Traces, "evidence": a.Evidence})
 	_, _ = s.Store.DB.Exec("INSERT OR IGNORE INTO chat_agent_runs VALUES(?,?,?)", a.ID, a.corpus.DocumentID, string(body))
 }
 func (s *Server) validateChatEvidence(w http.ResponseWriter, r *http.Request) {

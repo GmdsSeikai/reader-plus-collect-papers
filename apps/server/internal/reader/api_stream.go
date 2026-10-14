@@ -27,7 +27,16 @@ func (a apiAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(P
 		return GenerateResult{}, generationError(ErrorConfiguration, e.Error())
 	}
 	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && len(req.Input.images()) == 0 {
-		return streamAPIDocumentChat(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
+		completion := completionRequest{Model: a.config.Model}
+		if models, err := req.Input.Chat.Agent.server.apiCatalog(a.config)(ctx); err == nil {
+			for _, m := range models {
+				if m.ID == completion.Model {
+					completion.ContextWindow = m.ContextWindow
+					break
+				}
+			}
+		}
+		return streamAPIDocumentChat(ctx, a.config, completion, req.Input, emit)
 	}
 	return streamCompletion(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
 }
@@ -40,6 +49,7 @@ type completionMessage struct {
 // History holds earlier completed turns of the same conversation; the new user
 // turn is appended after it. Effort is omitted unless the model advertises it.
 type completionRequest struct {
+	ContextWindow int
 	Model, Effort string
 	History       []completionMessage
 	Tools         bool

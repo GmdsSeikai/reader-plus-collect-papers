@@ -3781,6 +3781,27 @@
               "type": "object",
               "properties":
                 {
+                  "stale": { "type": "boolean" },
+                  "sources":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "required": ["blockId", "label", "location"],
+                          "properties":
+                            {
+                              "blockId": { "type": "string" },
+                              "label": { "type": "string" },
+                              "location":
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true,
+                                },
+                            },
+                        },
+                    },
+
                   "documentId": { "type": "string" },
                   "corpusRevision": { "type": "string" },
                   "compilerVersion": { "type": "string" },
@@ -4573,6 +4594,13 @@
               "required": ["id", "name", "description", "isDefault"],
               "properties":
                 {
+                  "contextWindow":
+                    {
+                      "type": "integer",
+                      "description": "Provider-reported context capacity; omitted when unavailable",
+                    },
+                  "maxOutputTokens": { "type": "integer" },
+
                   "id": { "type": "string" },
                   "name": { "type": "string" },
                   "description": { "type": "string" },

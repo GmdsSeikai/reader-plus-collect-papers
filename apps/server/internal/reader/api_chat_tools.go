@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"strings"
@@ -194,8 +195,8 @@ func toolCompletion(ctx context.Context, c APIConnection, req completionRequest,
 		}
 	}
 	body, _ := json.Marshal(payload)
-	if len(body) > 512<<10 {
-		return toolCompletionResult{}, generationError(ErrorLimit, "API 工具上下文超过限制")
+	if len(body) > 4<<20 {
+		return toolCompletionResult{}, errDocumentToolContext
 	}
 	response, err := apiRequest(ctx, c, "POST", "/chat/completions", body)
 	if err != nil {
@@ -216,16 +217,30 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 	}
 	agent.resetAttempt(provider)
 	agent.Mode = "retrieval"
+	if err := agent.prepareReading(ctx, in); err != nil {
+		return GenerateResult{}, err
+	}
+	agent.updateContextWindow(req.ContextWindow, 0, "api_models")
+	readingContext, cancelReading := documentReadingContext(ctx)
+	defer cancelReading()
 	if req.Tools {
 		agent.Mode = "agent"
 		messages := []toolCompletionMessage{{Role: "system", Content: documentReadingInstructions}, {Role: "user", Content: documentReadingPrompt(in)}}
 		seenCalls := map[string]bool{}
 		complete := false
-		for round := 0; round < 8; round++ {
+	reading:
+		for round := 0; round < documentReadingRounds; round++ {
+			agent.mu.Lock()
+			agent.readingRounds = round + 1
+			agent.mu.Unlock()
+			if estimateDocumentTokens(jsonText(messages))+estimateDocumentTokens(jsonText(documentAPITools())) > agent.inputTokenLimit() {
+				agent.stopReading("工具对话接近上下文预算")
+				break
+			}
 			var response toolCompletionResult
 			_, err := trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, nil, func(send func(ProviderEvent) error) (GenerateResult, error) {
 				var e error
-				response, e = toolCompletion(ctx, c, req, messages, documentAPITools())
+				response, e = toolCompletion(readingContext, c, req, messages, documentAPITools())
 				metricErr := send(ProviderEvent{Metrics: []ModelTokens{{Model: response.Model, Tokens: response.Tokens}}})
 				if e == nil {
 					e = metricErr
@@ -233,6 +248,14 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 				return GenerateResult{}, e
 			})
 			if err != nil {
+				if errors.Is(err, errDocumentToolContext) {
+					agent.stopReading("工具上下文预算用完")
+					break
+				}
+				if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && readingContext.Err() != nil {
+					agent.stopReading("预留最终回答时间")
+					break
+				}
 				return GenerateResult{}, err
 			}
 			if len(response.Calls) == 0 {
@@ -245,15 +268,25 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 					return GenerateResult{}, generationError(ErrorProtocol, "API 重复使用工具调用 ID")
 				}
 				seenCalls[call.ID] = true
-				raw, e := agent.call(ctx, call.Function.Name, json.RawMessage(call.Function.Arguments))
+				raw, e := agent.call(readingContext, call.Function.Name, json.RawMessage(call.Function.Arguments))
 				if e != nil {
+					if errors.Is(e, errDocumentReadingBudget) {
+						break reading
+					}
+					if ctx.Err() == nil && errors.Is(e, context.DeadlineExceeded) && readingContext.Err() != nil {
+						agent.stopReading("预留最终回答时间")
+						break reading
+					}
 					return GenerateResult{}, e
 				}
 				messages = append(messages, toolCompletionMessage{Role: "tool", Content: string(raw), CallID: call.ID})
+				if agent.readingStopped() {
+					break reading
+				}
 			}
 		}
-		if !complete {
-			return GenerateResult{}, generationError(ErrorLimit, "API 自主阅读达到轮次上限")
+		if !complete && !agent.readingStopped() {
+			agent.stopReading("阅读轮次预算用完")
 		}
 	} else {
 		if agent.activity != nil {
@@ -261,11 +294,15 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 				return GenerateResult{}, err
 			}
 		}
-		if err := agent.preRetrieve(ctx, in.Chat.Question); err != nil {
-			return GenerateResult{}, err
+		if err := agent.preRetrieve(readingContext, in.Chat.Question); err != nil {
+			if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && readingContext.Err() != nil {
+				agent.stopReading("预留最终回答时间")
+			} else if !errors.Is(err, errDocumentReadingBudget) {
+				return GenerateResult{}, err
+			}
 		}
 	}
-	if err := agent.check(ctx); err != nil {
+	if err := agent.finishReading(ctx, nil); err != nil {
 		return GenerateResult{}, err
 	}
 	if agent.activity != nil {
@@ -273,9 +310,13 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 			return GenerateResult{}, err
 		}
 	}
-	return trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
+	result, err := trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
 		return streamCompletion(ctx, c, req, agent.finalInput(in), send)
 	})
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	return agent.finishDocumentAnswer(ctx, result, emit)
 }
 func (a *documentAgent) preRetrieve(ctx context.Context, question string) error {
 	raw, e := a.call(ctx, "search_document", json.RawMessage(jsonText(map[string]any{"query": question, "limit": 4})))
