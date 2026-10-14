@@ -247,3 +247,28 @@ func TestDocumentCorpusExtractsOnlyMissingPages(t *testing.T) {
 		t.Fatal("existing layout was changed")
 	}
 }
+
+func TestReadPassageNeighborsFollowSourceOrder(t *testing.T) {
+	for _, at := range []int{0, 2, 6} {
+		t.Run(strconv.Itoa(at), func(t *testing.T) {
+			_, a := originalDocumentFixture(t)
+			raw, err := a.call(t.Context(), "read_passage", json.RawMessage(jsonText(map[string]any{"blockId": a.corpus.Passages[at].ID, "before": 2, "after": 2})))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result struct{ Items []documentEvidence }
+			if err = json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+			lo, hi := max(0, at-2), min(len(a.corpus.Passages)-1, at+2)
+			if len(result.Items) != hi-lo+1 {
+				t.Fatal("neighbors missing", string(raw))
+			}
+			for i, item := range result.Items {
+				if item.BlockID != a.corpus.Passages[lo+i].ID {
+					t.Fatal("neighbors reordered", string(raw))
+				}
+			}
+		})
+	}
+}

@@ -39,14 +39,9 @@ func documentReadIndices(c *documentCorpus, q documentReadRequest) ([]int, bool)
 		}
 		for i, p := range c.Passages {
 			if p.ID == q.Block {
-				result := []int{i}
-				for distance := 1; distance <= 3; distance++ {
-					if distance <= q.Before && i-distance >= 0 {
-						result = append(result, i-distance)
-					}
-					if distance <= q.After && i+distance < len(c.Passages) {
-						result = append(result, i+distance)
-					}
+				result := []int{}
+				for index := max(0, i-q.Before); index <= min(len(c.Passages)-1, i+q.After); index++ {
+					result = append(result, index)
 				}
 				return result, true
 			}
