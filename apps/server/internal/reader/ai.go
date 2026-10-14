@@ -96,7 +96,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "未知 AI 服务")
 		return
 	}
-	if strings.TrimSpace(req.Prompt) == "" || len(req.Prompt) > 16000 || len(*req.Context) > 64000 {
+	// The client confirms contexts above 64 KB; this cap keeps the request body under 1 MB.
+	if strings.TrimSpace(req.Prompt) == "" || len(req.Prompt) > 16000 || len(*req.Context) > chatContextBytes {
 		fail(w, 400, "问题或上下文长度无效")
 		return
 	}

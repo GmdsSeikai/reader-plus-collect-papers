@@ -181,3 +181,31 @@ func TestEveryChatKindIncludesTitleAndSummary(t *testing.T) {
 		})
 	}
 }
+
+func TestChatAcceptsConfirmedLongContextUpToHardCap(t *testing.T) {
+	s := testServer(t)
+	d := organizationDoc(t, s)
+	upstream, calls := fakeAPI(t, func(int, apiCall) string { return "回答" })
+	c := AIConfig{Primary: "api", API: APIConnection{URL: upstream.URL + "/v1", Key: "sk-test"}, Models: map[string]string{"api": "plain"}}
+	passModels(&c, map[string]bool{"plain": false})
+	if err := s.writeAIConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	body := func(context string) *strings.Reader {
+		b, _ := json.Marshal(map[string]string{"provider": "api", "prompt": "总结", "context": context})
+		return strings.NewReader(string(b))
+	}
+	// About 100 KB, above the old 64 KB limit.
+	long := strings.Repeat("证", 100000/3)
+	r := request(t, s, "POST", "/api/documents/"+d.ID+"/chat", body(long))
+	if !strings.Contains(r.Body.String(), "event: done") {
+		t.Fatal(r.Body)
+	}
+	if !strings.Contains(jsonText(calls()[0].Messages[1].Content), long) {
+		t.Fatal("long context was not sent whole")
+	}
+	r = request(t, s, "POST", "/api/documents/"+d.ID+"/chat", body(strings.Repeat("证", chatContextBytes/3+1)))
+	if r.Code != 400 {
+		t.Fatal(r.Code, r.Body)
+	}
+}

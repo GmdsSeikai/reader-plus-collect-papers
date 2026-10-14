@@ -7,12 +7,26 @@ import {
 } from "@reader/core";
 import { contextReferences } from "../references";
 
-const contextByteLimit = 64000;
+/** Above this the user confirms the send; long chapters may be trimmed to it. */
+export const contextSoftLimit = 64000;
+/** Mirrors the server's hard cap on a single request's context. */
+export const contextHardLimit = 256000;
 const encoder = new TextEncoder();
 const byteLength = (text: string) => encoder.encode(text).length;
 
 type Anchor = { location: DocumentLocation; text?: string };
 type Chapter = { anchors: Anchor[]; excerpts: SourceReference[] };
+
+export interface OversizeContext {
+  /** UTF-8 bytes of the complete context. */
+  bytes: number;
+  /** The complete context fits under the hard cap. */
+  full: boolean;
+  /** Chapters can be cut to the text near each quote. */
+  trim: boolean;
+  quoted: boolean;
+}
+export type OversizeChoice = "full" | "trim" | "cancel";
 
 /** Explicit quotations carry their complete chapters as auxiliary context. */
 export async function composeChatContext({
@@ -21,17 +35,16 @@ export async function composeChatContext({
   includeChapter = false,
   useSection = false,
   marks = "",
+  confirmOversize,
 }: {
   adapter: ReaderAdapter | null | undefined;
   selected: ReaderSelection[];
   includeChapter?: boolean;
   useSection?: boolean;
   marks?: string;
-}): Promise<{
-  context: string;
-  references: SourceReference[];
-  notice?: string;
-}> {
+  /** Asks whether to send a context above the soft limit. */
+  confirmOversize?: (request: OversizeContext) => Promise<OversizeChoice>;
+}): Promise<{ context: string; references: SourceReference[] }> {
   if (selected.length && !adapter?.getChapterContext)
     throw new Error("无法读取引用所在的完整章节，请等待文档加载后重试。");
   const references: SourceReference[] = [];
@@ -48,49 +61,52 @@ export async function composeChatContext({
     });
   }
   // The quoted passages themselves are never shortened.
-  if (used() > contextByteLimit)
+  if (used() > contextHardLimit)
     throw new Error(
-      "选区超过 64 KB，无法完整发送。请减少引用的内容，或分开提问。",
+      "选区超过 256 KB，无法发送。请减少引用的内容，或分开提问。",
     );
-  if (!(selected.length || includeChapter || useSection) || !adapter)
-    return { context: parts.join("\n\n"), references };
 
-  const anchors: Anchor[] = selected.length
-    ? selected
-    : [{ location: adapter.getLocation() }];
+  const attach = Boolean(
+    (selected.length || includeChapter || useSection) && adapter,
+  );
   const chapters: Chapter[] = [];
   const owner = new Map<string, Chapter>();
-  for (const anchor of anchors) {
-    // Explicit page actions retain their scope. A quote always needs its chapter.
-    const excerpts =
-      adapter.getChapterContext && (!useSection || selected.length)
-        ? await adapter.getChapterContext(anchor.location)
-        : [{ text: await adapter.getContext(), location: anchor.location }];
-    if (selected.length && !excerpts.some((excerpt) => excerpt.text.trim()))
-      throw new Error("无法读取引用所在的完整章节，请等待文档解析完成后重试。");
-    let chapter: Chapter | undefined;
-    const fresh: SourceReference[] = [];
-    for (const excerpt of excerpts) {
-      if (!excerpt.text.trim()) continue;
-      const ref = contextReferences(excerpt.text, excerpt.location)[0]!;
-      const key = JSON.stringify([ref.location, ref.text]);
-      const seen = owner.get(key);
-      if (seen) chapter ??= seen;
-      else fresh.push(ref);
+  if (adapter && attach)
+    for (const anchor of selected.length
+      ? (selected as Anchor[])
+      : [{ location: adapter.getLocation() }]) {
+      // Explicit page actions retain their scope. A quote always needs its chapter.
+      const excerpts =
+        adapter.getChapterContext && (!useSection || selected.length)
+          ? await adapter.getChapterContext(anchor.location)
+          : [{ text: await adapter.getContext(), location: anchor.location }];
+      if (selected.length && !excerpts.some((excerpt) => excerpt.text.trim()))
+        throw new Error(
+          "无法读取引用所在的完整章节，请等待文档解析完成后重试。",
+        );
+      let chapter: Chapter | undefined;
+      const fresh: SourceReference[] = [];
+      for (const excerpt of excerpts) {
+        if (!excerpt.text.trim()) continue;
+        const ref = contextReferences(excerpt.text, excerpt.location)[0]!;
+        const key = JSON.stringify([ref.location, ref.text]);
+        const seen = owner.get(key);
+        if (seen) chapter ??= seen;
+        else fresh.push(ref);
+      }
+      if (!chapter) {
+        if (!fresh.length) continue;
+        chapter = { anchors: [], excerpts: [] };
+        chapters.push(chapter);
+      }
+      chapter.anchors.push(anchor);
+      for (const ref of fresh) {
+        chapter.excerpts.push(ref);
+        owner.set(JSON.stringify([ref.location, ref.text]), chapter);
+      }
     }
-    if (!chapter) {
-      if (!fresh.length) continue;
-      chapter = { anchors: [], excerpts: [] };
-      chapters.push(chapter);
-    }
-    chapter.anchors.push(anchor);
-    for (const ref of fresh) {
-      chapter.excerpts.push(ref);
-      owner.set(JSON.stringify([ref.location, ref.text]), chapter);
-    }
-  }
 
-  const tail = marks && !selected.length ? marks.slice(0, 4000) : "";
+  const tail = marks && attach && !selected.length ? marks.slice(0, 4000) : "";
   const prefix = selected.length ? "辅助章节原文" : "原文";
   const header = (ref: SourceReference, trimmed: boolean) =>
     `[${prefix}${trimmed ? "（节选）" : ""} · ${locationLabel(ref.location)}]\n`;
@@ -98,22 +114,41 @@ export async function composeChatContext({
     chapter.excerpts.map((ref) => header(ref, false) + ref.text),
   );
   const fixed = used() + (tail ? byteLength(tail) + 2 : 0);
-  const fits =
+  const bytes =
     fixed +
-      full.reduce(
-        (sum, part, i) => sum + byteLength(part) + (parts.length || i ? 2 : 0),
-        0,
-      ) <=
-    contextByteLimit;
-  let notice: string | undefined;
-  if (fits) {
+    full.reduce(
+      (sum, part, i) => sum + byteLength(part) + (parts.length || i ? 2 : 0),
+      0,
+    );
+  let choice: OversizeChoice = "full";
+  if (bytes > contextSoftLimit) {
+    const request = {
+      bytes,
+      full: bytes <= contextHardLimit,
+      // Trimming only helps when the quotes leave room for nearby text.
+      trim: chapters.length > 0 && fixed < contextSoftLimit,
+      quoted: selected.length > 0,
+    };
+    if (!request.full && !request.trim)
+      throw new Error(
+        "上下文超过 256 KB，无法发送。请减少引用的内容，或分开提问。",
+      );
+    choice = confirmOversize
+      ? await confirmOversize(request)
+      : request.trim
+        ? "trim"
+        : "full";
+    if (choice === "cancel")
+      throw Object.assign(new Error("已取消发送"), { name: "AbortError" });
+  }
+  if (choice === "full") {
     parts.push(...full);
     // Keep the user's chosen passages as the visible quotations.
     if (!selected.length)
       references.push(...chapters.flatMap((chapter) => chapter.excerpts));
   } else {
     // Long chapters keep the paragraphs nearest each quote, labelled as excerpts.
-    let budget = contextByteLimit - fixed;
+    let budget = contextSoftLimit - fixed;
     chapters.forEach((chapter, i) => {
       const share = Math.floor(budget / (chapters.length - i));
       const kept = nearbyText(chapter, share, (ref) => header(ref, true));
@@ -124,12 +159,9 @@ export async function composeChatContext({
         if (!selected.length) references.push(ref);
       }
     });
-    notice = selected.length
-      ? "引用所在章节超过 64 KB，已附带选区前后的原文。"
-      : "本章超过 64 KB，已附带当前位置前后的原文。";
   }
   if (tail) parts.push(tail);
-  return { context: parts.join("\n\n"), references, notice };
+  return { context: parts.join("\n\n"), references };
 }
 
 /** Grows contiguous paragraph windows around each anchor until the budget is spent. */
