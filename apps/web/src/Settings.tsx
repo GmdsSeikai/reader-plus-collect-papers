@@ -688,6 +688,52 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="reading" className="settings-panel" keepMounted>
+            <section className="mb-6 space-y-4">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={theme.autoGenerateOverview ?? false}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoGenerateOverview: !!checked })
+                  }
+                />
+                <span>
+                  导入后生成文档概要
+                  <span className="block text-xs text-muted-foreground">
+                    使用已配置的文字模型，单独记录用量；已有文档按需生成。
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm">
+                文档上下文上限（可选）
+                <Input
+                  className="mt-2 max-w-48"
+                  type="number"
+                  min={8192}
+                  max={1048576}
+                  step={1024}
+                  defaultValue={theme.documentContextTokens || ""}
+                  placeholder="自动获取"
+                  key={theme.documentContextTokens}
+                  onBlur={(e) => {
+                    const n = Number(e.currentTarget.value);
+                    if (
+                      Number.isInteger(n) &&
+                      (n === 0 || n >= 8192) &&
+                      n <= 1048576
+                    )
+                      setTheme({ documentContextTokens: n });
+                    else
+                      e.currentTarget.value = String(
+                        theme.documentContextTokens || "",
+                      );
+                  }}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  优先读取模型信息或 Codex 配置；留空为自动，未知时采用
+                  64K。填写后只限制上限。
+                </span>
+              </label>
+            </section>
             <section className="mb-6">
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox

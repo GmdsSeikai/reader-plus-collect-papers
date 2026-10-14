@@ -88,6 +88,7 @@ import {
   TooltipContent,
 } from "@reader/ui/components/tooltip";
 import { toast } from "sonner";
+import { DocumentOverviewDialog } from "./DocumentOverview";
 import { ProcessingUsageDialog } from "./ProcessingUsage";
 import { ModelSelector } from "./ModelSelector";
 import { SourceReferences } from "./SourceReferences";
@@ -312,6 +313,7 @@ export function Workspace({
       group.removeAttribute("data-toggling");
     };
   }, [left, right, leftPanel, rightPanel]);
+  const [overviewOpen, setOverviewOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [rightTab, setRightTab] = useState("ai");
   const [leftTab, setLeftTab] = useState("toc");
@@ -924,6 +926,9 @@ export function Workspace({
               返回阅读位置
             </Button>
           )}
+          <IconButton label="文档概要" onClick={() => setOverviewOpen(true)}>
+            <BookOpen />
+          </IconButton>
           <div ref={setReadingToolbar} />
           <span className="toolbar-divider" />
           <IconButton
@@ -1655,6 +1660,14 @@ export function Workspace({
           onClose={() => setExportingNotes(false)}
         />
       )}
+      <DocumentOverviewDialog
+        key={doc.id}
+        document={overviewOpen ? doc : null}
+        onClose={() => setOverviewOpen(false)}
+        onNavigate={async (location) => {
+          await adapter?.goTo(location);
+        }}
+      />
       <ProcessingUsageDialog
         document={usageOpen ? doc : null}
         onClose={() => setUsageOpen(false)}
