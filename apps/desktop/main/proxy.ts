@@ -63,7 +63,8 @@ export function systemProxyEnvironment(
   for (const entry of exceptions as string[]) {
     const value = entry.trim().replace(/^\*\./, ".");
     if (!value) continue;
-    if (/[\s,*]/.test(value)) throw new Error("系统代理包含不支持的直连例外");
+    // Skip unsupported bypass rules instead of failing the entire proxy config
+    if (/[\s,*]/.test(value)) continue;
     bypass.add(value);
   }
   env.NO_PROXY = env.no_proxy = [...bypass].join(",");

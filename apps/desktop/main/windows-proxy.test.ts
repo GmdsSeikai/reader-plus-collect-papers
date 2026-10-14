@@ -36,6 +36,24 @@ describe("Windows system proxy", () => {
     });
     expect(convert({})).toEqual(env);
   });
+
+  it("tolerates <local> and unsupported wildcards in bypass list", () => {
+    const env = convert({
+      proxy: "127.0.0.1:7890",
+      bypass: "*jd.com;localhost;<local>;172.2*;192.168.*;example.com",
+    });
+    expect(env.HTTP_PROXY).toBe("http://127.0.0.1:7890");
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1,::1,example.com");
+  });
+
+  it("preserves valid bypass rules when mixed with unsupported ones", () => {
+    const env = convert({
+      proxy: "localhost:7890",
+      bypass: "*.example.org;10.*.*;valid.com;foo*bar",
+    });
+    expect(env.HTTP_PROXY).toBe("http://localhost:7890");
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1,::1,.example.org,valid.com");
+  });
   it("does not invent a proxy for an unconfigured protocol", () => {
     const env = convert({ proxy: "https=proxy.example:8080" });
     expect(env.HTTP_PROXY).toBeUndefined();
@@ -52,12 +70,10 @@ describe("Windows system proxy", () => {
     { proxy: 123 },
     { autoConfigUrl: "https://example.org/proxy.pac" },
     { autoDetect: true },
-    { proxy: "localhost:7890", bypass: "<local>" },
     { proxy: "socks=localhost:7890" },
     { proxy: "https=http://proxy.example/path" },
     { proxy: "https=user:password@proxy.example" },
     { proxy: "https=proxy.example:99999" },
-    { proxy: "localhost:7890", bypass: "192.168.*" },
   ])("rejects unreadable or unsupported settings: %j", (raw) => {
     expect(() => convert(raw)).toThrow();
   });

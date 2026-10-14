@@ -88,9 +88,10 @@ export function windowsProxySettings(value: unknown): Record<string, unknown> {
     .split(";")
     .map((v) => v.trim())
     .filter(Boolean);
-  if (bypass.some((v) => v.toLowerCase() === "<local>"))
-    throw new Error("暂不支持将简单主机名直连规则传递给 Agent CLI");
-  settings.ExceptionsList = bypass;
+  // Skip <local> instead of failing - Reader always bypasses localhost/127.0.0.1/::1
+  settings.ExceptionsList = bypass.filter(
+    (v) => v.toLowerCase() !== "<local>",
+  );
   return settings;
 }
 
