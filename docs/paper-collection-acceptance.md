@@ -6,10 +6,10 @@
 
 | 编号 | 必须交付的行为 | 最小证据 | 当前状态 |
 | --- | --- | --- | --- |
-| R01 无 AI 采集 | 创建任务、运行发现、查看完整原文、现有筛选、选择固定版本入库并打开 PDF；原自动发现/引用/恢复继续可用 | 生产 HTTP/隔离 SQLite/下载协议回归，实际 React 行为测试；提供隔离预览与人工操作步骤 | 待 Mimo 收尾验证；已有阶段证据不能代替当前版本通过 |
-| R02 状态与取消 | 切页不停止服务任务；返回后恢复开放运行和候选最新导入状态；指定取消不影响其他任务，不伪报提交中项已取消；失败可见并可主动重试 | 实际 API 派生状态、React 返回页面/迟到响应/取消行为测试 | 待补 activeRun/latestImport 及相关 UI |
-| R03 数据与确认 | 重复导入及中断恢复无重复文档、不丢笔记/标注/进度；不覆盖未知文件、不自动恢复回收站；长论文与回收站恢复分别明确确认 | 复用仍有效的导入/恢复/数据保护正式测试，追加页数/恢复条件确认及部分失败测试 | 后端已有部分证据，确认 UI 待补 |
-| R04 手动 AI | 后台 tick 零自动分析发送；主动提交可查询、取消并保存完整结果；缓存命中零发送，额度零拒绝，页面退出不取消服务任务；应用发起请求预占/计数/恢复准确 | 生产 adapter 受控协议与真实 SQLite、生命周期及 React 回归；真实账号调用另记 | 手动实现已有阶段证据；后台调度尚待移除 |
+| R01 无 AI 采集 | 创建任务、运行发现、查看完整原文、现有筛选、选择固定版本入库并打开 PDF；原自动发现/引用/恢复继续可用 | 生产 HTTP/隔离 SQLite/下载协议回归，实际 React 行为测试；提供隔离预览与人工操作步骤 | passed（2026-10-14：TestCollectionManualDiscoveryLoop、TestCollectionCandidateImportFlow、TestDuplicateCollectionImportPreservesExistingFile 等生产 HTTP/隔离 SQLite 回归通过；CollectionPage/TaskForm React 行为测试通过；导入行展示固定版本 vN。人工 UI 与实际安装另行记录，不冒充通过） |
+| R02 状态与取消 | 切页不停止服务任务；返回后恢复开放运行和候选最新导入状态；指定取消不影响其他任务，不伪报提交中项已取消；失败可见并可主动重试 | 实际 API 派生状态、React 返回页面/迟到响应/取消行为测试 | passed（2026-10-14：GET tasks 派生 activeRun、GET candidate 派生 latestImport（created_at+request_id 最新）与 documentState；TestCollectionTasksListDerivesActiveRun、TestCollectionCandidateDetailDerivesLatestImport；React 测试覆盖返回页面恢复运行/导入状态、取消按 API 真实状态更新（importing 不伪报 cancelled）、失败重试入口） |
+| R03 数据与确认 | 重复导入及中断恢复无重复文档、不丢笔记/标注/进度；不覆盖未知文件、不自动恢复回收站；长论文与回收站恢复分别明确确认 | 复用仍有效的导入/恢复/数据保护正式测试，追加页数/恢复条件确认及部分失败测试 | passed（2026-10-14：TestDuplicateCollectionImportPreservesExistingFile、TestRecoverNeverRestoresTrash、TestImportCancelIsTerminalAndOwned 等数据保护回归通过；新增 TestCollectionImportBatchPartialFailure（一项失败不终止整批）、TestCollectionImportTrashRestoreNeedsConfirm（回收站恢复需显式确认；条件经 claimImport 持久化缺陷已修 fcc8474）、TestDoubleConfirmClaimsOnce（长论文页数确认单次认领）；UI 按 condition 区分「确认入库（N 页）/确认恢复回收站文档」，回收站文档不提供可打开按钮） |
+| R04 手动 AI | 后台 tick 零自动分析发送；主动提交可查询、取消并保存完整结果；缓存命中零发送，额度零拒绝，页面退出不取消服务任务；应用发起请求预占/计数/恢复准确 | 生产 adapter 受控协议与真实 SQLite、生命周期及 React 回归；真实账号调用另记 | passed（2026-10-14：后台调度已移除（d377181 删除 collection_analysis_scheduler.go 及公平调度专属测试）；新增 TestCollectionTickSendsNoAutomaticAnalysis 证明真实 tick 零自动发送且手动发送可用；TestPaperAnalysisProductionAPIAndCache（缓存零发送、额度计数）、AnalysisPanel 生命周期测试（页面退出不取消服务命令）、StartupSettlesAttemptsExactlyOnce 等恢复计量回归通过。真实账号/账单不冒充验证） |
 | R05 Windows 交付 | 当前源码检查通过；Windows x64 安装包构建及包内运行检查通过；安装包、SHA-256、源码提交、工具与命令记录齐全 | api:generate/typecheck/test/diff checks；pnpm package 内置完整 build 与 package smoke；隔离预览和人工步骤 | 最终检查与包待执行；macOS 延期，实际安装另记 |
 
 手动 AI 额度按应用发起的分析请求计量，不保证对应 CLI 内部尝试或提供商账单次数。保留现有连接与可选 RPM，不验收新增公平调度、分连接优先级或原生内部重试逐次计量。
