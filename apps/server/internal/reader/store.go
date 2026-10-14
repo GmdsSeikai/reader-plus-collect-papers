@@ -54,6 +54,7 @@ type Annotation struct {
 	Tags []string `json:"tags,omitempty"`
 }
 type Message struct {
+	Reasoning       string            `json:"reasoning,omitempty"`
 	ReadingLocation json.RawMessage   `json:"readingLocation,omitempty"`
 	Attachments     []ImageAttachment `json:"attachments,omitempty"`
 	Context         string            `json:"context,omitempty"`

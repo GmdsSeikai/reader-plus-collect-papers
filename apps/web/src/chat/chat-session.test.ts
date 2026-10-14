@@ -63,6 +63,52 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("chat request lifecycle", () => {
+  it("keeps thinking separate through tool activity, final text and history synchronization", async () => {
+    const h = setup();
+    await h.session.load();
+    const send = h.session.send(input);
+    h.emit({ event: "reasoning", data: { text: "先查看图片。" } });
+    h.emit({
+      event: "activity",
+      data: {
+        phase: "reading",
+        tool: "read_pdf_pages",
+        message: "正在查看第 2 页图像",
+      },
+    });
+    expect(h.session.getSnapshot().pending?.reasoning).toBe("先查看图片。");
+    h.emit({ event: "reasoning", data: { text: "\n\n再核对图例。" } });
+    h.emit({ event: "delta", data: { text: "答案" } });
+    h.emit({ event: "done", data: { ok: true } });
+    const saved = {
+      ...message("a", "assistant", "答案"),
+      reasoning: "先查看图片。\n\n再核对图例。",
+    };
+    h.messages.mockResolvedValue([message("u", "user", "question"), saved]);
+    h.wait.resolve();
+    await send;
+    expect(h.session.getSnapshot().pending).toMatchObject({
+      content: "答案",
+      reasoning: saved.reasoning,
+      phase: "saved",
+    });
+    expect(h.session.getSnapshot().messages[1].reasoning).toBe(saved.reasoning);
+  });
+  it("retains partial thinking after cancellation and ignores late fragments", async () => {
+    const h = setup();
+    await h.session.load();
+    const send = h.session.send(input);
+    h.emit({ event: "reasoning", data: { text: "已收到的思考" } });
+    h.session.cancel();
+    h.emit({ event: "reasoning", data: { text: "迟到内容" } });
+    h.wait.resolve();
+    await send;
+    expect(h.session.getSnapshot().pending).toMatchObject({
+      reasoning: "已收到的思考",
+      content: "",
+      phase: "cancelled",
+    });
+  });
   it("streams a candidate then commits the answer without duplicate text", async () => {
     const h = setup();
     await h.session.load();

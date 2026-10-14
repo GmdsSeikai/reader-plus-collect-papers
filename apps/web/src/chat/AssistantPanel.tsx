@@ -10,6 +10,7 @@ import {
   type PendingAnswer,
 } from "./chat-session";
 import { AnswerActions } from "./AnswerActions";
+import { Thinking } from "./Thinking";
 const MessageMarkdown = lazy(() =>
   import("./MessageMarkdown").then((module) => ({
     default: module.MessageMarkdown,
@@ -82,7 +83,11 @@ export function AssistantPanel({
               content = answer
                 ? answer.content + (answer.draft || "")
                 : (message?.content ?? "");
-            const waiting = answer?.phase === "generating" && !content;
+            const reasoning = answer?.reasoning ?? message?.reasoning ?? "";
+            const waiting =
+              answer?.phase === "generating" &&
+              !content &&
+              (!reasoning || !!answer.activity);
             const timestamp = message?.createdAt
               ? new Date(message.createdAt)
               : undefined;
@@ -122,6 +127,18 @@ export function AssistantPanel({
                       </span>
                     )}
                   </div>
+                )}
+                {assistant && reasoning && (
+                  <Thinking
+                    text={reasoning}
+                    active={answer?.phase === "generating" && !content}
+                    incomplete={
+                      !!answer &&
+                      ["incomplete", "unconfirmed", "cancelled"].includes(
+                        answer.phase,
+                      )
+                    }
+                  />
                 )}
                 {assistant ? (
                   <Suspense

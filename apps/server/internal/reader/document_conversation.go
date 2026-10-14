@@ -196,8 +196,8 @@ func (a *documentAgent) commitConversation(ctx context.Context, tx *sql.Tx, mess
 			}
 		}
 	}
-	// Preserve provider continuation fields in the private active API window.
-	// They are never exposed as chat text or copied into the public run record.
+	// Preserve exact provider continuation fields for replay. The separate UI
+	// thinking transcript is saved with the answer and never replayed as content.
 
 	return saveDocumentConversation(ctx, tx, a.corpus.DocumentID, a.provider, c)
 }

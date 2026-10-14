@@ -169,6 +169,7 @@ func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEv
 			Choices []struct {
 				Index *int `json:"index"`
 				Delta struct {
+					Reasoning    *string         `json:"reasoning_content"`
 					Content      *string         `json:"content"`
 					Refusal      *string         `json:"refusal"`
 					ToolCalls    json.RawMessage `json:"tool_calls"`
@@ -207,6 +208,11 @@ func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEv
 			if finished {
 				return false, generationError(ErrorProtocol, "API 成功终态后仍有候选事件")
 			}
+			if choice.Delta.Reasoning != nil && *choice.Delta.Reasoning != "" && emit != nil {
+				if err := emit(ProviderEvent{Reasoning: *choice.Delta.Reasoning}); err != nil {
+					return false, err
+				}
+			}
 			if choice.Delta.Refusal != nil && *choice.Delta.Refusal != "" {
 				return false, generationError(ErrorUpstream, "API 拒绝回答")
 			}
@@ -243,7 +249,7 @@ func readCompletionStream(ctx context.Context, r io.Reader, emit func(ProviderEv
 	if err := consumeCompletionFrames(ctx, r, dispatch); err != nil {
 		return GenerateResult{}, err
 	}
-	return GenerateResult{text.String(), "stop"}, nil
+	return GenerateResult{Text: text.String(), FinishReason: "stop"}, nil
 }
 
 // The existing text stream and tool rounds share framing, limits and EOF rules.

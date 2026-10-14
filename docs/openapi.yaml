@@ -4290,6 +4290,11 @@
                   "documentId": { "type": "string" },
                   "role": { "enum": ["user", "assistant"] },
                   "content": { "type": "string" },
+                  "reasoning":
+                    {
+                      "type": "string",
+                      "description": "Provider-returned thinking displayed separately from the final answer.",
+                    },
                   "createdAt": { "type": "string" },
                   "context": { "type": "string" },
                   "readingLocation":
@@ -4368,6 +4373,21 @@
               "description": "Decoded SSE event union for documentation and generated types only. Wire uses event: NAME and data: JSON lines; no envelope is transmitted. Append delta text verbatim. Only done confirms successful persistence. EOF is not completion. After error/done ignore late data. No automatic POST replay.",
               "oneOf":
                 [
+                  {
+                    "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "reasoning" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text"],
+                            "properties": { "text": { "type": "string" } },
+                          },
+                      },
+                  },
+
                   {
                     "type": "object",
                     "required": ["event", "data"],

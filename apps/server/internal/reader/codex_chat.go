@@ -172,7 +172,7 @@ func (a codexChatAdapter) Stream(ctx context.Context, req GenerateRequest, emit 
 			a.cache.finish(in.Chat, "", false)
 			return GenerateResult{}, err
 		}
-		return GenerateResult{text, "stop"}, nil
+		return GenerateResult{Text: text, FinishReason: "stop"}, nil
 	})
 }
 func (s *Server) Close() {

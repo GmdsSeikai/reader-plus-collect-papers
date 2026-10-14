@@ -15,6 +15,7 @@ export type ChatInput = {
   attachments: ImageAttachment[];
 };
 export type PendingAnswer = {
+  reasoning?: string;
   draft?: string;
   key: string;
   content: string;
@@ -176,6 +177,13 @@ export class ChatSession {
     const emit = (event: ChatStreamEvent) => {
       if (!this.current(serial) || controller.signal.aborted || terminal)
         return;
+      if (event.event === "reasoning") {
+        pending.reasoning = (pending.reasoning || "") + event.data.text;
+        pending.notice = "";
+        pending.activity = undefined;
+        if (!this.frame) this.frame = requestAnimationFrame(this.flush);
+        return;
+      }
       if (event.event === "draft") {
         pending.draft = event.data.reset
           ? ""
@@ -297,6 +305,7 @@ export class ChatSession {
         messageKeys[assistant.id] = pending.key;
         pending.savedId = assistant.id;
         pending.content = assistant.content;
+        pending.reasoning = assistant.reasoning;
         pending.phase = "saved";
         pending.notice = "";
       } else {

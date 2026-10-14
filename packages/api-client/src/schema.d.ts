@@ -3465,6 +3465,8 @@ export interface components {
             /** @enum {unknown} */
             role: "user" | "assistant";
             content: string;
+            /** @description Provider-returned thinking displayed separately from the final answer. */
+            reasoning?: string;
             createdAt: string;
             context?: string;
             /** @description Original reading position at send time, retained independently of current navigation and source citations. */
@@ -3500,6 +3502,12 @@ export interface components {
         };
         /** @description Decoded SSE event union for documentation and generated types only. Wire uses event: NAME and data: JSON lines; no envelope is transmitted. Append delta text verbatim. Only done confirms successful persistence. EOF is not completion. After error/done ignore late data. No automatic POST replay. */
         ChatStreamEvent: {
+            /** @constant */
+            event: "reasoning";
+            data: {
+                text: string;
+            };
+        } | {
             /** @constant */
             event: "draft";
             data: {

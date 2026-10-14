@@ -39,7 +39,7 @@ func (s *chatStreamWriter) send(event string, value any) error {
 		s.terminal = true
 		s.cancel()
 	}
-	if err == nil && (event == "delta" || event == "draft") && s.firstFlush.IsZero() {
+	if err == nil && (event == "delta" || event == "draft" || event == "reasoning") && s.firstFlush.IsZero() {
 		s.firstFlush = time.Now()
 	}
 	return err
@@ -138,6 +138,9 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	}
 	service.usageSink = s.processingUsageSink(documentID, "chat", requestID)
 	result, err := service.Generate(ctx, in, true, func(e ProviderEvent) error {
+		if e.Reasoning != "" {
+			return out.send("reasoning", map[string]string{"text": e.Reasoning})
+		}
 		if e.Draft != "" || e.ResetDraft {
 			if firstText.IsZero() && e.Draft != "" {
 				firstText = time.Now()
@@ -159,8 +162,8 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		if _, err = s.Store.Document(documentID); err != nil {
 			err = generationError(ErrorCanceled, "文档已不可用")
 		} else if in.Chat != nil && in.Chat.Agent != nil {
-			err = s.saveDocumentAgentAnswer(ctx, in.Chat.Agent, result.Text, result.Provider)
-		} else if err = s.Store.saveMessage(Message{DocumentID: documentID, Role: "assistant", Content: result.Text}); err != nil {
+			err = s.saveDocumentAgentAnswer(ctx, in.Chat.Agent, result.Text, result.Provider, result.Reasoning)
+		} else if err = s.Store.saveMessage(Message{DocumentID: documentID, Role: "assistant", Content: result.Text, Reasoning: result.Reasoning}); err != nil {
 			err = generationError(ErrorSave, "回答已收到，但无法保存到本地数据库")
 		}
 	}

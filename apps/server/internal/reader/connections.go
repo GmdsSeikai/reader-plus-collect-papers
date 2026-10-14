@@ -86,9 +86,10 @@ func (in AIInput) images() [][]byte {
 }
 
 type AIResult struct {
-	Text     string
-	Provider string
-	Fallback bool
+	Reasoning string
+	Text      string
+	Provider  string
+	Fallback  bool
 }
 
 func validAgent(p string) bool { return p == "codex" || p == "claude" || p == "kimi" || p == "api" }

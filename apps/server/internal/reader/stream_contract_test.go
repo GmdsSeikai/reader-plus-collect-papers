@@ -48,6 +48,10 @@ func TestFrozenStreamFixtures(t *testing.T) {
 					t.Fatal("unexpected fields")
 				}
 				switch event {
+				case "reasoning":
+					if _, ok := value["text"].(string); !ok {
+						t.Fatal(value)
+					}
 				case "draft":
 					if len(value) != 2 {
 						t.Fatal(value)

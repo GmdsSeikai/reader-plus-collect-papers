@@ -461,6 +461,8 @@ export interface ImageAttachment {
   caption?: string;
 }
 export interface Message {
+  /** Provider-returned thinking, displayed separately and never added to answer context. */
+  reasoning?: string;
   /** Navigation snapshot at send time; not an original-text citation. */
   readingLocation?: DocumentLocation;
   attachments?: ImageAttachment[];

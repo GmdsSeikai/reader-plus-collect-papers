@@ -84,8 +84,8 @@ func TestAPIConversationPersistsCompactsAndRestarts(t *testing.T) {
 		if strings.Count(out.Body.String(), "event: done") != 1 {
 			t.Fatalf("turn %d: %s", i, out.Body.String())
 		}
-		if strings.Contains(out.Body.String(), "private-continuation") {
-			t.Fatal("private continuation leaked to UI")
+		if !strings.Contains(out.Body.String(), "event: reasoning") {
+			t.Fatal("provider thinking missing from its separate UI channel")
 		}
 		if i == 10 {
 			s.Close()

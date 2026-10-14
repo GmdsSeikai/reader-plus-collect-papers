@@ -10,6 +10,7 @@ export type ChatStreamEvent =
     }
   | { event: "status"; data: { status: "reading" | "reading-image" } }
   | { event: "delta"; data: { text: string } }
+  | { event: "reasoning"; data: { text: string } }
   | { event: "draft"; data: { text: string; reset: boolean } }
   | { event: "fallback"; data: { message: string } }
   | { event: "error"; data: { error: string } }
@@ -26,6 +27,7 @@ const known = new Set([
   "status",
   "activity",
   "delta",
+  "reasoning",
   "draft",
   "fallback",
   "error",
@@ -58,7 +60,7 @@ export function decodeFrame(frame: string): ChatStreamEvent | undefined {
         (parsed.tool === undefined || typeof parsed.tool === "string")
       : event === "draft"
         ? typeof parsed.text === "string" && typeof parsed.reset === "boolean"
-        : event === "delta"
+        : event === "delta" || event === "reasoning"
           ? typeof parsed.text === "string"
           : event === "fallback"
             ? typeof parsed.message === "string"
@@ -84,6 +86,7 @@ export async function consumeChatStream(
     cr = false,
     terminal = false,
     textBytes = 0,
+    reasoningBytes = 0,
     draftBytes = 0;
   const abort = () => {
     void reader.cancel().catch(() => {});
@@ -98,6 +101,11 @@ export async function consumeChatStream(
     const event = decodeFrame(frame);
     frame = "";
     if (!event) return;
+    if (event.event === "reasoning") {
+      reasoningBytes += new TextEncoder().encode(event.data.text).length;
+      if (reasoningBytes > 1024 * 1024)
+        throw new ChatStreamError("AI 思考内容超出大小限制", "protocol");
+    }
     if (event.event === "draft") {
       draftBytes = event.data.reset
         ? 0

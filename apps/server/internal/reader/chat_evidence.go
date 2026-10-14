@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, text, provider string) error {
+func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, text, provider string, reasoning ...string) error {
 	if e := a.check(ctx); e != nil {
 		return e
 	}
@@ -15,6 +15,9 @@ func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, 
 		return e
 	}
 	message := Message{ID: id(), DocumentID: a.corpus.DocumentID, Role: "assistant", Content: text, References: refs, CreatedAt: now()}
+	if len(reasoning) > 0 {
+		message.Reasoning = reasoning[0]
+	}
 	body, e := json.Marshal(message)
 	if e != nil {
 		return e

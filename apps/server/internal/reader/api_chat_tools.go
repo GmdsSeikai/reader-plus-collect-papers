@@ -49,10 +49,15 @@ func documentAPITools(vision ...bool) []any {
 // Tool arguments are assembled completely before execution. This decoder never
 // commits assistant text before stop: prospective text streams as a draft,
 // discarded when a tool call follows, committed only after the terminal frame.
-func readToolCompletion(ctx context.Context, r io.Reader, drafts ...func(string, bool) error) (toolCompletionResult, error) {
+type toolStreamCallbacks struct {
+	Draft     func(string, bool) error
+	Reasoning func(string) error
+}
+
+func readToolCompletion(ctx context.Context, r io.Reader, callbacks ...toolStreamCallbacks) (toolCompletionResult, error) {
 	draft := func(text string, reset bool) error {
-		if len(drafts) > 0 && drafts[0] != nil {
-			return drafts[0](text, reset)
+		if len(callbacks) > 0 && callbacks[0].Draft != nil {
+			return callbacks[0].Draft(text, reset)
 		}
 		return nil
 	}
@@ -129,6 +134,17 @@ func readToolCompletion(ctx context.Context, r io.Reader, drafts ...func(string,
 			if len(choice.Delta.Legacy) > 0 && string(choice.Delta.Legacy) != "null" {
 				return false, generationError(ErrorCapability, "API 仅支持旧式函数协议")
 			}
+			if choice.Delta.Reasoning != nil {
+				result.Reasoning += *choice.Delta.Reasoning
+				if len(result.Reasoning) > 256<<10 {
+					return false, generationError(ErrorLimit, "API 续接信息超过限制")
+				}
+				if len(callbacks) > 0 && callbacks[0].Reasoning != nil {
+					if err := callbacks[0].Reasoning(*choice.Delta.Reasoning); err != nil {
+						return false, err
+					}
+				}
+			}
 			if choice.Delta.Content != nil {
 				result.Text += *choice.Delta.Content
 				if len(calls) == 0 {
@@ -138,12 +154,6 @@ func readToolCompletion(ctx context.Context, r io.Reader, drafts ...func(string,
 				}
 				if len(result.Text) > 1<<20 {
 					return false, generationError(ErrorLimit, "API 中间说明过长")
-				}
-			}
-			if choice.Delta.Reasoning != nil {
-				result.Reasoning += *choice.Delta.Reasoning
-				if len(result.Reasoning) > 256<<10 {
-					return false, generationError(ErrorLimit, "API 续接信息超过限制")
 				}
 			}
 			if len(choice.Delta.Calls) > 0 && len(calls) == 0 {
@@ -205,7 +215,7 @@ func readToolCompletion(ctx context.Context, r io.Reader, drafts ...func(string,
 	}
 	return result, nil
 }
-func toolCompletion(ctx context.Context, c APIConnection, req completionRequest, messages []toolCompletionMessage, tools []any, drafts ...func(string, bool) error) (toolCompletionResult, error) {
+func toolCompletion(ctx context.Context, c APIConnection, req completionRequest, messages []toolCompletionMessage, tools []any, callbacks ...toolStreamCallbacks) (toolCompletionResult, error) {
 	wire, err := pageImageMessages(req, messages)
 	if err != nil {
 		return toolCompletionResult{}, err
@@ -240,7 +250,7 @@ func toolCompletion(ctx context.Context, c APIConnection, req completionRequest,
 	if media != "text/event-stream" {
 		return toolCompletionResult{}, generationError(ErrorProtocol, "API 未返回工具调用 SSE")
 	}
-	return readToolCompletion(ctx, response.Body, drafts...)
+	return readToolCompletion(ctx, response.Body, callbacks...)
 }
 func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionRequest, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
 	a := in.Chat.Agent
@@ -305,6 +315,7 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 			seen[call.ID] = true
 		}
 	}
+	hasReasoning := false
 	for round := 0; round < documentReadingRounds; round++ {
 		a.readingRounds = round + 1
 		messages, err = compactAPIConversation(ctx, c, req, a, messages)
@@ -319,14 +330,24 @@ func streamAPIDocumentChat(ctx context.Context, c APIConnection, req completionR
 			tools = nil
 		}
 		var response toolCompletionResult
+		roundReasoning := false
 		_, err = trackModelUsage(UsageCall{Provider: provider}, in.UsageSink, nil, func(send func(ProviderEvent) error) (GenerateResult, error) {
 			var e error
-			response, e = toolCompletion(ctx, c, req, messages, tools, func(text string, reset bool) error {
+			response, e = toolCompletion(ctx, c, req, messages, tools, toolStreamCallbacks{Draft: func(text string, reset bool) error {
 				if emit == nil {
 					return nil
 				}
 				return emit(ProviderEvent{Draft: text, ResetDraft: reset})
-			})
+			}, Reasoning: func(text string) error {
+				if emit == nil || text == "" {
+					return nil
+				}
+				if !roundReasoning && hasReasoning {
+					text = "\n\n" + text
+				}
+				roundReasoning, hasReasoning = true, true
+				return emit(ProviderEvent{Reasoning: text})
+			}})
 			if metricErr := send(ProviderEvent{Metrics: []ModelTokens{{Model: response.Model, Tokens: response.Tokens}}}); e == nil {
 				e = metricErr
 			}

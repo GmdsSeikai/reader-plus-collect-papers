@@ -1,12 +1,18 @@
 # Agent 流式输出：前后端对接约定
 
+## API 思考过程 · 2026-10-15
+
+新增 `reasoning {text:string}`，流式转发 API 明确返回的 `delta.reasoning_content`，与答案的 `delta`、候选正文 `draft`、工具状态 `activity` 分开。一次提问中多个工具轮次的思考按顺序追加，轮次之间插入空行。前端提供可展开的思考区域，答案开始或完成后默认折叠；收到思考片段后同样禁止自动备用拼接。取消或断流时只在当前界面保留已收到的片段，不将其保存为成功回答。
+
+成功保存时，提供方返回的思考文本进入助手消息的可选 `reasoning` 字段，刷新后可回看。它不属于 `content`，复制答案及历史问题组装不包含它。API 活动窗口中的原始 `reasoning_content` 仍按协议回传，不受展示格式影响；运行审计不重复保存这份续接字段，诊断日志不记录思考正文。思考展示总量与正文分别限制为 1 MiB。本扩展仅显示 API 返回的字段，Codex 原生 reasoning 事件继续不向正文或此通道转发。
+
 ## 持续文档会话 · 2026-10-15
 
 Codex 文档会话保留持久 thread，并在同一 turn 内读取和回答。API 保存完整有效消息窗口，达到上下文阈值时用检查点压缩旧记录，工具调用与结果保持配对。此节替代下文旧两阶段成文策略和文档聊天的三分钟上限；文档交互上限为十分钟，取消始终有效。
 
 新增 `draft {text:string,reset:boolean}`：API 的 content 在 stop/tool_calls 确认前以增量候选文本显示；reset=true 清除候选文本，不改变已提交的 delta。工具调用出现时丢弃候选文本；成功 stop 后用 delta 提交完整答案并清除候选显示，不再额外调用模型成文。Codex 按 agentMessage.phase 直接流出正式答案，工具与 commentary 不混入正文。缺少阶段的旧协议只能在完整消息/turn 结束后确认候选。draft 一旦可见也禁止自动切换备用，不能在可见部分输出后拼接另一模型答案。
 
-前端显示候选文本以维持增量体验，但只将 delta 累积内容与服务端保存结果核对；错误/断流不会把候选内容保存为成功答案。reasoning_content 不发送到界面：DeepSeek 等提供方要求的续接字段只保存在私有 API 活动窗口中，并在同一模型的后续请求回传，公开聊天/运行记录不包含它。
+前端显示候选文本以维持增量体验，但只将 delta 累积内容与服务端保存结果核对；错误/断流不会把候选内容保存为成功答案。DeepSeek 等提供方要求的续接字段保留在 API 活动窗口，并在同一模型的后续请求回传；可见思考通过上方独立通道展示和保存，不混入答案正文。
 
 ## #41 文档检索扩展 · 2026-10-14
 
@@ -162,12 +168,12 @@ data: {"ok":true}
 
 ## 4. 各 Agent 的后端适配
 
-| Provider | 后端获取的增量事件                                                                                 | 对前端的统一输出 |
-| -------- | -------------------------------------------------------------------------------------------------- | ---------------- |
-| `codex`  | `codex app-server` 的 `item/agentMessage/delta`                                                    | `delta {text}`   |
-| `claude` | Claude Code `stream-json` 的 `content_block_delta / text_delta`，启用 `--include-partial-messages` | `delta {text}`   |
-| `kimi`   | Kimi Code ACP 的 `session/update / agent_message_chunk`                                            | `delta {text}`   |
-| `api`    | OpenAI Chat Completions SSE 中 choice 0 的 `delta.content`；`reasoning_content` 不输出             | `delta {text}`   |
+| Provider | 后端获取的增量事件                                                                                 | 对前端的统一输出                   |
+| -------- | -------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `codex`  | `codex app-server` 的 `item/agentMessage/delta`                                                    | `delta {text}`                     |
+| `claude` | Claude Code `stream-json` 的 `content_block_delta / text_delta`，启用 `--include-partial-messages` | `delta {text}`                     |
+| `kimi`   | Kimi Code ACP 的 `session/update / agent_message_chunk`                                            | `delta {text}`                     |
+| `api`    | Chat Completions SSE 中 choice 0 的 `delta.content`；`reasoning_content` 走独立思考通道            | `delta {text}`、`reasoning {text}` |
 
 前端无需解析上述 CLI 协议，也无需为不同 Agent 编写 SSE 分支。纯文字及带图片请求都使用相同事件结构。Codex 的完整消息事件仅用于补齐未发送后缀与一致性校验，不会重复发送已有内容。
 

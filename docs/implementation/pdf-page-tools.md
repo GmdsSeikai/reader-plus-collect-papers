@@ -16,4 +16,6 @@ API 估算图片上下文时单独预留每页 8192 tokens，这只是保守预�
 
 本次实际验证：Codex 一次工具调用返回两页，正确报告两个红色三角形和三个蓝色圆形，并通过两页引用校验；Reader 重启后继续回答和引用成功。typecheck、全包 Go 测试、前端 612 项测试（4 项跳过）、完整构建及相关 race 检查通过；Electron 内置 Node 下，阻断网络的处理器 smoke 通过，含旧版面解析和新增指定页渲染。尚未重新制作和验收完整安装包。
 
+2026-10-15 后续修复：真实问答记录显示，旧 API 配置没有工具检测结果，导致只走 `retrieval`；自动聊天选择的 `deepseek-v4-pro` 也未通过图片检测。首次文档问答现会补做缺失的工具检测并缓存结果，提示词明确当前真实工具范围。经用户选择切换至 `deepseek-flash`；使用自然问题“第二页的图讲的是什么”，分别在原创图形和 Pictionary 论文副本上验证，模型主动调用 `read_pdf_pages`。论文验证实际读取第 2 页图像，来源 S264，并流式返回思考内容，无需在问题里指定工具名。大图请求另修正为多模态载荷边界，不再套用 4 MiB 纯文本请求上限。
+
 协议参考：[Chat Completions 消息结构](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[图片输入](https://developers.openai.com/api/docs/guides/images-vision)、[Codex App Server](https://learn.chatgpt.com/docs/app-server)。工具图片沿用原生多模态通道，没有将图片编码当成模型可阅读的文字。
