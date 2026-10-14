@@ -15,6 +15,17 @@ export async function exportAnnotatedPDF(doc: Document) {
     (a) => a.kind !== "bookmark" && a.location.type === "pdf",
   );
   if (!marks.length) throw new Error("这份 PDF 还没有可导出的批注");
+  // Marks made on the translation are placed through their source blocks.
+  const blocks = marks.some(
+    (a) => "translation" in a.location && a.location.translation,
+  )
+    ? Object.fromEntries(
+        (await api.blocks(doc.id)).map((b) => [
+          b.id,
+          { page: b.page, bounds: b.bounds },
+        ]),
+      )
+    : {};
   // Loaded on demand so the library does not carry the PDF engine.
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc ||= workerURL;
@@ -28,7 +39,10 @@ export async function exportAnnotatedPDF(doc: Document) {
       wasmUrl: "/pdf-assets/wasm/",
     },
     marks,
-    Object.fromEntries(messages.map((m) => [m.id, m.content])),
+    {
+      answers: Object.fromEntries(messages.map((m) => [m.id, m.content])),
+      blocks,
+    },
   );
   if (!result.exported) throw new Error("批注无法在原文中定位，没有导出");
   downloadBlob(

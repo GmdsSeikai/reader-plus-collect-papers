@@ -4,12 +4,17 @@ import type { Annotation, Document } from "@reader/core";
 const mocks = vi.hoisted(() => ({
   annotations: vi.fn(),
   messages: vi.fn(),
+  blocks: vi.fn(),
   annotatedPDF: vi.fn(),
   downloadBlob: vi.fn(),
   toast: { loading: vi.fn(() => "t"), success: vi.fn(), error: vi.fn() },
 }));
 vi.mock("@reader/api", () => ({
-  api: { annotations: mocks.annotations, messages: mocks.messages },
+  api: {
+    annotations: mocks.annotations,
+    messages: mocks.messages,
+    blocks: mocks.blocks,
+  },
   publicationURL: (id: string, name: string) => `/pub/x/${id}/${name}`,
 }));
 vi.mock("./readers/pdf-export", () => ({ annotatedPDF: mocks.annotatedPDF }));
@@ -57,10 +62,38 @@ it("writes annotations and answers into a downloaded copy", async () => {
     exported: 2,
     skipped: 1,
   });
-  const [, source, marks, answers] = mocks.annotatedPDF.mock.calls[0];
+  const [, source, marks, context] = mocks.annotatedPDF.mock.calls[0];
   expect(source.url).toBe("/pub/x/d1/original.pdf");
   expect(marks.map((a: Annotation) => a.id)).toEqual(["h", "q"]);
-  expect(answers).toEqual({ m1: "回答" });
+  expect(context).toEqual({ answers: { m1: "回答" }, blocks: {} });
+  // Layout blocks are only fetched for marks made on the translation.
+  expect(mocks.blocks).not.toHaveBeenCalled();
+});
+
+it("passes layout blocks for marks made on the translation", async () => {
+  const bounds = { x: 0.1, y: 0.2, width: 0.5, height: 0.1 };
+  mocks.annotations.mockResolvedValue([
+    mark("t", {
+      location: {
+        type: "pdf",
+        page: 1,
+        translation: {
+          blockId: "p1-b1",
+          sourceHash: "h",
+          sentenceIndexes: [],
+          start: 0,
+          end: 0,
+        },
+      },
+    }),
+  ]);
+  mocks.blocks.mockResolvedValue([
+    { id: "p2-b3", page: 2, bounds, label: "text", text: "" },
+  ]);
+  await exportAnnotatedPDF(doc);
+  expect(mocks.annotatedPDF.mock.calls[0][3].blocks).toEqual({
+    "p2-b3": { page: 2, bounds },
+  });
   const [blob, name] = mocks.downloadBlob.mock.calls[0];
   expect(blob.type).toBe("application/pdf");
   expect(name).toBe("A-B- -C--批注.pdf");

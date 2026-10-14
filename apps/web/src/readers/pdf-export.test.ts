@@ -7,6 +7,8 @@ import {
   commentText,
   hexColor,
   lineBoxes,
+  translationTargets,
+  type ExportContext,
 } from "./pdf-export";
 
 const sample = new URL(
@@ -29,14 +31,17 @@ const mark = (value: Partial<Annotation>): Annotation => ({
   ...value,
 });
 
-async function exportAndReopen(annotations: Annotation[], answers = {}) {
+async function exportAndReopen(
+  annotations: Annotation[],
+  context: ExportContext = {},
+) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const original = new Uint8Array(await readFile(sample));
   const result = await annotatedPDF(
     pdfjs.getDocument,
     { data: original.slice(), useSystemFonts: true },
     annotations,
-    answers,
+    context,
   );
   const task = pdfjs.getDocument({ data: result.bytes.slice() });
   const pdf = await task.promise;
@@ -76,7 +81,7 @@ describe("annotated PDF export", () => {
         }),
         mark({ id: "none", location: { type: "pdf", page: 1 } }),
       ],
-      { m1: "因为证据不足。" },
+      { answers: { m1: "因为证据不足。" } },
     );
     expect(result).toMatchObject({ exported: 3, skipped: 2 });
     // Incremental save: the original bytes are an unchanged prefix.
@@ -141,6 +146,86 @@ describe("annotated PDF export", () => {
     expect(y2).toBeGreaterThan(y);
     expect(x1).toBeGreaterThanOrEqual(x - 1);
     expect(x2).toBeLessThanOrEqual(x + line.width + 1);
+  }, 30_000);
+
+  const page = { x: 0, y: 0, width: 1, height: 1 };
+  const spanning = (second: string): Annotation =>
+    mark({
+      id: "span",
+      note: "跨页的一段",
+      location: {
+        type: "pdf",
+        page: 1,
+        rects: [page],
+        quote: "",
+        translation: {
+          blockId: "p1-b8",
+          sourceHash: "h1",
+          sentenceIndexes: [0],
+          start: 0,
+          end: 0,
+          ranges: [
+            {
+              blockId: "p1-b8",
+              sourceHash: "h1",
+              sentenceIndexes: [0],
+              start: 0,
+              end: 0,
+              quote: "",
+            },
+            {
+              blockId: "p2-b3",
+              sourceHash: "h2",
+              sentenceIndexes: [0],
+              start: 0,
+              end: 0,
+              quote: "",
+            },
+          ],
+        },
+        sentenceLink: {
+          origin: "translation",
+          parts: [
+            {
+              blockId: "p1-b8",
+              sourceHash: "h1",
+              sentenceIndex: 0,
+              source: "A claim is not the same as evidence.",
+              target: "",
+            },
+            {
+              blockId: "p2-b3",
+              sourceHash: "h2",
+              sentenceIndex: 0,
+              source: second,
+              target: "",
+            },
+          ],
+        },
+      },
+    });
+  const blocks = { "p2-b3": { page: 2, bounds: page } };
+
+  it("places every block of a selection spanning paragraphs and pages", async () => {
+    const { result, pages } = await exportAndReopen(
+      [spanning("Separate quotations, interpretations, and open questions.")],
+      { blocks },
+    );
+    expect(result).toMatchObject({ exported: 1, skipped: 0 });
+    const [first] = pages[0].filter((a) => a.subtype === "Highlight");
+    const [second] = pages[1].filter((a) => a.subtype === "Highlight");
+    expect(first.contentsObj.str).toBe("跨页的一段");
+    // One comment for the mark, on the first page it touches.
+    expect(second.contentsObj.str).toBe("");
+  }, 30_000);
+
+  it("skips a spanning selection whose second block cannot be placed", async () => {
+    const { result, pages } = await exportAndReopen(
+      [spanning("Not a sentence from this document.")],
+      { blocks },
+    );
+    expect(result).toMatchObject({ exported: 0, skipped: 1 });
+    expect(pages.flat()).toEqual([]);
   }, 30_000);
 
   it("skips translation marks whose sentence is not on the page", async () => {
@@ -227,6 +312,54 @@ describe("export helpers", () => {
     expect(bottomStrip([10, 0, 10, 50, 20, 0, 20, 50])).toEqual([
       18.5, 0, 18.5, 50, 20, 0, 20, 50,
     ]);
+  });
+  it("keeps same-height rects in different columns apart", () => {
+    const left = { x: 0.08, y: 0.4, width: 0.38, height: 0.02 };
+    const right = { x: 0.54, y: 0.401, width: 0.38, height: 0.02 };
+    expect(lineBoxes([left, right])).toEqual([left, right]);
+    // Neighbouring words on one line still join.
+    expect(
+      lineBoxes([left, { ...right, x: left.x + left.width + 0.005 }]),
+    ).toHaveLength(1);
+  });
+  it("needs a sentence link to place a selection spanning blocks", () => {
+    const location = {
+      type: "pdf" as const,
+      page: 1,
+      rects: [{ x: 0, y: 0, width: 1, height: 1 }],
+      translation: {
+        blockId: "a",
+        sourceHash: "h",
+        sentenceIndexes: [0],
+        start: 0,
+        end: 0,
+        ranges: ["a", "b"].map((blockId) => ({
+          blockId,
+          sourceHash: "h",
+          sentenceIndexes: [0],
+          start: 0,
+          end: 0,
+          quote: "",
+        })),
+      },
+    };
+    const blocks = { b: { page: 2, bounds: location.rects[0] } };
+    expect(
+      translationTargets(mark({ quote: "x", location }), blocks),
+    ).toBeNull();
+    // A single block falls back to the stored quote.
+    expect(
+      translationTargets(
+        mark({
+          quote: "x",
+          location: {
+            ...location,
+            translation: { ...location.translation, ranges: undefined },
+          },
+        }),
+        {},
+      ),
+    ).toEqual([{ page: 1, bounds: location.rects[0], sources: ["x"] }]);
   });
   it("writes notes, questions and answers as comments", () => {
     expect(commentText(mark({ note: " 备注 " }))).toBe("备注");

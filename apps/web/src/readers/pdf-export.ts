@@ -37,14 +37,21 @@ export function hexColor(value: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Rects on one text line, as returned by Range.getClientRects(), become one box. */
+/** Horizontal gap, as a fraction of the page width, still joined into one box. */
+const wordGap = 0.01;
+
+/**
+ * Overlapping rects of one text run, as returned by Range.getClientRects(),
+ * become one box. Rects at the same height in different columns stay apart.
+ */
 export function lineBoxes(rects: Rect[]): Rect[] {
   const lines: Rect[] = [];
   for (const r of [...rects].sort((a, b) => a.y - b.y || a.x - b.x)) {
     const line = lines.find((l) => {
       const overlap =
         Math.min(l.y + l.height, r.y + r.height) - Math.max(l.y, r.y);
-      return overlap > Math.min(l.height, r.height) / 2;
+      const gap = Math.max(l.x, r.x) - Math.min(l.x + l.width, r.x + r.width);
+      return overlap > Math.min(l.height, r.height) / 2 && gap <= wordGap;
     });
     if (!line) {
       lines.push({ ...r });
@@ -89,11 +96,12 @@ function displayQuads(page: PDFPageProxy, rects: Rect[]): Quad[] {
 }
 
 // A mark made on the translation stores the whole source block. Find the
-// source sentences inside that block in the page text and cover only them.
+// source sentences inside that block in the page text and cover only them;
+// every sentence must be found, or nothing is placed for the block.
 async function sentenceQuads(
   page: PDFPageProxy,
   block: Rect,
-  quote: string,
+  sources: string[],
 ): Promise<Quad[]> {
   const viewport = page.getViewport({ scale: 1 });
   const content = await page.getTextContent();
@@ -134,24 +142,64 @@ async function sentenceQuads(
     });
     text += value;
   }
-  const needle = compact(quote);
-  const [range] = sentenceTextRanges(text, text, [needle]);
-  if (!range) return [];
+  const needles = sources.map(compact).filter(Boolean);
+  const ranges = sentenceTextRanges(text, text, needles);
+  if (!needles.length || ranges.length < needles.length) return [];
   const quads: Quad[] = [];
-  for (const item of items) {
-    const from = Math.max(range.start, item.start) - item.start;
-    const to = Math.min(range.end, item.start + item.text.length) - item.start;
-    if (to <= from) continue;
-    const [, , , d, e, f] = item.transform;
-    const per = item.width / item.text.length;
-    const left = e + from * per,
-      right = e + to * per;
-    const height = item.height || Math.abs(d);
-    const bottom = f - height * 0.2,
-      top = f + height * 0.85;
-    quads.push([left, top, right, top, left, bottom, right, bottom]);
-  }
+  for (const range of ranges)
+    for (const item of items) {
+      const from = Math.max(range.start, item.start) - item.start;
+      const to =
+        Math.min(range.end, item.start + item.text.length) - item.start;
+      if (to <= from) continue;
+      const [, , , d, e, f] = item.transform;
+      const per = item.width / item.text.length;
+      const left = e + from * per,
+        right = e + to * per;
+      const height = item.height || Math.abs(d);
+      const bottom = f - height * 0.2,
+        top = f + height * 0.85;
+      quads.push([left, top, right, top, left, bottom, right, bottom]);
+    }
   return quads;
+}
+
+export type BlockPlaces = Record<string, { page: number; bounds: Rect }>;
+
+/**
+ * The source passages of a translation mark, one per block it spans. A
+ * selection across paragraphs or pages keeps every block in
+ * `translation.ranges`; the sentence link carries each block's sentences.
+ */
+export function translationTargets(
+  annotation: Annotation,
+  blocks: BlockPlaces,
+): { page: number; bounds: Rect; sources: string[] }[] | null {
+  const location = annotation.location as PDFLocation;
+  const mark = location.translation!;
+  const ids = [
+    ...new Set(mark.ranges?.map((r) => r.blockId) ?? [mark.blockId]),
+  ];
+  const parts = location.sentenceLink?.parts ?? [];
+  const targets = [];
+  for (const id of ids) {
+    // The first block is also stored on the mark itself.
+    const block =
+      blocks[id] ??
+      (id === mark.blockId && location.rects?.[0]
+        ? { page: location.page, bounds: location.rects[0] }
+        : undefined);
+    const linked = parts.filter((p) => p.blockId === id).map((p) => p.source);
+    // Without a sentence link only a single-block quote can be placed.
+    const sources = linked.length
+      ? linked
+      : ids.length === 1
+        ? [location.quote ?? annotation.quote]
+        : [];
+    if (!block || !sources.some((s) => s.trim())) return null;
+    targets.push({ page: block.page, bounds: block.bounds, sources });
+  }
+  return targets;
 }
 
 function bounds(quads: Quad[]) {
@@ -221,47 +269,64 @@ function editorValue(
   };
 }
 
+export interface ExportContext {
+  /** Chat message text by ID, for answered questions. */
+  answers?: Record<string, string>;
+  /** Layout blocks by ID, for marks made on the translation. */
+  blocks?: BlockPlaces;
+}
+
 export async function annotatedPDF(
   getDocument: (params: DocumentInitParameters) => PDFDocumentLoadingTask,
   source: DocumentInitParameters,
   annotations: Annotation[],
-  answers: Record<string, string> = {},
+  { answers = {}, blocks = {} }: ExportContext = {},
 ): Promise<AnnotatedPDF> {
   const task = getDocument(source);
   try {
     const pdf = await task.promise;
+    const inRange = (page: number) => page >= 1 && page <= pdf.numPages;
     let exported = 0,
       skipped = 0;
     for (const annotation of annotations) {
       if (annotation.kind === "bookmark" || annotation.location.type !== "pdf")
         continue;
       const location = annotation.location as PDFLocation;
-      const rects = location.rects ?? [];
-      if (location.page < 1 || location.page > pdf.numPages || !rects.length) {
+      // Quads per page. A mark is written whole or not at all, so a partly
+      // placed selection is never exported silently.
+      const pages = new Map<number, Quad[]>();
+      if (location.translation) {
+        for (const target of translationTargets(annotation, blocks) ?? []) {
+          const quads = inRange(target.page)
+            ? await sentenceQuads(
+                await pdf.getPage(target.page),
+                target.bounds,
+                target.sources,
+              )
+            : [];
+          if (!quads.length) {
+            pages.clear();
+            break;
+          }
+          pages.set(target.page, [...(pages.get(target.page) ?? []), ...quads]);
+        }
+      } else if (inRange(location.page) && location.rects?.length) {
+        const page = await pdf.getPage(location.page);
+        pages.set(location.page, displayQuads(page, location.rects));
+      }
+      if (!pages.size) {
         skipped++;
         continue;
       }
-      const page = await pdf.getPage(location.page);
-      const quads = location.translation
-        ? await sentenceQuads(
-            page,
-            rects[0],
-            location.quote ?? annotation.quote,
-          )
-        : displayQuads(page, rects);
-      if (!quads.length) {
-        skipped++;
-        continue;
+      // The comment goes on the first page the mark touches.
+      let comment = commentText(annotation, answers[annotation.answerId ?? ""]);
+      for (const [page, quads] of [...pages].sort((a, b) => a[0] - b[0])) {
+        pdf.annotationStorage.setValue(
+          `${editorPrefix}${annotation.id}-${page}`,
+          editorValue(annotation, page - 1, quads, comment),
+        );
+        comment = "";
       }
-      pdf.annotationStorage.setValue(
-        `${editorPrefix}${annotation.id}`,
-        editorValue(
-          annotation,
-          location.page - 1,
-          quads,
-          commentText(annotation, answers[annotation.answerId ?? ""]),
-        ),
-      );
       exported++;
     }
     const bytes = exported ? await pdf.saveDocument() : await pdf.getData();
