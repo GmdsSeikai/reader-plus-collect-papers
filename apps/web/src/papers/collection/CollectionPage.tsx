@@ -214,10 +214,48 @@ export function CollectionPage({
     confirmPages?: number;
     downloadVersion?: number;
     documentState?: string;
+    // Local write generation: which fetch or command produced this entry.
+    seq: number;
   };
   const [imports, setImports] = useState<Record<string, ImportState>>({});
   const requestSeq = useRef(0);
   const detailSeq = useRef(0);
+  const importSeq = useRef(0);
+  // Synchronous ownership mirror of the imports map: slot -> owning request
+  // and the generation of the last accepted write. Refs are updated outside
+  // React state so async continuations can gate on fresh values.
+  const importOwner = useRef<
+    Record<string, { requestId: string; seq: number }>
+  >({});
+
+  // Ownership rule: an entry is owned by its requestId. Restores (mount
+  // snapshot, detail latestImport, polls) may only fill an empty slot or
+  // refresh their own request, and only when their fetch generation is at
+  // least as new as the last accepted write. A late response never rolls the
+  // slot back to another request or an older status. User commands claim the
+  // slot with a fresh generation and always win.
+  const writeImport = (
+    arxivId: string,
+    next: Omit<ImportState, "seq">,
+    issued: number,
+  ) => {
+    const owner = importOwner.current[arxivId];
+    if (owner) {
+      if (owner.requestId !== next.requestId) return;
+      if (issued < owner.seq) return;
+    }
+    importOwner.current[arxivId] = { requestId: next.requestId, seq: issued };
+    setImports((s) => ({ ...s, [arxivId]: { ...next, seq: issued } }));
+  };
+  const claimImport = (
+    arxivId: string,
+    next: Omit<ImportState, "seq">,
+  ): number => {
+    const issued = ++importSeq.current;
+    importOwner.current[arxivId] = { requestId: next.requestId, seq: issued };
+    setImports((s) => ({ ...s, [arxivId]: { ...next, seq: issued } }));
+    return issued;
+  };
 
   const loadTasks = useCallback(() => {
     collectionApi
@@ -343,19 +381,15 @@ export function CollectionPage({
     collectionApi
       .importItems(items)
       .then((res) => {
-        const next = { ...imports };
         for (const item of res.items) {
           if (item.error) {
             toast.error(`${item.arxivId}: ${item.error}`);
             continue;
           }
-          next[item.arxivId] = {
-            requestId: item.requestId,
-            status: "queued",
-          };
+          // User command: the server-issued request owns the slot.
+          claimImport(item.arxivId, { requestId: item.requestId, status: "queued" });
           void pollImport(item.arxivId, item.requestId);
         }
-        setImports(next);
       })
       .catch((e) => toast.error((e as Error).message))
       .finally(() => setBusy(false));
@@ -370,17 +404,25 @@ export function CollectionPage({
       .activeImports()
       .then((reqs) => {
         if (!aliveRef.current) return;
-        const next: Record<string, ImportState> = {};
+        // Snapshot restore fills empty slots or refreshes its own request;
+        // it never replaces the map or rolls back a newer command. The
+        // generation is fixed at fetch start so a slow snapshot cannot
+        // outrank writes that happened while it was in flight.
+        const issued = ++importSeq.current;
         for (const req of reqs) {
-          next[req.arxivId] = {
-            requestId: req.requestId,
-            status: req.status,
-            error: req.error,
-            documentId: req.documentId,
-            condition: req.condition,
-            confirmPages: req.confirmPages,
-            downloadVersion: req.downloadVersion,
-          };
+          writeImport(
+            req.arxivId,
+            {
+              requestId: req.requestId,
+              status: req.status,
+              error: req.error,
+              documentId: req.documentId,
+              condition: req.condition,
+              confirmPages: req.confirmPages,
+              downloadVersion: req.downloadVersion,
+            },
+            issued,
+          );
           if (
             req.status === "queued" ||
             req.status === "downloading" ||
@@ -389,7 +431,6 @@ export function CollectionPage({
             void pollImport(req.arxivId, req.requestId);
           }
         }
-        setImports(next);
       })
       .catch(() => {});
     return () => {
@@ -404,12 +445,15 @@ export function CollectionPage({
     for (let i = 0; i < 600; i++) {
       await new Promise((r) => setTimeout(r, 500));
       if (!aliveRef.current) return;
+      // A superseded request is no longer this page's concern.
+      if (importOwner.current[arxivId]?.requestId !== requestId) return;
+      const issued = ++importSeq.current;
       try {
         const req = await collectionApi.importRequest(requestId);
         if (!aliveRef.current) return;
-        setImports((s) => ({
-          ...s,
-          [arxivId]: {
+        writeImport(
+          arxivId,
+          {
             requestId,
             status: req.status,
             error: req.error,
@@ -419,7 +463,8 @@ export function CollectionPage({
             downloadVersion: req.downloadVersion,
             documentState: req.documentState,
           },
-        }));
+          issued,
+        );
         // Long papers wait for the user's explicit confirmation; polling
         // never confirms on its own.
         if (
@@ -440,13 +485,11 @@ export function CollectionPage({
   const confirmImport = (arxivId: string) => {
     const state = imports[arxivId];
     if (!state) return;
+    const issued = ++importSeq.current;
     collectionApi
       .confirmImport(state.requestId)
       .then(() => {
-        setImports((s) => ({
-          ...s,
-          [arxivId]: { ...state, status: "importing" },
-        }));
+        writeImport(arxivId, { ...state, status: "importing" }, issued);
         void pollImport(arxivId, state.requestId);
       })
       .catch((e) => toast.error((e as Error).message));
@@ -457,13 +500,11 @@ export function CollectionPage({
   const cancelImport = (arxivId: string) => {
     const state = imports[arxivId];
     if (!state) return;
+    const issued = ++importSeq.current;
     collectionApi
       .cancelImport(state.requestId)
       .then((res) => {
-        setImports((s) => ({
-          ...s,
-          [arxivId]: { ...state, status: res.status },
-        }));
+        writeImport(arxivId, { ...state, status: res.status }, issued);
         if (res.status !== "cancelled") {
           toast.info(`请求仍在${statusLabel[res.status] || res.status}，未取消`);
           void pollImport(arxivId, state.requestId);
@@ -493,10 +534,8 @@ export function CollectionPage({
           toast.error(item?.error || "重试失败");
           return;
         }
-        setImports((s) => ({
-          ...s,
-          [arxivId]: { requestId: item.requestId, status: "queued" },
-        }));
+        // User command: the new request claims the slot from the failed one.
+        claimImport(arxivId, { requestId: item.requestId, status: "queued" });
         void pollImport(arxivId, item.requestId);
       })
       .catch((e) => toast.error((e as Error).message))
@@ -505,6 +544,7 @@ export function CollectionPage({
 
   const openDetail = (row: CandidateRow) => {
     const seq = ++detailSeq.current;
+    const issued = ++importSeq.current;
     collectionApi
       .candidate(row.candidate.arxivId)
       .then((res) => {
@@ -518,9 +558,11 @@ export function CollectionPage({
         });
         if (res.latestImport) {
           const req = res.latestImport;
-          setImports((s) => ({
-            ...s,
-            [req.arxivId]: {
+          // The restore generation was fixed when this fetch started: a
+          // retry or new import claimed after that keeps the slot.
+          writeImport(
+            req.arxivId,
+            {
               requestId: req.requestId,
               status: req.status,
               error: req.error,
@@ -530,7 +572,8 @@ export function CollectionPage({
               downloadVersion: req.downloadVersion,
               documentState: req.documentState,
             },
-          }));
+            issued,
+          );
         }
       })
       .catch((e) => toast.error((e as Error).message));

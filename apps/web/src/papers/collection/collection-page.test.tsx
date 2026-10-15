@@ -10,10 +10,25 @@ const { candidates, tasks, activeImports, createTask, api } = vi.hoisted(() => {
   const api = {
     run: vi.fn(async () => ({ id: "r1", taskId: "t1", status: "running" })),
     cancelRun: vi.fn(async () => ({ status: "cancelled" })),
-    candidate: vi.fn(async () => ({ candidate: {}, citation: {} })),
+    candidate: vi.fn(
+      async (
+        _id: string,
+      ): Promise<Record<string, unknown>> => ({
+        candidate: {},
+        citation: {},
+      }),
+    ),
     setIgnored: vi.fn(async () => ({ candidate: {}, citation: {} })),
-    importItems: vi.fn(async () => ({ items: [] })),
-    importRequest: vi.fn(async () => ({ status: "queued" })),
+    importItems: vi.fn(
+      async (): Promise<{
+        items: { requestId: string; arxivId: string; error?: string }[];
+      }> => ({ items: [] }),
+    ),
+    importRequest: vi.fn(
+      async (_id: string): Promise<Record<string, unknown>> => ({
+        status: "queued",
+      }),
+    ),
     confirmImport: vi.fn(async () => ({})),
     cancelImport: vi.fn(async () => ({ status: "cancelled" })),
     settings: vi.fn(async () => ({})),
@@ -58,7 +73,36 @@ let root: Root, host: HTMLDivElement;
 
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  // Base UI checkbox clicks construct a PointerEvent; jsdom has none.
+  if (typeof globalThis.PointerEvent === "undefined") {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+  }
   vi.clearAllMocks();
+  // clearAllMocks keeps mockImplementation; restore defaults so one test's
+  // fixtures cannot occupy another test's import slot.
+  candidates.mockImplementation(async () => ({ items: [], nextCursor: "" }));
+  tasks.mockImplementation(async () => []);
+  activeImports.mockImplementation(async () => []);
+  api.candidate.mockImplementation(async () => ({ candidate: {}, citation: {} }));
+  api.importItems.mockImplementation(async () => ({ items: [] }));
+  api.importRequest.mockImplementation(async () => ({ status: "queued" }));
+  api.confirmImport.mockImplementation(async () => ({}));
+  api.cancelImport.mockImplementation(async () => ({ status: "cancelled" }));
+  api.run.mockImplementation(async () => ({
+    id: "r1",
+    taskId: "t1",
+    status: "running",
+  }));
+  api.cancelRun.mockImplementation(async () => ({ status: "cancelled" }));
+  api.runTask.mockImplementation(async () => ({
+    id: "r1",
+    taskId: "t1",
+    status: "running",
+  }));
+  api.setIgnored.mockImplementation(async () => ({
+    candidate: {},
+    citation: {},
+  }));
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -98,7 +142,13 @@ it("switches the requested channel when the tab changes", async () => {
 
 it("restores open runs and import state after switching pages", async () => {
   tasks.mockImplementation(async () => [
-    { id: "t1", name: "视觉", enabled: true, config: {}, activeRun: { id: "r9", taskId: "t1", status: "running" } },
+    {
+      id: "t1",
+      name: "视觉",
+      enabled: true,
+      config: {},
+      activeRun: { id: "r9", taskId: "t1", status: "running" },
+    },
   ]);
   activeImports.mockImplementation(async () => [
     {
@@ -189,8 +239,8 @@ it("does not report a committing import as cancelled", async () => {
       <CollectionPage navOpen onToggleNav={() => {}} onOpenDocument={() => {}} />,
     );
   });
-  const cancel = Array.from(host.querySelectorAll("button")).find((b) =>
-    b.textContent === "取消",
+  const cancel = Array.from(host.querySelectorAll("button")).find(
+    (b) => b.textContent === "取消",
   ) as HTMLElement;
   await act(async () => {
     cancel.click();
@@ -200,42 +250,82 @@ it("does not report a committing import as cancelled", async () => {
   expect(host.textContent).not.toContain("已取消");
 });
 
+// terminalRows renders two candidate rows. Terminal import states are restored
+// through the detail contract: activeImports only carries non-terminal
+// requests and must not be faked with failed/imported returns.
+const terminalRows = {
+  items: [
+    {
+      candidate: {
+        arxivId: "2301.12345",
+        title: "论文甲",
+        abstract: "摘要",
+        authors: [],
+        categories: [],
+        publishedAt: "2023-01-02T00:00:00Z",
+        latestVersion: 2,
+        contentHash: "h1",
+      },
+      score: 10,
+    },
+    {
+      candidate: {
+        arxivId: "2301.00002",
+        title: "论文乙",
+        abstract: "摘要",
+        authors: [],
+        categories: [],
+        publishedAt: "2023-01-03T00:00:00Z",
+        latestVersion: 1,
+        contentHash: "h2",
+      },
+      score: 8,
+    },
+  ],
+  nextCursor: "",
+};
+
 it("offers retry for failed imports and blocks opening a trashed document", async () => {
-  activeImports.mockImplementation(async () => [
-    { requestId: "req-3", arxivId: "2301.12345", status: "failed", error: "下载失败", downloadVersion: 2 },
-    { requestId: "req-4", arxivId: "2301.00002", status: "imported", documentId: "d1" },
-  ]);
-  candidates.mockImplementation(async () => ({
-    items: [
-      {
-        candidate: {
-          arxivId: "2301.12345",
-          title: "论文甲",
-          abstract: "摘要",
-          authors: [],
-          categories: [],
-          publishedAt: "2023-01-02T00:00:00Z",
-          latestVersion: 2,
-          contentHash: "h1",
+  candidates.mockImplementation(async () => terminalRows);
+  api.candidate.mockImplementation(async (id: string) =>
+    id === "2301.12345"
+      ? {
+          candidate: {
+            arxivId: id,
+            title: "论文甲",
+            authors: [],
+            categories: [],
+          },
+          citation: {},
+          analyses: [],
+          analysisJob: null,
+          latestImport: {
+            requestId: "req-3",
+            arxivId: id,
+            status: "failed",
+            error: "下载失败",
+            downloadVersion: 2,
+          },
+        }
+      : {
+          candidate: {
+            arxivId: id,
+            title: "论文乙",
+            authors: [],
+            categories: [],
+          },
+          citation: {},
+          analyses: [],
+          analysisJob: null,
+          latestImport: {
+            requestId: "req-4",
+            arxivId: id,
+            status: "imported",
+            documentId: "d1",
+            documentState: "trash",
+          },
         },
-        score: 10,
-      },
-      {
-        candidate: {
-          arxivId: "2301.00002",
-          title: "论文乙",
-          abstract: "摘要",
-          authors: [],
-          categories: [],
-          publishedAt: "2023-01-03T00:00:00Z",
-          latestVersion: 1,
-          contentHash: "h2",
-        },
-        score: 8,
-      },
-    ],
-    nextCursor: "",
-  }));
+  );
   await act(async () => {
     root.unmount();
   });
@@ -248,28 +338,217 @@ it("offers retry for failed imports and blocks opening a trashed document", asyn
       <CollectionPage navOpen onToggleNav={() => {}} onOpenDocument={() => {}} />,
     );
   });
-  const buttons = Array.from(host.querySelectorAll("button")).map((b) => b.textContent);
-  expect(buttons).toContain("重试");
-  // imported without a live document state still offers open here (state
-  // unknown); once the detail reports trash, the open button disappears.
-  api.candidate.mockImplementation(async () => ({
-    candidate: { arxivId: "2301.00002", title: "论文乙", authors: [], categories: [] },
-    citation: {},
-    analyses: [],
-    analysisJob: null,
-    latestImport: {
-      requestId: "req-4",
-      arxivId: "2301.00002",
-      status: "imported",
-      documentId: "d1",
-      documentState: "trash",
-    },
-  }));
+  const rows = Array.from(host.querySelectorAll("button.min-w-0"));
+  await act(async () => {
+    (rows[0] as HTMLElement).click();
+  });
+  expect(
+    Array.from(host.querySelectorAll("button")).some(
+      (b) => b.textContent === "重试",
+    ),
+  ).toBe(true);
   await act(async () => {
     (Array.from(host.querySelectorAll("button.min-w-0"))[1] as HTMLElement).click();
   });
   expect(host.textContent).toContain("文档在回收站");
   expect(
-    Array.from(host.querySelectorAll("button")).some((b) => b.textContent?.includes("打开")),
+    Array.from(host.querySelectorAll("button")).some((b) =>
+      b.textContent?.includes("打开"),
+    ),
   ).toBe(false);
+});
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+async function remount() {
+  await act(async () => {
+    root.unmount();
+  });
+  host.remove();
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => {
+    root.render(
+      <CollectionPage navOpen onToggleNav={() => {}} onOpenDocument={() => {}} />,
+    );
+  });
+}
+
+it("keeps a retry claimed after a detail fetch when the old detail lands late", async () => {
+  candidates.mockImplementation(async () => terminalRows);
+  const slow = deferred<Record<string, unknown>>();
+  let calls = 0;
+  api.candidate.mockImplementation(async (id: string) => {
+    calls++;
+    if (calls === 1) {
+      return {
+        candidate: {
+          arxivId: id,
+          title: "论文甲",
+          authors: [],
+          categories: [],
+        },
+        citation: {},
+        analyses: [],
+        analysisJob: null,
+        latestImport: {
+          requestId: "req-old",
+          arxivId: id,
+          status: "failed",
+          error: "下载失败",
+          downloadVersion: 2,
+        },
+      };
+    }
+    return slow.promise;
+  });
+  api.importItems.mockImplementation(async () => ({
+    items: [{ requestId: "req-new", arxivId: "2301.12345" }],
+  }));
+  await remount();
+  const rows = Array.from(host.querySelectorAll("button.min-w-0"));
+  // First detail restores the old failed request.
+  await act(async () => {
+    (rows[0] as HTMLElement).click();
+  });
+  expect(host.textContent).toContain("下载失败");
+  // A second detail query is delayed; then the user retries and the new
+  // request claims the slot.
+  await act(async () => {
+    (rows[0] as HTMLElement).click();
+  });
+  const retry = Array.from(host.querySelectorAll("button")).find(
+    (b) => b.textContent === "重试",
+  ) as HTMLElement;
+  await act(async () => {
+    retry.click();
+  });
+  expect(host.textContent).toContain("排队");
+  // The old detail response must not roll the slot back to failed.
+  slow.resolve({
+    candidate: {
+      arxivId: "2301.12345",
+      title: "论文甲",
+      authors: [],
+      categories: [],
+    },
+    citation: {},
+    analyses: [],
+    analysisJob: null,
+    latestImport: {
+      requestId: "req-old",
+      arxivId: "2301.12345",
+      status: "failed",
+      error: "下载失败",
+      downloadVersion: 2,
+    },
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(host.textContent).toContain("排队");
+  expect(host.textContent).not.toContain("下载失败");
+});
+
+it("keeps a detail-restored import when the mount snapshot lands late and empty", async () => {
+  const snapshot = deferred<Record<string, unknown>[]>();
+  activeImports.mockImplementation(() => snapshot.promise);
+  candidates.mockImplementation(async () => terminalRows);
+  api.candidate.mockImplementation(async (id: string) => ({
+    candidate: {
+      arxivId: id,
+      title: "论文乙",
+      authors: [],
+      categories: [],
+    },
+    citation: {},
+    analyses: [],
+    analysisJob: null,
+    latestImport: {
+      requestId: "req-4",
+      arxivId: id,
+      status: "imported",
+      documentId: "d1",
+      documentState: "active",
+    },
+  }));
+  await remount();
+  const rows = Array.from(host.querySelectorAll("button.min-w-0"));
+  await act(async () => {
+    (rows[1] as HTMLElement).click();
+  });
+  expect(
+    Array.from(host.querySelectorAll("button")).some((b) =>
+      b.textContent?.includes("打开"),
+    ),
+  ).toBe(true);
+  // Terminal imports are absent from activeImports; the late empty snapshot
+  // must not erase the restored state.
+  snapshot.resolve([]);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(
+    Array.from(host.querySelectorAll("button")).some((b) =>
+      b.textContent?.includes("打开"),
+    ),
+  ).toBe(true);
+});
+
+it("ignores a stale poll response after a new import claims the slot", async () => {
+  activeImports.mockImplementation(async () => [
+    {
+      requestId: "req-old",
+      arxivId: "2301.12345",
+      status: "downloading",
+      downloadVersion: 2,
+    },
+  ]);
+  candidates.mockImplementation(async () => terminalRows);
+  // Only the superseded request answers with the stale failure; the new
+  // request stays queued, mirroring the real per-request endpoint.
+  api.importRequest.mockImplementation((id: string) =>
+    Promise.resolve(
+      id === "req-old"
+        ? {
+            requestId: id,
+            arxivId: "2301.12345",
+            status: "failed",
+            error: "旧响应",
+            downloadVersion: 2,
+          }
+        : { requestId: id, arxivId: "2301.12345", status: "queued" },
+    ),
+  );
+  api.importItems.mockImplementation(async () => ({
+    items: [{ requestId: "req-new", arxivId: "2301.12345" }],
+  }));
+  await remount();
+  const select = host.querySelector('[role="checkbox"]') as HTMLElement | null;
+  if (select) {
+    await act(async () => {
+      select.click();
+    });
+  }
+  const download = Array.from(host.querySelectorAll("button")).find((b) =>
+    b.textContent?.includes("下载并入库"),
+  ) as HTMLElement;
+  await act(async () => {
+    download.click();
+  });
+  expect(host.textContent).toContain("排队");
+  // Let the poll loop for the superseded request deliver its stale failure;
+  // ownership keeps it out of the slot.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 700));
+  });
+  expect(host.textContent).toContain("排队");
+  expect(host.textContent).not.toContain("旧响应");
 });
