@@ -22,18 +22,22 @@ import (
 )
 
 type APIConnection struct {
-	URL    string `json:"url"`
-	Model  string `json:"model"`
-	Key    string `json:"key,omitempty"`
-	HasKey bool   `json:"hasKey"`
+	Protocol string `json:"protocol,omitempty"`
+	URL      string `json:"url"`
+	Model    string `json:"model"`
+	Key      string `json:"key,omitempty"`
+	HasKey   bool   `json:"hasKey"`
 }
 type Capability struct {
-	PendingVision bool   `json:"pendingVision,omitempty"`
-	Text          bool   `json:"text"`
-	Vision        bool   `json:"vision"`
-	CheckedAt     string `json:"checkedAt"`
-	Error         string `json:"error,omitempty"`
-	Fingerprint   string `json:"-"`
+	Tools             string `json:"tools,omitempty"`
+	ToolSchemaVersion string `json:"toolSchemaVersion,omitempty"`
+	ToolError         string `json:"toolError,omitempty"`
+	PendingVision     bool   `json:"pendingVision,omitempty"`
+	Text              bool   `json:"text"`
+	Vision            bool   `json:"vision"`
+	CheckedAt         string `json:"checkedAt"`
+	Error             string `json:"error,omitempty"`
+	Fingerprint       string `json:"-"`
 }
 type AIConfig struct {
 	Primary string                       `json:"primary"`
@@ -63,14 +67,18 @@ type savedConfig struct {
 	Fingerprints map[string]string `json:"fingerprints"`
 }
 type AIInput struct {
-	Chat     *chatInput
-	System   string              `json:"-"`
-	Dispatch *generationDispatch `json:"-"`
-	NoRetry  bool                `json:"-"`
-	Effort   string
-	Prompt   string
-	Image    []byte
-	Images   [][]byte
+	SourceOnly    bool
+	ContextInfo   func(window, used int)
+	UsageSink     func(UsageCall) error
+	UsageProvider string
+	Chat          *chatInput
+	Effort        string
+	Prompt        string
+	Image         []byte
+	Images        [][]byte
+	System        string              `json:"-"`
+	Dispatch      *generationDispatch `json:"-"`
+	NoRetry       bool                `json:"-"`
 }
 
 func (in AIInput) systemPrompt() string {
@@ -91,9 +99,10 @@ func (in AIInput) images() [][]byte {
 }
 
 type AIResult struct {
-	Text     string
-	Provider string
-	Fallback bool
+	Reasoning string
+	Text      string
+	Provider  string
+	Fallback  bool
 }
 
 func validAgent(p string) bool { return p == "codex" || p == "claude" || p == "kimi" || p == "api" }
@@ -124,6 +133,11 @@ func (s *Server) readAIConfig() AIConfig {
 	}
 	for k, v := range c.Capabilities {
 		v.Fingerprint = stored.Fingerprints[k]
+		if v.ToolSchemaVersion != documentToolSchemaVersion {
+			v.Tools = ""
+			v.ToolError = ""
+			v.ToolSchemaVersion = ""
+		}
 		c.Capabilities[k] = v
 	}
 	return c
@@ -169,7 +183,7 @@ func configPrint(c AIConfig, p string) string {
 	} else if p == "image-api" {
 		value = c.ImageAPI
 	} else if model, ok := strings.CutPrefix(p, "api:"); ok {
-		value = []string{"api", c.API.URL, c.API.Key, model}
+		value = []string{"api", c.API.URL, c.API.Key, c.API.Protocol, apiRulesVersion, model}
 	} else if p == "api" {
 		// Checked per model, never as a whole.
 		return ""
@@ -201,6 +215,9 @@ func publicConfig(c AIConfig) AIConfig {
 	return c
 }
 func validateAPI(c APIConnection) error {
+	if e := validateAPIProtocol(c.Protocol); e != nil {
+		return e
+	}
 	if c.URL == "" && c.Model == "" && c.Key == "" {
 		return nil
 	}
@@ -215,10 +232,19 @@ func validateAPI(c APIConnection) error {
 
 // The API agent chooses models per task, so only the endpoint is required.
 func validateAgentAPI(c APIConnection) error {
+	if e := validateAPIProtocol(c.Protocol); e != nil {
+		return e
+	}
 	if c.URL == "" && c.Key == "" {
 		return nil
 	}
 	return validateAPIURL(c.URL)
+}
+func validateAPIProtocol(protocol string) error {
+	if protocol != "" && protocol != "auto" && protocol != "openai" && protocol != "anthropic" {
+		return errors.New("无效的 API 协议")
+	}
+	return nil
 }
 func validateAPIURL(raw string) error {
 	u, e := url.Parse(raw)
@@ -376,6 +402,10 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 		p = apiCapabilityKey(model)
 	}
 	mode := r.URL.Query().Get("capability")
+	if mode == "tools" {
+		s.testDocumentToolConnection(w, r, p)
+		return
+	}
 	if mode != "" && mode != "text" && mode != "vision" || mode == "vision" && p == "text-api" {
 		fail(w, 400, "无效的检测能力")
 		return
@@ -383,6 +413,10 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 	c := s.aiConfig()
 	fingerprint := configPrint(c, p)
 	cap := Capability{CheckedAt: now(), Fingerprint: fingerprint}
+	if previous := c.Capabilities[p]; previous.Fingerprint == fingerprint {
+		cap.Tools, cap.ToolError = previous.Tools, previous.ToolError
+		cap.ToolSchemaVersion = previous.ToolSchemaVersion
+	}
 	if mode == "vision" {
 		if !capable(c, p, false) {
 			fail(w, 409, "请先完成文本检测")
@@ -439,8 +473,8 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 	s.wakeProcessing()
 }
 
-// Probes use the selected model with CLI defaults. Listing models or mapping
-// chat effort is optional metadata and must not block a real capability check.
+// CLI probes use model defaults. API probes exercise saved reasoning settings;
+// catalog failures still allow a selected model to be tested.
 func (s *Server) probeConnection(parent context.Context, c AIConfig, p string, in AIInput, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
@@ -453,9 +487,21 @@ func (s *Server) probeConnection(parent context.Context, c AIConfig, p string, i
 	}
 	var adapter Adapter = cliAdapter{s.Store.Root, p, model}
 	if model, ok := strings.CutPrefix(p, "api:"); ok {
-		// Probe exactly this model, without effort, for text and images alike.
-		choice := apiModelChoice{model, ""}
-		adapter = apiAgentAdapter{c.API, choice, choice, taskChat, func(context.Context) ([]AgentModel, error) { return nil, errors.New("not listed") }}
+		// Exercise the same parameter builder as generation, including the
+		// saved effort. A successful probe establishes acceptance, not efficacy.
+		efforts, selected := c.Efforts, c.Models["api"]
+		if len(in.images()) > 0 {
+			efforts, selected = c.VisionEfforts, c.VisionModels["api"]
+		}
+		effort := efforts["api"][model]
+		if selected == "" && efforts["api"][""] != "" {
+			effort = efforts["api"][""]
+		}
+		if effort == "" {
+			effort = "medium"
+		}
+		choice := apiModelChoice{model, effort}
+		adapter = apiAgentAdapter{c.API, choice, choice, taskChat, s.apiCatalog(c.API)}
 	}
 	if p == "text-api" {
 		adapter = apiAdapter{c.TextAPI}

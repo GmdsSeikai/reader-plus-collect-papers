@@ -278,6 +278,16 @@ func (s *Server) resumeImportCommit(commitID, owner, ownerRef, library, filename
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复提交失败")
 		return
 	}
+	if err := queueImportedOverview(tx, doc.ID, settings); err != nil {
+		tx.Rollback()
+		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复概要任务失败")
+		return
+	}
+	if _, err := tx.Exec("INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued')", doc.ID); err != nil {
+		tx.Rollback()
+		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复索引任务失败")
+		return
+	}
 	if err := linkRecoveredRequestTx(tx, ownerRef, doc, fullSHA); err != nil {
 		tx.Rollback()
 		_ = s.Store.markImportCommit(commitID, importStageFailed, "", "恢复提交失败")

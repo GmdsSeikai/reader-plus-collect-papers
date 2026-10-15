@@ -53,6 +53,7 @@ import { LibraryModeSwitcher, libraryModes } from "./LibraryModeSwitcher";
 import { Settings } from "./Settings";
 import { Workspace } from "./Workspace";
 import { useProcessing } from "./ProcessingStatus";
+import { useUpdateProgress } from "./update-progress";
 import { useResolvedTheme } from "./appearance";
 import { DocumentEditor, LibraryFilterBar } from "./DocumentManagement";
 import { TagBoards } from "./TagBoards";
@@ -76,6 +77,7 @@ export function App() {
   const documents = allDocuments.filter((d) => d.library === mode);
   const resolvedTheme = useResolvedTheme(theme);
   const { jobs, error: processingError } = useProcessing();
+  useUpdateProgress();
   const jobsById = useMemo(
     () => new Map(jobs.map((job) => [job.documentId, job])),
     [jobs],

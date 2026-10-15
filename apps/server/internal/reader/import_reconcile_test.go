@@ -78,6 +78,9 @@ func TestRecoverOpenRunsMarksInterrupted(t *testing.T) {
 // file resumes its commit into the document table, linked and idempotent.
 func TestRecoverInstalledCommitResumes(t *testing.T) {
 	s := testServer(t)
+	if _, err := s.Store.DB.Exec(`INSERT OR REPLACE INTO settings(key,value) VALUES('reader','{"autoGenerateOverview":true}')`); err != nil {
+		t.Fatal(err)
+	}
 	data := pdfBytes(t)
 	sum := sha256.Sum256(data)
 	full := hex.EncodeToString(sum[:])
@@ -92,6 +95,12 @@ func TestRecoverInstalledCommitResumes(t *testing.T) {
 	docID := full[:32]
 	if _, err := s.Store.Document(docID); err != nil {
 		t.Fatalf("document not restored: %v", err)
+	}
+	for _, table := range []string{"document_corpus_jobs", "document_overview_jobs"} {
+		var status string
+		if err := s.Store.DB.QueryRow("SELECT status FROM "+table+" WHERE document_id=?", docID).Scan(&status); err != nil || status != "queued" {
+			t.Fatalf("%s job = %q, %v", table, status, err)
+		}
 	}
 	// Double restart is a no-op.
 	if err := s.RecoverImports(); err != nil {

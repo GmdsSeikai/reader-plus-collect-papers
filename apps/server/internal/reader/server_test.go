@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http/httptest"
 	"net/url"
@@ -426,5 +427,29 @@ func TestReaderPolicyAllowsReadiumBlobStyles(t *testing.T) {
 	}
 	if got := strings.Join(directives["object-src"], " "); got != "'none'" {
 		t.Errorf("object-src unexpectedly widened: %s", got)
+	}
+}
+func TestWebAssetsKeepModuleMIMETypes(t *testing.T) {
+	// Windows MIME registrations can map ".mjs" to "text/plain", and Chromium
+	// then refuses to load the ES module that starts the PDF.js worker.
+	mime.AddExtensionType(".mjs", "text/plain; charset=utf-8")
+	web := t.TempDir()
+	for name, content := range map[string]string{"page.html": "<!doctype html>", "app.js": "export const ok = 1;", "app.mjs": "export const ok = 1;", "app.css": "body { margin: 0; }"} {
+		if e := os.WriteFile(filepath.Join(web, name), []byte(content), 0o600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	store, e := OpenStore(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { store.DB.Close() })
+	server := NewServer(store, "test-secret", web)
+	t.Cleanup(server.Close)
+	for path, want := range map[string]string{"/app.mjs": "text/javascript; charset=utf-8", "/app.js": "text/javascript; charset=utf-8", "/app.css": "text/css; charset=utf-8", "/page.html": "text/html; charset=utf-8"} {
+		response := request(t, server, "GET", path, nil)
+		if response.Code != 200 || response.Header().Get("Content-Type") != want {
+			t.Errorf("%s: status %d, Content-Type %q, want %q", path, response.Code, response.Header().Get("Content-Type"), want)
+		}
 	}
 }

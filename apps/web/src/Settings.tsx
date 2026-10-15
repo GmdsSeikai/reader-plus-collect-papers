@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
+  FileText,
   Bot,
   Check,
   CircleCheck,
@@ -13,6 +14,8 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { DiagnosticExport } from "./DiagnosticExport";
+import { CommandLineSettings } from "./CommandLineSettings";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
@@ -23,9 +26,11 @@ import type {
   AgentModel,
   APIConnection,
   LibraryMode,
+  JournalRankConfig,
   Provider,
 } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
+import { Input } from "@reader/ui/components/input";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +58,7 @@ import {
   TabsTrigger,
 } from "@reader/ui/components/tabs";
 import { HighlightColorsEditor } from "./HighlightColorsEditor";
+import { ProxySettings } from "./ProxySettings";
 import {
   primaryLibraryMode,
   updateLibraryPreferences,
@@ -85,6 +91,48 @@ export function Settings({
   const [connector, setConnector] = useState<Awaited<
     ReturnType<typeof api.connectorStatus>
   > | null>(null);
+  const [journalRank, setJournalRank] = useState<JournalRankConfig | null>(
+    null,
+  );
+  const [journalKey, setJournalKey] = useState("");
+  const [journalSaving, setJournalSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let mounted = true;
+    void api
+      .journalRankConfig()
+      .then((config) => {
+        if (mounted) setJournalRank(config);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [open]);
+  const saveJournalRank = async (
+    patch: Partial<
+      Pick<JournalRankConfig, "enabled" | "filterMode" | "selected">
+    >,
+    key?: string,
+  ) => {
+    if (!journalRank) return;
+    setJournalSaving(true);
+    try {
+      const saved = await api.saveJournalRankConfig({
+        enabled: patch.enabled ?? journalRank.enabled,
+        filterMode: patch.filterMode ?? journalRank.filterMode,
+        selected: patch.selected ?? journalRank.selected,
+        ...(key !== undefined ? { key } : {}),
+      });
+      setJournalRank(saved);
+      setJournalKey("");
+      window.dispatchEvent(new Event("reader:journal-rank-config"));
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setJournalSaving(false);
+    }
+  };
   useEffect(() => {
     if (!open) setAPIDetails(false);
   }, [open]);
@@ -260,6 +308,31 @@ export function Settings({
     await checkAll([`api:${model.id}`], () => "text", snapshot);
     warnWithoutVision(apiModels);
   };
+  const checkTools = async (model: AgentModel) => {
+    const snapshot = useReaderStore.getState().aiConfig;
+    if (!snapshot) return;
+    setSaving(true);
+    try {
+      const capability = await api.testAI("api", "tools", model.id);
+      const current = useReaderStore.getState().aiConfig;
+      if (current && current.api.url === snapshot.api.url)
+        setAIConfig({
+          ...current,
+          capabilities: {
+            ...current.capabilities,
+            [`api:${model.id}`]: capability,
+          },
+        });
+      if (capability.tools !== "passed")
+        toast.error(
+          capability.toolError || "工具调用未通过，仍可使用检索辅助回答",
+        );
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const saveConfig = async (change: (latest: AIConfig) => AIConfig) => {
     setSaving(true);
     try {
@@ -409,7 +482,7 @@ export function Settings({
             )}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Agent 连接、显示、阅读与论文库
+            Agent 连接、显示、阅读、诊断与论文库
           </DialogDescription>
         </DialogHeader>
         {apiDetails && (
@@ -453,6 +526,19 @@ export function Settings({
                                 onClick={() => void checkModel(model)}
                               >
                                 检测
+                              </Button>
+                            )}
+                            {result?.text && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={saving || testing.has(id)}
+                                onClick={() => void checkTools(model)}
+                                title={result.toolError}
+                              >
+                                {result.tools === "passed"
+                                  ? "检索工具已通过"
+                                  : "检测检索工具"}
                               </Button>
                             )}
                             {model.custom && (
@@ -510,11 +596,34 @@ export function Settings({
               <Highlighter />
               阅读
             </TabsTrigger>
+            <TabsTrigger value="diagnostics">
+              <FileText />
+              诊断
+            </TabsTrigger>
             <TabsTrigger value="papers">
               <Library />
               论文库
             </TabsTrigger>
           </TabsList>
+          <TabsContent
+            value="diagnostics"
+            className="settings-panel"
+            keepMounted
+          >
+            {window.readerDesktop?.proxySettings && (
+              <div className="mb-6">
+                <ProxySettings open={open} />
+              </div>
+            )}
+            <section>
+              <h3 className="mb-3 text-sm font-medium">本地日志</h3>
+              <p className="mb-4 text-xs leading-5 text-muted-foreground">
+                导出全部已保留日志和运行环境供开发者排查。凭据、用户路径和翻译诊断中的正文会脱敏；不包含文档、聊天或批注。日志最多保留
+                7 天、100 MiB，仅在本机保存。
+              </p>
+              <DiagnosticExport />
+            </section>
+          </TabsContent>
           <TabsContent value="display" className="settings-panel" keepMounted>
             <section className="mb-6">
               <h3
@@ -586,6 +695,68 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="reading" className="settings-panel" keepMounted>
+            <section className="mb-6 space-y-4">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={theme.autoGenerateOverview ?? false}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoGenerateOverview: !!checked })
+                  }
+                />
+                <span>
+                  导入后生成文档概要
+                  <span className="block text-xs text-muted-foreground">
+                    使用已配置的文字模型，单独记录用量；已有文档按需生成。
+                  </span>
+                </span>
+              </label>
+              <label className="block text-sm">
+                文档上下文上限（可选）
+                <Input
+                  className="mt-2 max-w-48"
+                  type="number"
+                  min={8192}
+                  max={1048576}
+                  step={1024}
+                  defaultValue={theme.documentContextTokens || ""}
+                  placeholder="自动获取"
+                  key={theme.documentContextTokens}
+                  onBlur={(e) => {
+                    const n = Number(e.currentTarget.value);
+                    if (
+                      Number.isInteger(n) &&
+                      (n === 0 || n >= 8192) &&
+                      n <= 1048576
+                    )
+                      setTheme({ documentContextTokens: n });
+                    else
+                      e.currentTarget.value = String(
+                        theme.documentContextTokens || "",
+                      );
+                  }}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  优先读取模型信息或 Codex 配置；留空为自动，未知时采用
+                  64K。填写后只限制上限。
+                </span>
+              </label>
+            </section>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={theme.autoCopySelection === true}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoCopySelection: !!checked })
+                  }
+                />
+                <span>
+                  自动复制选中文字
+                  <span className="block text-xs text-muted-foreground">
+                    选中文字或点击高亮、划线等批注时，自动复制到剪贴板
+                  </span>
+                </span>
+              </label>
+            </section>
             <section className="mb-6">
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox
@@ -658,6 +829,132 @@ export function Settings({
                   </span>
                 </span>
               </label>
+            </section>
+            <section className="mt-7 border-t pt-5">
+              <h3 className="mb-3 text-sm font-medium">期刊指标</h3>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={journalRank?.enabled ?? true}
+                  disabled={!journalRank || journalSaving}
+                  onCheckedChange={(checked) =>
+                    void saveJournalRank({ enabled: !!checked })
+                  }
+                />
+                <span>
+                  在论文库显示 easyScholar 期刊指标
+                  <span className="block text-xs text-muted-foreground">
+                    默认开启；配置 SecretKey 后按论文出处查询。
+                  </span>
+                </span>
+              </label>
+              {journalRank?.enabled && (
+                <>
+                  <div className="mt-4 flex items-center gap-2">
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      aria-label="easyScholar SecretKey"
+                      placeholder={
+                        journalRank.hasKey
+                          ? "已保存 SecretKey；输入新密钥可替换"
+                          : "输入 easyScholar SecretKey"
+                      }
+                      value={journalKey}
+                      onChange={(event) => setJournalKey(event.target.value)}
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={!journalKey.trim() || journalSaving}
+                      onClick={() =>
+                        void saveJournalRank({}, journalKey.trim())
+                      }
+                    >
+                      保存
+                    </Button>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-xs">
+                    <span id="journal-rank-filter-label">指标筛选</span>
+                    <Select
+                      value={journalRank.filterMode}
+                      onValueChange={(value) => {
+                        if (value !== "include" && value !== "exclude") return;
+                        void saveJournalRank({
+                          filterMode: value,
+                          selected:
+                            value === "include"
+                              ? journalRank.available.map((field) => field.key)
+                              : [],
+                        });
+                      }}
+                      disabled={journalSaving}
+                    >
+                      <SelectTrigger
+                        aria-labelledby="journal-rank-filter-label"
+                        className="w-48"
+                      >
+                        <SelectValue>
+                          {journalRank.filterMode === "include"
+                            ? "只显示选中的指标"
+                            : "隐藏选中的指标"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="include">
+                          只显示选中的指标
+                        </SelectItem>
+                        <SelectItem value="exclude">隐藏选中的指标</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {journalRank.filterMode === "include"
+                      ? "勾选要显示的指标。"
+                      : "勾选不想显示的指标。"}
+                    无数据或超出标题列宽度的标签会省略。
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
+                    {journalRank.available.map((field) => (
+                      <label
+                        key={field.key}
+                        className="flex min-w-0 items-center gap-2 text-xs"
+                      >
+                        <Checkbox
+                          checked={journalRank.selected.includes(field.key)}
+                          disabled={journalSaving}
+                          onCheckedChange={(checked) =>
+                            void saveJournalRank({
+                              selected: checked
+                                ? [...journalRank.selected, field.key]
+                                : journalRank.selected.filter(
+                                    (value) => value !== field.key,
+                                  ),
+                            })
+                          }
+                        />
+                        <span className="truncate" title={field.name}>
+                          {field.name}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {journalRank.hasKey && (
+                    <Button
+                      className="mt-4"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new Event("reader:journal-rank-refresh"),
+                        )
+                      }
+                    >
+                      <RefreshCw />
+                      刷新当前列表的期刊指标
+                    </Button>
+                  )}
+                </>
+              )}
             </section>
           </TabsContent>
           <TabsContent value="agent" className="settings-panel" keepMounted>
@@ -793,6 +1090,7 @@ export function Settings({
                 数据目录。发送的选区或章节会交给对应服务。
               </p>
             </section>
+            <CommandLineSettings open={open} />
           </TabsContent>
         </Tabs>
       </DialogContent>

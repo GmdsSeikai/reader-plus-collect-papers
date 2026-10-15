@@ -38,7 +38,7 @@ func (s *Server) runLayout(ctx context.Context, d Document, work string, from, t
 	}
 	child, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	args := []string{worker, "--input", s.Store.File(d), "--output", work, "--model-cache", filepath.Join(s.Store.Root, "models")}
+	args := []string{worker, "--input", s.Store.File(d), "--output", work}
 	if from > 0 {
 		args = append(args, "--from-page", strconv.Itoa(from), "--to-page", strconv.Itoa(to))
 	}
@@ -59,20 +59,14 @@ func (s *Server) runLayout(ctx context.Context, d Document, work string, from, t
 	var saveErr error
 	for scan.Scan() {
 		var event struct {
-			Event      string `json:"event"`
-			Page       int    `json:"page"`
-			Total      int    `json:"total"`
-			Downloaded int64  `json:"downloaded"`
-			Bytes      int64  `json:"bytes"`
+			Event string `json:"event"`
+			Page  int    `json:"page"`
+			Total int    `json:"total"`
 		}
 		if json.Unmarshal(scan.Bytes(), &event) != nil {
 			continue
 		}
 		switch event.Event {
-		case "model-download":
-			p.Detail = "首次准备版面模型（约 67 MB）"
-		case "model-progress":
-			p.Detail = fmt.Sprintf("正在下载版面模型 %.0f / %.0f MB", float64(event.Downloaded)/1e6, float64(event.Bytes)/1e6)
 		case "page":
 			p.PagesDone, p.PagesTotal = event.Page, event.Total
 			p.Detail = fmt.Sprintf("已解析 %d / %d 页", event.Page, event.Total)
@@ -99,7 +93,7 @@ func (s *Server) runLayout(ctx context.Context, d Document, work string, from, t
 		return errors.New("无法保存解析进度")
 	}
 	if err != nil || scan.Err() != nil {
-		return errors.New("PDF 解析未完成。请检查网络、模型缓存或文件后重试")
+		return errors.New("PDF 解析未完成。请检查文件，或重新构建或安装 Reader 后重试")
 	}
 	return nil
 }

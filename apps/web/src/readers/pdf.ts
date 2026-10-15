@@ -99,6 +99,12 @@ export class PDFReaderAdapter implements ReaderAdapter {
       removePageBorders: true,
     });
     this.links.setViewer(this.viewer);
+    this.bus.on("pagesinit", () => {
+      // PDFViewer resets lang during setup. Explicitly mark it unknown before
+      // text rendering to match PDF.js's measurement canvas and stop inheriting
+      // the app's zh-CN font choice. PDF metadata may supply the language later.
+      viewer.lang = "";
+    });
     this.navigation = new PDFReadingNavigation(
       container,
       this.viewer,
@@ -178,7 +184,10 @@ export class PDFReaderAdapter implements ReaderAdapter {
     ): Promise<TOCItem[]> =>
       Promise.all(
         items.map(async (item, i) => {
-          let page = 1;
+          const children = await map(item.items, `${prefix}${i}-`);
+          // A grouping entry without its own target opens its first child.
+          const first = children[0]?.location;
+          let page = first?.type === "pdf" ? first.page : 1;
           let dest = item.dest;
           try {
             if (typeof dest === "string")
@@ -196,7 +205,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
             id: `${prefix}${i}`,
             label: item.title,
             location: { type: "pdf" as const, page },
-            children: await map(item.items, `${prefix}${i}-`),
+            children,
           };
         }),
       );

@@ -347,7 +347,12 @@ func (s *Server) recordTranslationFailure(documentID string, batch translationBa
 		if a.err != nil {
 			fmt.Fprintf(&b, "provider error: %v\n", a.err)
 		}
-		b.WriteString("--- raw output ---\n")
+	}
+	// Keep trusted diagnostic metadata before a single untrusted output section.
+	// Export removes everything after this marker, including forged delimiters.
+	b.WriteString("--- raw output ---\n")
+	for i, a := range attempts {
+		fmt.Fprintf(&b, "=== raw attempt %d ===\n", i+1)
 		b.WriteString(a.output.String())
 		if a.truncated {
 			fmt.Fprintf(&b, "\n--- output truncated at %d bytes ---", translationDiagnosticOutput)
@@ -355,7 +360,7 @@ func (s *Server) recordTranslationFailure(documentID string, batch translationBa
 		b.WriteString("\n")
 	}
 	dir := filepath.Join(s.Store.Root, "cache", documentID, "translation-failures")
-	name := time.Now().UTC().Format("20060102T150405.000000000Z") + "-" + translationFileID.ReplaceAllString(batch.Paragraphs[0].BlockID, "_") + ".txt"
+	name := time.Now().UTC().Format("20060102T150405.000000000Z") + "-" + translationFileID.ReplaceAllString(batch.Paragraphs[0].BlockID, "_") + "-" + id() + ".txt"
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("cannot record translation failure: %v", err)
 		return

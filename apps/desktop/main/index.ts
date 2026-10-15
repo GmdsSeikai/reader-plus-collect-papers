@@ -21,9 +21,14 @@ import {
   type ReaderLinkTarget,
 } from "../../../packages/reader-core/src/reader-link";
 import { writeClipboardText } from "./clipboard";
-import { childProxyEnvironment } from "./proxy";
+import {
+  ProxySettingsService,
+  electronProxyConfiguration,
+} from "./proxy-settings";
 import { startUpdateService } from "./update-service";
 import { devIsolation } from "./dev-isolation";
+import { startDiagnosticService } from "./diagnostic-service";
+import { commandLineStatus, setCommandLine } from "./command-line";
 const isolation = devIsolation({
   isPackaged: app.isPackaged,
   env: process.env,
@@ -34,6 +39,7 @@ if (isolation.userDataDirectory)
     join(app.getPath("appData"), isolation.userDataDirectory),
   );
 let updateService: Awaited<ReturnType<typeof startUpdateService>> | undefined;
+let diagnostics: ReturnType<typeof startDiagnosticService> | undefined;
 let child: ChildProcess | undefined;
 let serverURL = "";
 let serverToken = "";
@@ -42,30 +48,30 @@ let quitting = false;
 let closing = false;
 let flushed = false;
 let childExited = false;
+let restartRequested = false;
+let proxySettings: ProxySettingsService;
 const root = resolve(__dirname, "../..");
+function bundledBinary(name: "reader-server" | "reader") {
+  const file = process.platform === "win32" ? `${name}.exe` : name;
+  return app.isPackaged
+    ? join(process.resourcesPath, "bin", file)
+    : join(root, "desktop", "bin", file);
+}
+function serverBinary() {
+  return bundledBinary("reader-server");
+}
+const commandLineHost = () => ({
+  platform: process.platform,
+  packaged: app.isPackaged,
+  binary: bundledBinary("reader"),
+  env: process.env,
+});
 async function startServer() {
-  let childEnv = { ...process.env };
-  try {
-    childEnv = await childProxyEnvironment(process.env);
-  } catch {
-    dialog.showErrorBox(
-      "无法应用系统代理",
-      "无法读取系统代理，或代理地址、自动配置、直连例外规则暂不受支持。本次保留原有网络环境，Agent 连接可能不可用。请检查手动系统代理后重启 Reader。",
-    );
-  }
+  const childEnv = proxySettings.activeEnvironment;
   serverToken = randomBytes(32).toString("hex");
-  const binary = app.isPackaged
-    ? join(
-        process.resourcesPath,
-        "bin",
-        process.platform === "win32" ? "reader-server.exe" : "reader-server",
-      )
-    : join(
-        root,
-        "desktop",
-        "bin",
-        process.platform === "win32" ? "reader-server.exe" : "reader-server",
-      );
+  diagnostics?.logs.secrets.push(serverToken);
+  diagnostics?.record("server.start_requested");
+  const binary = serverBinary();
   const web = app.isPackaged
     ? join(process.resourcesPath, "web")
     : join(root, "web", "dist");
@@ -83,6 +89,10 @@ async function startServer() {
     [
       "--port",
       "0",
+      "--logs",
+      diagnostics!.directory,
+      "--session",
+      diagnostics!.logs.sessionId,
       "--data",
       join(app.getPath("userData"), "library"),
       "--web",
@@ -102,26 +112,44 @@ async function startServer() {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  child.stderr?.on("data", (data) => process.stderr.write(data));
+  const stderrLines = createInterface({ input: child.stderr! });
+  stderrLines.on("line", (line) =>
+    diagnostics?.logs.record("server-stderr", {
+      level: "error",
+      event: "server.stderr",
+      detail: line.slice(0, 16000),
+    }),
+  );
+  child.once("close", () => stderrLines.close());
   return new Promise<string>((accept, reject) => {
     const timer = setTimeout(() => {
       child?.kill();
       reject(new Error("本地服务启动超时"));
     }, 20000);
     child!.once("error", (err) => {
+      diagnostics?.record("server.spawn_failed", err);
       clearTimeout(timer);
       reject(err);
     });
     child!.once("exit", (code) => {
+      diagnostics?.logs.record("desktop", {
+        level: quitting ? "info" : "error",
+        event: "server.exited",
+        exitCode: code,
+      });
       clearTimeout(timer);
       childExited = true;
       reject(new Error(`本地服务已退出 (${code})`));
       if (window && !quitting) {
-        dialog.showErrorBox(
-          "Reader 本地服务已停止",
-          "请重新打开 Reader。已保存的文档和笔记仍保留在本地。",
-        );
-        app.quit();
+        void diagnostics!
+          .failure(
+            "Reader 本地服务已停止",
+            "已保存的文档和笔记仍保留在本地。可先导出诊断包，再重新打开 Reader。",
+          )
+          .then(() => {
+            flushed = true;
+            app.quit();
+          });
       }
     });
     const lines = createInterface({ input: child!.stdout! });
@@ -129,6 +157,7 @@ async function startServer() {
       try {
         const ready = JSON.parse(line);
         serverURL = ready.url;
+        diagnostics?.record("server.ready");
         clearTimeout(timer);
         lines.close();
         accept(serverURL);
@@ -320,6 +349,16 @@ app
   .whenReady()
   .then(async () => {
     if (!primary) return;
+    diagnostics = startDiagnosticService(() => window);
+    ipcMain.on("reader:diagnostic-event", (event, value) =>
+      diagnostics!.receive(event, value),
+    );
+    ipcMain.on("reader:diagnostic-settings", (event, value) =>
+      diagnostics!.receiveSettings(event, value),
+    );
+    ipcMain.handle("reader:export-diagnostics", (event) =>
+      diagnostics!.invoke(event),
+    );
     // Development runs need the entry script registered beside Electron.
     if (isolation.registerProtocol) {
       if (process.defaultApp && process.argv.length >= 2)
@@ -328,6 +367,13 @@ app
         ]);
       else app.setAsDefaultProtocolClient(READER_SCHEME);
     }
+    proxySettings = await ProxySettingsService.open(
+      app.getPath("userData"),
+      process.env,
+    );
+    await session.defaultSession.setProxy(
+      electronProxyConfiguration(proxySettings.activeSettings),
+    );
     const url = await startServer();
     session.defaultSession.setPermissionRequestHandler(
       (contents, permission, callback, details) => {
@@ -351,6 +397,7 @@ app
     })
       .then((r) => (r.ok ? r.json() : {}))
       .catch(() => ({}));
+    diagnostics.setSettings(preferences);
     const appearance =
       typeof preferences === "object" &&
       preferences !== null &&
@@ -383,6 +430,28 @@ app
         sandbox: true,
       },
     });
+    window.webContents.on("render-process-gone", (_event, details) => {
+      diagnostics!.logs.record("desktop", {
+        level: "error",
+        event: "renderer.exited",
+        reason: details.reason,
+        exitCode: details.exitCode,
+      });
+      if (!quitting)
+        void diagnostics!
+          .failure("Reader 界面已停止", "可先导出诊断包，再重新打开 Reader。")
+          .then(() => {
+            flushed = true;
+            app.quit();
+          });
+    });
+    window.webContents.on("did-fail-load", (_event, code) =>
+      diagnostics?.logs.record("desktop", {
+        level: "error",
+        event: "renderer.load_failed",
+        code,
+      }),
+    );
     window.on("close", (event) => {
       if (flushed) return;
       event.preventDefault();
@@ -404,6 +473,7 @@ app
         clearTimeout(timer);
         ipcMain.removeListener("reader:flushed", handler);
         if (error) {
+          diagnostics?.record("reading.flush_failed", new Error(error));
           const result = await dialog.showMessageBox(window!, {
             type: "warning",
             message: "阅读数据尚未保存",
@@ -414,12 +484,14 @@ app
           });
           if (result.response === 0) {
             closing = false;
+            restartRequested = false;
             return;
           }
         }
         // Reading data is saved; wait for background writes to drain before
         // the service may exit. The flush dialog never overrides this.
         if (!(await drainServer())) {
+          restartRequested = false;
           closing = false;
           return;
         }
@@ -464,6 +536,41 @@ app
     ipcMain.handle("reader:clipboard-write", (event, text: unknown) =>
       writeClipboardText(event, text, window?.webContents, url),
     );
+    const settingsSender = (event: Electron.IpcMainInvokeEvent) => {
+      if (
+        event.sender !== window?.webContents ||
+        event.senderFrame !== window.webContents.mainFrame ||
+        new URL(event.senderFrame.url).origin !== url
+      )
+        throw new Error("Invalid sender");
+    };
+    ipcMain.handle("reader:proxy-settings", (event) => {
+      settingsSender(event);
+      return proxySettings.state();
+    });
+    ipcMain.handle("reader:save-proxy-settings", (event, value: unknown) => {
+      settingsSender(event);
+      return proxySettings.save(value);
+    });
+    ipcMain.handle("reader:check-proxy", (event, value: unknown) => {
+      settingsSender(event);
+      return proxySettings.check(value, serverBinary());
+    });
+    ipcMain.handle("reader:command-line", (event) => {
+      settingsSender(event);
+      return commandLineStatus(commandLineHost());
+    });
+    ipcMain.handle("reader:set-command-line", (event, installed: unknown) => {
+      settingsSender(event);
+      if (typeof installed !== "boolean") throw new Error("Invalid request");
+      return setCommandLine(commandLineHost(), installed);
+    });
+    ipcMain.handle("reader:restart", (event) => {
+      settingsSender(event);
+      if (closing || restartRequested) return;
+      restartRequested = true;
+      app.quit();
+    });
     ipcMain.handle("reader:appearance", (event, appearance: unknown) => {
       if (
         event.sender !== window?.webContents ||
@@ -591,8 +698,15 @@ app
       return updateService?.check();
     });
   })
-  .catch((error) => {
-    dialog.showErrorBox("无法打开 Reader", String(error));
+  .catch(async (error) => {
+    diagnostics?.record("desktop.start_failed", error);
+    if (diagnostics)
+      await diagnostics.failure(
+        "无法打开 Reader",
+        "可导出启动日志供开发者排查，然后退出重试。",
+      );
+    else dialog.showErrorBox("无法打开 Reader", String(error));
+    flushed = true;
     app.quit();
   });
 app.on("before-quit", (event) => {
@@ -602,7 +716,13 @@ app.on("before-quit", (event) => {
     return;
   }
   quitting = true;
+  if (restartRequested) {
+    restartRequested = false;
+    app.relaunch();
+  }
+  diagnostics?.record("desktop.stopping");
   updateService?.stop();
+  proxySettings?.stop();
   child?.kill();
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const)

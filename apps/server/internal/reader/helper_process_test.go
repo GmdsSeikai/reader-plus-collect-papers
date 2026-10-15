@@ -25,6 +25,12 @@ func TestMain(m *testing.M) {
 			runChatSessionProcess()
 		case "analysis-session":
 			runAnalysisSessionProcess()
+		case "document-conversation":
+			runPersistentDocumentProcess()
+		case "document-reading":
+			runDocumentReadingProcess()
+		case "corpus-worker":
+			runMissingPageCorpusProcess()
 		case "models":
 			runModelProcess()
 		case "models-wait":

@@ -826,16 +826,15 @@ export class EPUBReaderAdapter implements ReaderAdapter {
   }
   async getContext() {
     if (!this.doc || !this.location.href) return "";
-    const response = await fetch(
-      publicationURL(this.doc.id, this.location.href.split("#")[0]),
-    );
+    const href = this.location.href.split("#")[0];
+    const response = await fetch(publicationURL(this.doc.id, href));
     if (!response.ok) throw new Error("无法读取章节");
     const html = new DOMParser().parseFromString(
       await response.text(),
       "text/html",
     );
     html.querySelectorAll("style,script").forEach((el) => el.remove());
-    return html.body.textContent?.trim().slice(0, 24000) || "";
+    return (html.body.textContent?.trim() || "").slice(0, 24000);
   }
   async destroy() {
     if (this.disposed) return;

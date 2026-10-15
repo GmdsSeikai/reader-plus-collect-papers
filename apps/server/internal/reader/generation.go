@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,11 @@ import (
 type ErrorKind string
 
 const (
+	ErrorPermission     ErrorKind = "permission"
+	ErrorModel          ErrorKind = "model"
+	ErrorBilling        ErrorKind = "billing"
+	ErrorContext        ErrorKind = "context_limit"
+	ErrorContent        ErrorKind = "content_policy"
 	ErrorConfiguration  ErrorKind = "configuration"
 	ErrorAuthentication ErrorKind = "authentication"
 	ErrorCapability     ErrorKind = "capability"
@@ -48,12 +54,16 @@ func errorKind(err error) ErrorKind {
 }
 
 type ProviderEvent struct {
-	Text     string
-	Fallback string
-	Metrics  []ModelTokens
+	Reasoning  string
+	Draft      string
+	ResetDraft bool
+	Text       string
+	Fallback   string
+	Metrics    []ModelTokens
 }
 type GenerateRequest struct{ Input AIInput }
 type GenerateResult struct {
+	Reasoning    string
 	Text         string
 	FinishReason string
 }
@@ -157,7 +167,7 @@ func (a configuredCLIAdapter) streamWith(ctx context.Context, req GenerateReques
 	first.Input.Effort = nativeEffort(a.provider, a.level, cli.model, models)
 	var visible, emitFailed atomic.Bool
 	result, err := run(cli, first, func(e ProviderEvent) error {
-		if e.Text != "" {
+		if e.Text != "" || e.Draft != "" || e.Reasoning != "" {
 			visible.Store(true)
 		}
 		if emit == nil {
@@ -206,7 +216,7 @@ func (a cliAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(P
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	return GenerateResult{text, "stop"}, nil
+	return GenerateResult{Text: text, FinishReason: "stop"}, nil
 }
 func legacyEmitter(delta, fallback func(string)) func(ProviderEvent) error {
 	if delta == nil && fallback == nil {
@@ -230,6 +240,7 @@ func runAttempt(ctx context.Context, adapter Adapter, in AIInput, emit func(Prov
 	defer cancel()
 	var mu sync.Mutex
 	var text strings.Builder
+	var reasoning strings.Builder
 	var emitErr error
 	closed := false
 	result, err := adapter.Stream(child, GenerateRequest{in}, func(e ProviderEvent) error {
@@ -248,8 +259,11 @@ func runAttempt(ctx context.Context, adapter Adapter, in AIInput, emit func(Prov
 			emitErr = generationError(ErrorProtocol, "适配器事件无效")
 		} else if text.Len()+len(e.Text) > 1<<20 {
 			emitErr = generationError(ErrorLimit, "回答超过 1 MiB 限制")
-		} else if e.Text != "" || len(e.Metrics) > 0 {
+		} else if reasoning.Len()+len(e.Reasoning) > 1<<20 {
+			emitErr = generationError(ErrorLimit, "思考内容超过 1 MiB 限制")
+		} else if e.Text != "" || e.Draft != "" || e.Reasoning != "" || e.ResetDraft || len(e.Metrics) > 0 {
 			text.WriteString(e.Text)
+			reasoning.WriteString(e.Reasoning)
 			if emit != nil {
 				emitErr = emit(e)
 			}
@@ -274,52 +288,39 @@ func runAttempt(ctx context.Context, adapter Adapter, in AIInput, emit func(Prov
 	if result.FinishReason != "stop" || text.Len() == 0 || result.Text != text.String() {
 		return GenerateResult{}, generationError(ErrorProtocol, "完整回答与流式片段或成功终态不一致")
 	}
+	result.Reasoning = reasoning.String()
 	return result, nil
 }
 func (g *GenerationService) Generate(ctx context.Context, in AIInput, interactive bool, emit func(ProviderEvent) error) (AIResult, error) {
 	return g.generate(ctx, in, interactive, emit != nil, emit)
 }
-func (g *GenerationService) attempt(ctx context.Context, provider string, in AIInput, emit func(ProviderEvent) error) (GenerateResult, error) {
+func (g *GenerationService) attempt(ctx context.Context, provider string, in AIInput, emit func(ProviderEvent) error) (result GenerateResult, err error) {
 	if in.Dispatch == nil && g.dispatchGate != nil {
 		in.Dispatch = &generationDispatch{Before: g.dispatchGate}
 	}
-	call := UsageCall{ID: id(), Provider: provider, StartedAt: now(), Status: "running", Models: []ModelTokens{{Model: ""}}}
-	if g.usageSink != nil {
-		if err := g.usageSink(call); err != nil {
-			return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
+	started := time.Now()
+	attemptID := id()
+	ctx = context.WithValue(ctx, apiAttemptKey{}, attemptID)
+	slog.Info("generation.start", "attemptId", attemptID, "requestId", requestID(ctx), "provider", provider, "vision", len(in.images()) > 0)
+	defer func() {
+		level := slog.LevelInfo
+		kind := ErrorKind("")
+		if err != nil {
+			level = slog.LevelError
+			kind = errorKind(err)
 		}
+		slog.Log(ctx, level, "generation.finish", "attemptId", attemptID, "requestId", requestID(ctx), "provider", provider, "durationMs", time.Since(started).Milliseconds(), "errorCode", kind)
+	}()
+	sink := g.usageSink
+	structuredUsage := in.Chat != nil && in.Chat.Agent != nil && (provider == "codex" || provider == "api" || provider == "text-api")
+	if structuredUsage {
+		in.UsageSink = g.usageSink
+		in.UsageProvider = provider
+		sink = nil
 	}
-	var metricMu sync.Mutex
-	result, err := runAttempt(ctx, g.connections[provider].Adapter, in, func(event ProviderEvent) error {
-		if len(event.Metrics) > 0 {
-			metricMu.Lock()
-			call.Models = mergeModelTokens(call.Models, event.Metrics)
-			if g.usageSink != nil {
-				if err := g.usageSink(call); err != nil {
-					metricMu.Unlock()
-					return generationError(ErrorSave, "无法保存调用统计")
-				}
-			}
-			metricMu.Unlock()
-		}
-		if emit != nil {
-			return emit(event)
-		}
-		return nil
+	result, err = trackModelUsage(UsageCall{ID: attemptID, Provider: provider}, sink, emit, func(send func(ProviderEvent) error) (GenerateResult, error) {
+		return runAttempt(ctx, g.connections[provider].Adapter, in, send)
 	})
-	call.FinishedAt = now()
-	call.Status = "complete"
-	if err != nil {
-		call.Status = "failed"
-		if errors.Is(err, context.Canceled) {
-			call.Status = "cancelled"
-		}
-	}
-	if g.usageSink != nil {
-		if saveErr := g.usageSink(call); saveErr != nil {
-			return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
-		}
-	}
 	// User cancellation and a disconnected consumer do not invalidate the agent.
 	if err != nil && !errors.Is(ctx.Err(), context.Canceled) && errorKind(err) != ErrorCanceled && g.attemptFailed != nil {
 		g.attemptFailed(provider, len(in.images()) > 0, err)
@@ -331,6 +332,9 @@ func (g *GenerationService) generate(ctx context.Context, in AIInput, interactiv
 	if timeout <= 0 {
 		timeout = 3 * time.Minute
 	}
+	if in.Chat != nil && in.Chat.Agent != nil {
+		timeout = 10 * time.Minute
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if !validAgent(g.primary) {
@@ -340,14 +344,14 @@ func (g *GenerationService) generate(ctx context.Context, in AIInput, interactiv
 	primary := g.connections[g.primary]
 	visible := false
 	send := func(e ProviderEvent) error {
-		if e.Text == "" && e.Fallback == "" {
+		if e.Text == "" && e.Fallback == "" && e.Draft == "" && e.Reasoning == "" && !e.ResetDraft {
 			return nil
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if emit != nil {
-			if e.Text != "" && exposeText {
+			if (e.Text != "" || e.Draft != "" || e.Reasoning != "") && exposeText {
 				visible = true
 			}
 			if err := emit(e); err != nil {
@@ -364,7 +368,7 @@ func (g *GenerationService) generate(ctx context.Context, in AIInput, interactiv
 		result, err = g.attempt(ctx, g.primary, in, send)
 	}
 	if err == nil {
-		return AIResult{result.Text, g.primary, false}, nil
+		return AIResult{Text: result.Text, Provider: g.primary, Reasoning: result.Reasoning}, nil
 	}
 	if ctx.Err() != nil {
 		return AIResult{}, ctx.Err()
@@ -387,7 +391,7 @@ func (g *GenerationService) generate(ctx context.Context, in AIInput, interactiv
 		return AIResult{}, err
 	}
 	result, err = g.attempt(ctx, target, in, send)
-	return AIResult{result.Text, target, true}, err
+	return AIResult{Text: result.Text, Provider: target, Fallback: true, Reasoning: result.Reasoning}, err
 }
 
 func (g *GenerationService) ValidateInput(in AIInput, interactive bool) error {

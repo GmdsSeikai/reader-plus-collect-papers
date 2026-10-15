@@ -7,6 +7,8 @@ import {
   type PDFBlockAction,
   type PDFLocation,
 } from "@reader/core";
+// Includes the toolbar's padding, which bridges the gap above the block.
+const blockActionTarget = "[data-block-action], .block-actions";
 export function hitBlock(
   blocks: PDFBlock[],
   page: number,
@@ -182,7 +184,7 @@ export class PDFBlockOverlay {
   private press = (event: PointerEvent) => {
     this.pressed = undefined;
     if (
-      (event.target as Element)?.closest("[data-block-action]") ||
+      (event.target as Element)?.closest(blockActionTarget) ||
       event.button !== 0
     )
       return;
@@ -191,7 +193,7 @@ export class PDFBlockOverlay {
       this.pressed = { id: block.id, x: event.clientX, y: event.clientY };
   };
   private click = (event: MouseEvent) => {
-    if ((event.target as Element)?.closest("[data-block-action]")) return;
+    if ((event.target as Element)?.closest(blockActionTarget)) return;
     const pressed = this.pressed;
     this.pressed = undefined;
     if (
@@ -229,8 +231,7 @@ export class PDFBlockOverlay {
     );
   }
   private move = (event: PointerEvent) => {
-    if ((event.target as Element | null)?.closest("[data-block-action]"))
-      return;
+    if ((event.target as Element | null)?.closest(blockActionTarget)) return;
     if (event.buttons || window.getSelection()?.toString().trim()) {
       this.clear();
       return;
@@ -260,7 +261,6 @@ export class PDFBlockOverlay {
       );
     }
     const b = block.bounds;
-    this.overlay.toggleAttribute("data-compact", b.height * rect.height < 72);
     Object.assign(this.overlay.style, {
       left: `${b.x * 100}%`,
       top: `${b.y * 100}%`,

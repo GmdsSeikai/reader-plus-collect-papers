@@ -51,7 +51,7 @@ import { numberedReference } from "../readers/pdf-citations";
 import "./translation.css";
 
 import { AssistanceControls } from "./AssistanceControls";
-import { chapterRange } from "./chapters";
+import { chapterRange, headingPages } from "./chapters";
 import { searchPDFBlocks } from "./pdf-search";
 
 type Mode = "source" | "parallel" | "translation";
@@ -827,6 +827,7 @@ export function PDFReadingView({
             location.page,
             engine?.getPageCount?.() ||
               Math.max(1, ...blocks.map((b) => b.page)),
+            headingPages(blocks),
           );
         }}
       />

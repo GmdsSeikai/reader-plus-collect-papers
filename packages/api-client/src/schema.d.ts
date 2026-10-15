@@ -4,6 +4,392 @@
  */
 
 export interface paths {
+    "/api/overviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job states */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OverviewJob"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Persisted source-versioned overview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        regenerate: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Existing overview or job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Overview queued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job canceled; translation unaffected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/diagnostics/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        level: "info" | "warn" | "error";
+                        event: string;
+                        detail?: string;
+                        stack?: string;
+                        requestId?: string;
+                        route?: string;
+                        method?: string;
+                        status?: number;
+                        durationMs?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Local diagnostic event recorded */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/diagnostics/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description ZIP containing all retained local logs with redaction and a manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/zip": string;
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/journal-ranks/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read local easyScholar settings without the SecretKey */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settings and known datasets */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankConfig"];
+                    };
+                };
+            };
+        };
+        /** Save easyScholar settings; omitted key preserves the saved key */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        /** @enum {string} */
+                        filterMode?: "include" | "exclude";
+                        selected: string[];
+                        key?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankConfig"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/journal-rank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query or read cached journal indicators for one paper */
+        get: {
+            parameters: {
+                query?: {
+                    refresh?: "1";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Journal indicator result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/connector/status": {
         parameters: {
             query?: never;
@@ -823,6 +1209,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Readable text in reading order for the command line. PDFs have text only after layout parsing; units are pages for a PDF and reading-order chapters for an EPUB. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: number;
+                    to?: number;
+                    side?: "source" | "translation" | "both";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentText"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Search the source and translated text of every document. A block matches when it contains all whitespace-separated terms, ignoring case. */
+        get: {
+            parameters: {
+                query: {
+                    q: string;
+                    library?: "books" | "papers";
+                    document?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LibrarySearchHit"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/documents/{id}/messages": {
         parameters: {
             query?: never;
@@ -895,11 +1382,19 @@ export interface paths {
                         attachments?: string[];
                         prompt: string;
                         context: string;
+                        /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
+                        readingLocation?: components["schemas"]["DocumentLocation"];
                         references?: {
                             text: string;
                             /** @enum {unknown} */
                             kind?: "selection" | "section";
                             location: components["schemas"]["DocumentLocation"];
+                            sourceId?: string;
+                            pageImage?: components["schemas"]["PageImageEvidence"];
+                            corpusRevision?: string;
+                            contentHash?: string;
+                            /** @enum {string} */
+                            precision?: "page" | "block" | "paragraph";
                         }[];
                     };
                 };
@@ -1557,7 +2052,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration. */
-                    capability?: "text" | "vision";
+                    capability?: "text" | "vision" | "tools";
                     /** @description Required for the api provider, which is checked one model at a time; the result is stored under capabilities["api:<model>"]. */
                     model?: string;
                 };
@@ -2417,6 +2912,449 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    library: "books" | "papers";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Trashed documents, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Document"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Permanently delete every trashed document in a library */
+        delete: {
+            parameters: {
+                query: {
+                    library: "books" | "papers";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Emptied */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            removed: number;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/libraries/{library}/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename a folder (with to) or remove it (without to) on every document of a library, including the trash, in one transaction. Subfolders (from/child) follow; 400 when a renamed folder would exceed 40 characters */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    library: "books" | "papers";
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        from: string;
+                        to?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Changed documents */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            changed: number;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/libraries/{library}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename a tag (with to) or remove it (without to) on every document of a library, including the trash, in one transaction */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    library: "books" | "papers";
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        from: string;
+                        to?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Changed documents */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            changed: number;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download a paper into the paper library from an arXiv ID, DOI, paper or PDF link, or title; metadata comes from arXiv, Crossref, Semantic Scholar, OpenReview or the page's citation tags */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        ref: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The same file already exists */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Document"];
+                    };
+                };
+                /** @description Imported */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Document"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/metadata/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Look up metadata by DOI, arXiv ID (also detected on the first pages) or a close title match; manual fields are kept */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Document"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The document's free-form paper note */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Note (empty when unset) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            body: string;
+                            updatedAt?: string;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        body: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            body: string;
+                            updatedAt?: string;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/messages/{message}/sources/{source}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Validate a persisted original-text citation before navigation */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    message: string;
+                    source: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Original source is still current */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            valid: boolean;
+                        };
+                    };
+                };
+                /** @description Document, message or source is unavailable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Original text or citation version has changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3348,536 +4286,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/trash": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: {
-            parameters: {
-                query: {
-                    library: "books" | "papers";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Trashed documents, newest first */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Document"][];
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /** Permanently delete every trashed document in a library */
-        delete: {
-            parameters: {
-                query: {
-                    library: "books" | "papers";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Emptied */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            removed: number;
-                        };
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/libraries/{library}/folders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rename a folder (with to) or remove it (without to) on every document of a library, including the trash, in one transaction. Subfolders (from/child) follow; 400 when a renamed folder would exceed 40 characters */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    library: "books" | "papers";
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        from: string;
-                        to?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Changed documents */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            changed: number;
-                        };
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/libraries/{library}/tags": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rename a tag (with to) or remove it (without to) on every document of a library, including the trash, in one transaction */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    library: "books" | "papers";
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        from: string;
-                        to?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Changed documents */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            changed: number;
-                        };
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/documents/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Download a paper into the paper library from an arXiv ID, DOI, paper or PDF link, or title; metadata comes from arXiv, Crossref, Semantic Scholar, OpenReview or the page's citation tags */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        ref: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description The same file already exists */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Document"];
-                    };
-                };
-                /** @description Imported */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Document"];
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/documents/{id}/metadata/lookup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Look up metadata by DOI, arXiv ID (also detected on the first pages) or a close title match; manual fields are kept */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Document"];
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/documents/{id}/note": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The document's free-form paper note */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Note (empty when unset) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            body: string;
-                            updatedAt?: string;
-                        };
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        body: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Saved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            body: string;
-                            updatedAt?: string;
-                        };
-                    };
-                };
-                /** @description Error */
-                default: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        CollectionTaskConfig: {
-            v: number;
-            research_topic?: string;
-            keyword_groups?: string[][];
-            group_operator_or?: boolean;
-            authors?: {
-                name?: string;
-                aliases?: string[];
+        OverviewContent: {
+            summary: string;
+            findings: {
+                text: string;
+                blockIds: string[];
             }[];
-            categories?: string[];
-            not_interested?: string;
-            frequency_hours?: number;
-            latest_window_days?: number;
-            hot_window_months?: number;
+            limitations: {
+                text: string;
+                blockIds: string[];
+            }[];
+            terms: string[];
         };
-        CollectionTask: {
-            id: string;
-            name: string;
-            enabled?: boolean;
-            priority?: number;
-            config?: components["schemas"]["CollectionTaskConfig"];
-            queryRevision: number;
-            semanticHash?: string;
-            nextRunAt?: string;
-            createdAt?: string;
-            updatedAt?: string;
-            activeRun?: components["schemas"]["CollectionRun"] | null;
-        };
-        CollectionRun: {
-            id: string;
-            taskId: string;
-            queryRevision?: number;
-            trigger?: string;
-            status: string;
-            failureClass?: string;
-            startedAt?: string;
-            finishedAt?: string;
-        };
-        CollectionCandidate: {
-            arxivId: string;
+        OverviewSection: {
+            key: string;
             title: string;
-            abstract: string;
-            authors?: {
-                name?: string;
-                affiliation?: string;
-            }[];
-            categories?: string[];
-            publishedAt?: string;
-            updatedAt?: string;
-            latestVersion: number;
-            doi?: string;
-            journalRef?: string;
-            contentHash?: string;
-            firstSeenAt?: string;
-            lastSeenAt?: string;
-            ignored?: boolean;
-        };
-        CollectionCitation: {
-            arxivId?: string;
-            servicePaperID?: string;
-            count?: number | null;
-            successAt?: string;
-            attemptedAt?: string;
-            error?: string;
-            stale?: boolean;
-        };
-        CollectionImportRequest: {
-            requestId: string;
-            arxivId: string;
-            downloadVersion: number;
-            status: string;
-            actualSha256?: string;
-            documentId?: string;
-            library?: string;
-            confirmPages?: number;
-            error?: string;
-            condition?: string;
-            /** @description Detail-view only: active, trash or missing for the linked document. */
-            documentState?: string;
-        };
-        CollectionSettings: {
-            analysisEnabled?: boolean;
-            analysisProvider?: string;
-            analysisModel?: string;
-            analysisEffort?: string;
-            dailyLimit?: number;
-            requestRpm?: number;
-            paused?: boolean;
-            configVersion?: number;
-            hasCitationsKey?: boolean;
-            readonly quota?: {
-                utcDay: string;
-                sent: number;
-                reserved: number;
-                uncertain: number;
+            firstBlockId: string;
+            lastBlockId: string;
+            location: {
+                [key: string]: unknown;
             };
+            passageCount: number;
+            content: components["schemas"]["OverviewContent"];
         };
-        CollectionAnalysisJob: {
-            id: string;
-            arxivId: string;
-            expectedContentHash: string;
+        DocumentOverview: {
+            stale?: boolean;
+            sources?: {
+                blockId: string;
+                label: string;
+                location: {
+                    [key: string]: unknown;
+                };
+            }[];
+            documentId: string;
+            corpusRevision: string;
+            compilerVersion: string;
             /** @enum {string} */
-            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-            error?: string;
-            createdAt: string;
-            finishedAt?: string;
-        };
-        CollectionAnalysis: {
-            cacheKey: string;
-            arxivId: string;
-            contentHash: string;
-            profileHash: string;
-            modelFingerprint: string;
-            promptVersion: number;
-            resultVersion: number;
-            /** @enum {string} */
-            status: "pending" | "running" | "succeeded" | "failed" | "interrupted" | "blocked";
-            error?: string;
-            attempt: number;
-            retryAt?: string;
-            createdAt: string;
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            content?: components["schemas"]["OverviewContent"];
+            sections: components["schemas"]["OverviewSection"][];
+            coverage: {
+                status: string;
+                totalUnits: number;
+                searchableUnits: number;
+                missingRanges: string[];
+                warnings: string[];
+            };
+            compiledPassages: number;
+            totalPassages: number;
             updatedAt: string;
-            result?: components["schemas"]["CollectionAnalysisResult"];
+            error?: string;
         };
-        CollectionAnalysisResult: {
-            /** @enum {integer} */
-            schema_version: 1;
-            title_zh: string;
-            abstract_zh: string;
-            assessments: {
-                taskId: string;
-                profileHash: string;
-                relevance_score: number;
-                reason_zh: string;
-                evidence: {
-                    /** @enum {string} */
-                    field: "title" | "abstract";
-                    quote: string;
-                }[];
+        OverviewJob: {
+            documentId: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            error: string;
+            compiledPassages: number;
+            totalPassages: number;
+        };
+        JournalRankConfig: {
+            enabled: boolean;
+            hasKey: boolean;
+            /** @enum {string} */
+            filterMode: "include" | "exclude";
+            selected: string[];
+            available: {
+                key: string;
+                name: string;
+            }[];
+        };
+        JournalRankResult: {
+            /** @enum {string} */
+            status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+            checkedAt?: string;
+            badges: {
+                key: string;
+                name: string;
+                value: string;
+                subject?: string;
+                year?: string;
             }[];
         };
         ZoteroEntry: {
@@ -3905,6 +4397,15 @@ export interface components {
             notes: number;
             annotations: number;
             warnings: string[];
+        };
+        PageImageEvidence: {
+            page: number;
+            width: number;
+            height: number;
+            bytes: number;
+            sourceId: string;
+            corpusRevision: string;
+            contentHash: string;
         };
         DocumentLocation: {
             /** @constant */
@@ -3979,6 +4480,42 @@ export interface components {
             /** @description IDs removed when overlapping underlines were merged into the returned annotation. */
             replacedIds?: string[];
         };
+        DocumentText: {
+            documentId: string;
+            /** @enum {string} */
+            type: "epub" | "pdf";
+            /** @description Page count of a PDF or chapter count of an EPUB. */
+            units: number;
+            /** @description False for a PDF without a layout index; it then has no blocks. */
+            parsed: boolean;
+            /** @description Parsed pages of a partly parsed book; absent means all. */
+            parsedPages?: number[];
+            blocks: components["schemas"]["TextBlock"][];
+        };
+        TextBlock: {
+            id: string;
+            /** @description Page or chapter, starting at 1. */
+            unit: number;
+            /** @description EPUB chapter resource. */
+            href?: string;
+            label: string;
+            /** @description Source text, or a figure caption; empty on the translation side. */
+            text: string;
+            /** @description Completed translation, when requested. */
+            translation?: string;
+        };
+        LibrarySearchHit: {
+            documentId: string;
+            title: string;
+            /** @enum {string} */
+            type: "epub" | "pdf";
+            unit: number;
+            href?: string;
+            blockId: string;
+            /** @enum {string} */
+            side: "source" | "translation";
+            excerpt: string;
+        };
         SearchResult: {
             id: string;
             excerpt: string;
@@ -3990,8 +4527,12 @@ export interface components {
             /** @enum {unknown} */
             role: "user" | "assistant";
             content: string;
+            /** @description Provider-returned thinking displayed separately from the final answer. */
+            reasoning?: string;
             createdAt: string;
             context?: string;
+            /** @description Original reading position at send time, retained independently of current navigation and source citations. */
+            readingLocation?: components["schemas"]["DocumentLocation"];
             attachments?: {
                 id: string;
                 page: number;
@@ -4003,6 +4544,12 @@ export interface components {
                 /** @enum {unknown} */
                 kind?: "selection" | "section";
                 location: components["schemas"]["DocumentLocation"];
+                sourceId?: string;
+                pageImage?: components["schemas"]["PageImageEvidence"];
+                corpusRevision?: string;
+                contentHash?: string;
+                /** @enum {string} */
+                precision?: "page" | "block" | "paragraph";
             }[];
         };
         Provider: {
@@ -4017,11 +4564,33 @@ export interface components {
         };
         /** @description Decoded SSE event union for documentation and generated types only. Wire uses event: NAME and data: JSON lines; no envelope is transmitted. Append delta text verbatim. Only done confirms successful persistence. EOF is not completion. After error/done ignore late data. No automatic POST replay. */
         ChatStreamEvent: {
+            /** @constant */
+            event: "reasoning";
+            data: {
+                text: string;
+            };
+        } | {
+            /** @constant */
+            event: "draft";
+            data: {
+                text: string;
+                reset: boolean;
+            };
+        } | {
             /** @enum {string} */
             event: "status";
             data: {
                 /** @enum {string} */
                 status: "reading" | "reading-image";
+            };
+        } | {
+            /** @enum {string} */
+            event: "activity";
+            data: {
+                /** @enum {string} */
+                phase: "indexing" | "reading" | "writing";
+                message: string;
+                tool?: string;
             };
         } | {
             /** @enum {string} */
@@ -4103,14 +4672,38 @@ export interface components {
             vision: boolean;
             checkedAt: string;
             error?: string;
+            /**
+             * @description Independent structured tool-call capability; missing means not checked.
+             * @enum {string}
+             */
+            tools?: "passed" | "unsupported" | "failed";
+            toolError?: string;
+            /** @description Server-owned fingerprint of the checked tool protocol and schemas. */
+            toolSchemaVersion?: string;
         };
         APIConnection: {
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            protocol: "auto" | "openai" | "anthropic";
             url: string;
             model: string;
             key?: string;
             hasKey: boolean;
         };
         AgentModel: {
+            /** @description Provider-reported context capacity; omitted when unavailable */
+            contextWindow?: number;
+            maxOutputTokens?: number;
+            effortInfo?: {
+                /** @enum {string} */
+                mode: "levels" | "budget" | "fixed" | "unknown";
+                note: string;
+                mappings?: {
+                    [key: string]: string;
+                };
+            };
             id: string;
             name: string;
             description: string;
@@ -4349,6 +4942,147 @@ export interface components {
             text: string;
             location: components["schemas"]["EPUBLocation"];
             image?: string;
+        };
+        CollectionTaskConfig: {
+            v: number;
+            research_topic?: string;
+            keyword_groups?: string[][];
+            group_operator_or?: boolean;
+            authors?: {
+                name?: string;
+                aliases?: string[];
+            }[];
+            categories?: string[];
+            not_interested?: string;
+            frequency_hours?: number;
+            latest_window_days?: number;
+            hot_window_months?: number;
+        };
+        CollectionTask: {
+            id: string;
+            name: string;
+            enabled?: boolean;
+            priority?: number;
+            config?: components["schemas"]["CollectionTaskConfig"];
+            queryRevision: number;
+            semanticHash?: string;
+            nextRunAt?: string;
+            createdAt?: string;
+            updatedAt?: string;
+            activeRun?: components["schemas"]["CollectionRun"] | null;
+        };
+        CollectionRun: {
+            id: string;
+            taskId: string;
+            queryRevision?: number;
+            trigger?: string;
+            status: string;
+            failureClass?: string;
+            startedAt?: string;
+            finishedAt?: string;
+        };
+        CollectionCandidate: {
+            arxivId: string;
+            title: string;
+            abstract: string;
+            authors?: {
+                name?: string;
+                affiliation?: string;
+            }[];
+            categories?: string[];
+            publishedAt?: string;
+            updatedAt?: string;
+            latestVersion: number;
+            doi?: string;
+            journalRef?: string;
+            contentHash?: string;
+            firstSeenAt?: string;
+            lastSeenAt?: string;
+            ignored?: boolean;
+        };
+        CollectionCitation: {
+            arxivId?: string;
+            servicePaperID?: string;
+            count?: number | null;
+            successAt?: string;
+            attemptedAt?: string;
+            error?: string;
+            stale?: boolean;
+        };
+        CollectionImportRequest: {
+            requestId: string;
+            arxivId: string;
+            downloadVersion: number;
+            status: string;
+            actualSha256?: string;
+            documentId?: string;
+            library?: string;
+            confirmPages?: number;
+            error?: string;
+            condition?: string;
+            /** @description Detail-view only: active, trash or missing for the linked document. */
+            documentState?: string;
+        };
+        CollectionSettings: {
+            analysisEnabled?: boolean;
+            analysisProvider?: string;
+            analysisModel?: string;
+            analysisEffort?: string;
+            dailyLimit?: number;
+            requestRpm?: number;
+            paused?: boolean;
+            configVersion?: number;
+            hasCitationsKey?: boolean;
+            readonly quota?: {
+                utcDay: string;
+                sent: number;
+                reserved: number;
+                uncertain: number;
+            };
+        };
+        CollectionAnalysisJob: {
+            id: string;
+            arxivId: string;
+            expectedContentHash: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            error?: string;
+            createdAt: string;
+            finishedAt?: string;
+        };
+        CollectionAnalysis: {
+            cacheKey: string;
+            arxivId: string;
+            contentHash: string;
+            profileHash: string;
+            modelFingerprint: string;
+            promptVersion: number;
+            resultVersion: number;
+            /** @enum {string} */
+            status: "pending" | "running" | "succeeded" | "failed" | "interrupted" | "blocked";
+            error?: string;
+            attempt: number;
+            retryAt?: string;
+            createdAt: string;
+            updatedAt: string;
+            result?: components["schemas"]["CollectionAnalysisResult"];
+        };
+        CollectionAnalysisResult: {
+            /** @enum {integer} */
+            schema_version: 1;
+            title_zh: string;
+            abstract_zh: string;
+            assessments: {
+                taskId: string;
+                profileHash: string;
+                relevance_score: number;
+                reason_zh: string;
+                evidence: {
+                    /** @enum {string} */
+                    field: "title" | "abstract";
+                    quote: string;
+                }[];
+            }[];
         };
     };
     responses: never;

@@ -1,3 +1,4 @@
+import { annotationsInRects, sentenceRectsAtPoint } from "./annotation-hover";
 import { useTranslations } from "./useTranslations";
 import {
   useEffect,
@@ -295,6 +296,7 @@ export function EPUBReadingView({
         .catch((e) => toast.error(e.message));
   };
   const scroll = () => {
+    live.current.events.annotationHover?.(null);
     cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = requestAnimationFrame(() => {
       if (
@@ -498,7 +500,51 @@ export function EPUBReadingView({
                   : undefined,
               lineHeight: theme.lineHeight,
             }}
+            onPointerMove={(event) => {
+              const target =
+                event.target instanceof Element ? event.target : null;
+              if (
+                !pane.current ||
+                !target ||
+                event.buttons ||
+                window.getSelection()?.toString().trim() ||
+                target.closest("a,button,input,textarea")
+              ) {
+                live.current.events.annotationHover?.(null);
+                return;
+              }
+              const rects = sentenceRectsAtPoint(
+                target,
+                event.clientX,
+                event.clientY,
+              );
+              const marks = translatedAnnotationRanges(
+                pane.current,
+                annotations,
+                translations,
+              );
+              const matches = annotationsInRects(
+                pane.current,
+                annotations,
+                marks,
+                rects,
+              );
+              live.current.events.annotationHover?.(
+                matches.length
+                  ? {
+                      ids: matches.map((a) => a.id),
+                      anchor: {
+                        x: event.clientX,
+                        top: Math.min(...rects.map((r) => r.top)),
+                        bottom: Math.max(...rects.map((r) => r.bottom)),
+                      },
+                    }
+                  : null,
+              );
+            }}
+            onPointerLeave={() => live.current.events.annotationHover?.(null)}
             onPointerDown={() => {
+              live.current.events.annotationHover?.(null);
               side.current = "translation";
               dragging.current = true;
             }}

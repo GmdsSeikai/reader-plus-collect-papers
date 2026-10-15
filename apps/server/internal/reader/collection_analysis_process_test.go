@@ -86,8 +86,8 @@ func TestPaperAnalysisProcessCrashMetering(t *testing.T) {
 				if recover {
 					cmd.Env = append(cmd.Env, "READER_ANALYSIS_PROCESS_RECOVER=1")
 				}
-				output := &bytes.Buffer{}
-				cmd.Stdout, cmd.Stderr = output, output
+				output, diagnostics := &bytes.Buffer{}, &bytes.Buffer{}
+				cmd.Stdout, cmd.Stderr = output, diagnostics
 				if err := cmd.Start(); err != nil {
 					t.Fatal(err)
 				}
@@ -96,10 +96,10 @@ func TestPaperAnalysisProcessCrashMetering(t *testing.T) {
 				select {
 				case err := <-done:
 					if recover && err != nil {
-						t.Fatalf("startup failed: %v %s", err, output.String())
+						t.Fatalf("startup failed: %v %s %s", err, output.String(), diagnostics.String())
 					}
 					if !recover && (err == nil || cmd.ProcessState.ExitCode() != 1 || output.Len() != 0) {
-						t.Fatalf("wrong abrupt exit: %v %s", err, output.String())
+						t.Fatalf("wrong abrupt exit: %v %s %s", err, output.String(), diagnostics.String())
 					}
 				case <-time.After(25 * time.Second):
 					cmd.Process.Kill()

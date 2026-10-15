@@ -121,6 +121,25 @@ export type PaperSort =
 /** Optional columns of the paper table; the title is always shown. */
 export type PaperColumn =
   "authors" | "year" | "venue" | "added" | "opened" | "notes" | "status";
+export interface JournalRankBadge {
+  key: string;
+  name: string;
+  value: string;
+  subject?: string;
+  year?: string;
+}
+export interface JournalRankResult {
+  status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+  badges: JournalRankBadge[];
+  checkedAt?: string;
+}
+export interface JournalRankConfig {
+  enabled: boolean;
+  hasKey: boolean;
+  filterMode: "include" | "exclude";
+  selected: string[];
+  available: { key: string; name: string }[];
+}
 export interface PaperLibraryPreferences {
   /** Category (folder) order, including categories without papers. */
   categories?: string[];
@@ -256,7 +275,12 @@ export interface ReaderAnnotationTarget {
 }
 export type Appearance = "light" | "sepia" | "dark" | "system";
 export interface ReaderTheme {
+  /** Opt in to copying text selections and selected annotations. */
+  autoCopySelection?: boolean;
   autoTranslatePDF?: boolean;
+  autoGenerateOverview?: boolean;
+  /** Estimated total document-agent context; output and history reserve is included. */
+  documentContextTokens?: number;
   appearance?: Appearance;
   mode: "light" | "sepia" | "dark";
   fontSize: number;
@@ -282,7 +306,10 @@ export interface HighlightColor {
   label: string;
 }
 export const defaultTheme: ReaderTheme = {
+  autoCopySelection: false,
   autoTranslatePDF: true,
+  autoGenerateOverview: false,
+  documentContextTokens: 0,
   appearance: "system",
   mode: "light",
   fontSize: 1.15,
@@ -297,7 +324,8 @@ export const defaultTheme: ReaderTheme = {
   linkTranslationAnnotations: true,
   epubFlow: "scroll",
 };
-export type PDFBlockAction = "attach" | "preview" | "explain" | "translate";
+export type PDFBlockAction =
+  "attach" | "preview" | "copy" | "explain" | "translate";
 export interface PDFReadingAnchor {
   blockId: string;
   fraction: number;
@@ -330,6 +358,8 @@ export interface ReaderEvents {
   epubReadingAnchor?: (blockId: string) => void;
   blockHover?: (block: PDFBlock | null) => void;
   annotation?: (target: ReaderAnnotationTarget | null) => void;
+  /** Hover preview only; never select or copy annotation text. */
+  annotationHover?: (target: ReaderAnnotationTarget | null) => void;
   zoom?: (zoom: ReaderTheme["zoom"]) => void;
   readingAnchor?: (anchor: PDFReadingAnchor) => void;
   blockFocus?: (block: PDFBlock) => void;
@@ -411,6 +441,21 @@ export interface Provider {
   status: string;
 }
 export interface SourceReference {
+  /** Rendered page evidence, separate from extracted text. */
+  pageImage?: {
+    page: number;
+    width: number;
+    height: number;
+    bytes: number;
+    sourceId: string;
+    corpusRevision: string;
+    contentHash: string;
+  };
+  /** Server-issued evidence from a completed document reading attempt. */
+  sourceId?: string;
+  corpusRevision?: string;
+  contentHash?: string;
+  precision?: "page" | "block" | "paragraph";
   text: string;
   location: DocumentLocation;
   kind?: "selection" | "section";
@@ -422,6 +467,10 @@ export interface ImageAttachment {
   caption?: string;
 }
 export interface Message {
+  /** Provider-returned thinking, displayed separately and never added to answer context. */
+  reasoning?: string;
+  /** Navigation snapshot at send time; not an original-text citation. */
+  readingLocation?: DocumentLocation;
   attachments?: ImageAttachment[];
   context?: string;
   references?: SourceReference[];
@@ -492,6 +541,9 @@ export interface TranslationBlock {
   error?: string;
 }
 export interface AICapability {
+  tools?: "passed" | "unsupported" | "failed";
+  toolSchemaVersion?: string;
+  toolError?: string;
   pendingVision?: boolean;
   text: boolean;
   vision: boolean;
@@ -499,6 +551,8 @@ export interface AICapability {
   error?: string;
 }
 export interface APIConnection {
+  /** Auto detects official endpoints; other addresses use OpenAI Chat Completions. */
+  protocol?: "auto" | "openai" | "anthropic";
   url: string;
   model: string;
   key?: string;
@@ -527,6 +581,13 @@ export interface AIConfig {
   capabilities: Record<string, AICapability>;
 }
 export interface AgentModel {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  effortInfo?: {
+    mode: "levels" | "budget" | "fixed" | "unknown";
+    note: string;
+    mappings?: Partial<Record<ReasoningEffort, string>>;
+  };
   id: string;
   name: string;
   description: string;
@@ -603,3 +664,59 @@ export interface EPUBChapters {
   chapters: EPUBChapter[];
   toc: EPUBChapterLink[] | null;
 }
+
+export interface OverviewContent {
+  summary: string;
+  findings: { text: string; blockIds: string[] }[];
+  limitations: { text: string; blockIds: string[] }[];
+  terms: string[];
+}
+export interface OverviewSection {
+  key: string;
+  title: string;
+  firstBlockId: string;
+  lastBlockId: string;
+  location: DocumentLocation;
+  passageCount: number;
+  content: OverviewContent;
+}
+export type OverviewStatus =
+  | "missing"
+  | "queued"
+  | "running"
+  | "waiting"
+  | "complete"
+  | "partial"
+  | "failed"
+  | "canceled"
+  | "stale";
+export interface OverviewJob {
+  documentId: string;
+  status: OverviewStatus;
+  error?: string;
+  compiledPassages: number;
+  totalPassages: number;
+}
+export interface DocumentOverview extends OverviewJob {
+  stale: boolean;
+  sources?: { blockId: string; label: string; location: DocumentLocation }[];
+  corpusRevision: string;
+  compilerVersion: string;
+  content?: OverviewContent;
+  sections: OverviewSection[];
+  coverage: {
+    status: string;
+    totalUnits: number;
+    searchableUnits: number;
+    missingRanges: string[];
+    warnings: string[];
+  };
+  updatedAt: string;
+}
+export type {
+  ProxySettings,
+  ProxySettingsState,
+  ProxyCheckResult,
+} from "./proxy-settings";
+export type { UpdateProgress } from "./update-progress";
+export type { CommandLineStatus } from "./command-line";

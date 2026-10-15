@@ -409,11 +409,11 @@ func (s *Server) commitCollectionDocument(tx *sql.Tx, req CollectionImportReques
 		title = req.ArXivID
 	}
 	meta, _ := json.Marshal(PaperMetadata{
-		Lookup:  "done",
-		Sources: map[string]string{"title": "arxiv", "creators": "arxiv"},
+		Lookup:   "done",
+		Sources:  map[string]string{"title": "arxiv", "creators": "arxiv"},
 		Abstract: snapshot.Abstract,
-		DOI:     snapshot.DOI,
-		ArXiv:   req.ArXivID,
+		DOI:      snapshot.DOI,
+		ArXiv:    req.ArXivID,
 	})
 	d := Document{
 		ID:           docID,
@@ -437,6 +437,12 @@ func (s *Server) commitCollectionDocument(tx *sql.Tx, req CollectionImportReques
 	p := initialDocumentProcessing(d, settings)
 	body, _ := json.Marshal(p)
 	if _, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, body); err != nil {
+		return Document{}, err
+	}
+	if err = queueImportedOverview(tx, d.ID, settings); err != nil {
+		return Document{}, err
+	}
+	if _, err = tx.Exec("INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued')", d.ID); err != nil {
 		return Document{}, err
 	}
 	if _, err = tx.Exec("UPDATE collection_imports SET document_id=?,library=?,actual_sha256=? WHERE request_id=?", d.ID, d.Library, fullSHA, req.RequestID); err != nil {

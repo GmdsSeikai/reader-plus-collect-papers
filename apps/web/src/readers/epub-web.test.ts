@@ -77,6 +77,7 @@ let events: {
   location: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   selection: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   annotation: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
+  annotationHover: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   epubReadingAnchor: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   epubInteraction: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 };
@@ -179,6 +180,7 @@ beforeEach(() => {
     location: vi.fn(),
     selection: vi.fn(),
     annotation: vi.fn(),
+    annotationHover: vi.fn(),
     epubReadingAnchor: vi.fn(),
     epubInteraction: vi.fn(),
   };
@@ -694,4 +696,41 @@ it("keeps nested TOC anchors in their containing block", async () => {
   await open();
   await reader.goTo({ type: "epub", href: "a.xhtml#nested-anchor" });
   expect(reader.getLocation()).toMatchObject({ href: "a.xhtml", blockId: "a" });
+});
+
+it("emits note hover independently of selection/click and clears it on leaving", async () => {
+  await open();
+  const annotation = {
+    id: "note",
+    kind: "note",
+    note: "批注内容",
+    color: "#e6b94c",
+    quote: "Same words",
+    location: {
+      type: "epub",
+      href: "a.xhtml",
+      blockId: "a",
+      start: 0,
+      end: 10,
+    },
+  } as Annotation;
+  await reader.highlight([annotation]);
+  const text = host.querySelector('[data-epub-run="a"]')!;
+  const top = text.getBoundingClientRect().top;
+  events.annotation.mockClear();
+  events.selection.mockClear();
+  text.dispatchEvent(
+    new MouseEvent("pointermove", {
+      bubbles: true,
+      clientX: 40,
+      clientY: top + 10,
+    }),
+  );
+  expect(events.annotationHover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: ["note"] }),
+  );
+  expect(events.annotation).not.toHaveBeenCalled();
+  expect(events.selection).not.toHaveBeenCalled();
+  host.dispatchEvent(new MouseEvent("pointerleave"));
+  expect(events.annotationHover).toHaveBeenLastCalledWith(null);
 });

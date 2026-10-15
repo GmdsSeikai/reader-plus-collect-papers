@@ -53,6 +53,15 @@ run(process.execPath, [
   processor,
 ]);
 await cp(join(processor, "dist/main.mjs"), join(processor, "main.mjs"));
+await cp(join(processor, "dist/corpus.mjs"), join(processor, "corpus.mjs"));
+await cp(
+  join(processor, "dist/render-pages.mjs"),
+  join(processor, "render-pages.mjs"),
+);
+await cp(join(processor, "dist/model.mjs"), join(processor, "model.mjs"));
+await cp(join(processor, "dist/models"), join(processor, "models"), {
+  recursive: true,
+});
 await rm(join(processor, "dist"), { recursive: true });
 await cp(
   join(root, "scripts/processor-smoke.mjs"),
@@ -62,8 +71,10 @@ await cp(join(root, "apps/web/dist"), join(staging, "web"), {
   recursive: true,
 });
 await mkdir(join(staging, "bin"));
-const binary = `reader-server${process.platform === "win32" ? ".exe" : ""}`;
-await cp(join(desktop, "bin", binary), join(staging, "bin", binary));
+for (const name of ["reader-server", "reader"]) {
+  const binary = `${name}${process.platform === "win32" ? ".exe" : ""}`;
+  await cp(join(desktop, "bin", binary), join(staging, "bin", binary));
+}
 // onnxruntime-node ships other platforms too. Keep the native runner's ABI only.
 const nativeRoot = join(processor, "node_modules/onnxruntime-node/bin/napi-v6");
 for (const platform of await readdir(nativeRoot)) {
@@ -96,7 +107,7 @@ if (process.platform === "darwin" && !process.argv.includes("--dir")) {
   const dmg = join(
     root,
     "release",
-    `Reader-${app.version}-mac-${process.arch}.dmg`,
+    `Reader-${app.version}-mac-${process.arch === "x64" ? "intel-x64" : process.arch}.dmg`,
   );
   const compressed = `${dmg}.ulmo.dmg`;
   await rm(compressed, { force: true });

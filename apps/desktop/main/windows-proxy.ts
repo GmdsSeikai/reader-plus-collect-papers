@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { hostname } from "node:os";
 import { win32 } from "node:path";
 import { promisify } from "node:util";
 
@@ -41,6 +42,34 @@ try {
   }
 }
 `;
+
+function bypassEntries(entry: string): string[] {
+  if (entry.toLowerCase() === "<local>") {
+    // NO_PROXY has no portable equivalent for all unqualified intranet names.
+    // Keep this machine direct without turning <local> into a global wildcard.
+    const host = hostname().toLowerCase();
+    return ["localhost", host, host.split(".")[0]];
+  }
+  if (!entry.includes("*") || entry.startsWith("*.")) return [entry];
+  const octets = entry.split(".");
+  const prefix = octets.indexOf("*");
+  if (
+    prefix < 1 ||
+    octets.length > 4 ||
+    !octets.slice(prefix).every((part) => part === "*") ||
+    !octets
+      .slice(0, prefix)
+      .every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255)
+  )
+    // Skip unsupported bypass rules instead of failing the entire proxy config
+    return [];
+  const network = octets.slice(0, prefix);
+  const start = [...network, ...Array<string>(4 - prefix).fill("0")].join(".");
+  const end = [...network, ...Array<string>(4 - prefix).fill("255")].join(".");
+  // Go understands CIDRs; Node's HTTP agent understands IP address ranges.
+  // Include both so inherited environments preserve the same IPv4 subnet.
+  return [`${start}/${prefix * 8}`, `${start}-${end}`];
+}
 
 export function windowsProxySettings(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -87,9 +116,8 @@ export function windowsProxySettings(value: unknown): Record<string, unknown> {
   const bypass = ((raw.bypass as string | null | undefined) ?? "")
     .split(";")
     .map((v) => v.trim())
-    .filter(Boolean);
-  if (bypass.some((v) => v.toLowerCase() === "<local>"))
-    throw new Error("暂不支持将简单主机名直连规则传递给 Agent CLI");
+    .filter(Boolean)
+    .flatMap(bypassEntries);
   settings.ExceptionsList = bypass;
   return settings;
 }

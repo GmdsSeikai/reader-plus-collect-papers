@@ -8,6 +8,7 @@ import { detectRegions } from "./detect";
 import { assignText, readingRegions, isAsset, type Region } from "./layout";
 import { extractTextSpans } from "./text";
 import { digest, model, resolveModel } from "./model";
+import { renderPage } from "./render-page";
 
 Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
 const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -22,7 +23,6 @@ const { values } = parseArgs({
   options: {
     input: { type: "string" },
     output: { type: "string" },
-    "model-cache": { type: "string" },
     model: { type: "string" },
     // Books parse one chapter at a time; omitted bounds cover the document.
     "from-page": { type: "string" },
@@ -32,7 +32,7 @@ const { values } = parseArgs({
 });
 if (!values.input || !values.output)
   throw new Error(
-    "Usage: --input PDF --output DIRECTORY [--from-page N] [--to-page N] [--model FILE] [--model-cache DIRECTORY] [--debug]",
+    "Usage: --input PDF --output DIRECTORY [--from-page N] [--to-page N] [--model FILE] [--debug]",
   );
 const pageBound = (value: string | undefined) => {
   if (value === undefined) return undefined;
@@ -48,10 +48,7 @@ await mkdir(output, { recursive: true, mode: 0o700 });
 if ((await readdir(output)).length)
   throw new Error("输出目录必须为空，避免覆盖已有解析稿或用户修订");
 await mkdir(join(output, "assets"), { recursive: true, mode: 0o700 });
-const modelPath = await resolveModel(
-  resolve(values["model-cache"] ?? join(output, "..", "models")),
-  values.model,
-);
+const modelPath = await resolveModel(values.model && resolve(values.model));
 const session = await ort.InferenceSession.create(modelPath, {
   intraOpNumThreads: 2,
   interOpNumThreads: 1,
@@ -95,23 +92,8 @@ try {
   for (let number = first; number <= last; number++) {
     const pageStart = performance.now();
     const page = await pdf.getPage(number);
-    const original = page.getViewport({ scale: 1 });
-    const scale = Math.min(
-      2,
-      Math.sqrt(4_000_000 / (original.width * original.height)),
-    );
-    const viewport = page.getViewport({ scale });
-    const canvas = createCanvas(
-      Math.ceil(viewport.width),
-      Math.ceil(viewport.height),
-    );
+    const { canvas, scale } = await renderPage(page);
     const context = canvas.getContext("2d");
-    await page.render({
-      canvas: canvas as unknown as HTMLCanvasElement,
-      canvasContext: context as unknown as CanvasRenderingContext2D,
-      viewport,
-      background: "white",
-    }).promise;
     const regions = await detectRegions(session, canvas);
     const spans = await extractTextSpans(page, scale);
     if (!spans.length) incompletePages.push(number);

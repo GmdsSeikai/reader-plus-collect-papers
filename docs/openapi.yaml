@@ -4,6 +4,406 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/overviews":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Overview job states",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/OverviewJob",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Persisted source-versioned overview",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                { "regenerate": { "type": "boolean" } },
+                              "required": ["regenerate"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Existing overview or job",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "202":
+                    {
+                      "description": "Overview queued",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview/job":
+        {
+          "delete":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "204":
+                    {
+                      "description": "Overview job canceled; translation unaffected",
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/diagnostics/events":
+        {
+          "post":
+            {
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": ["level", "event"],
+                              "properties":
+                                {
+                                  "level":
+                                    {
+                                      "type": "string",
+                                      "enum": ["info", "warn", "error"],
+                                    },
+                                  "event":
+                                    {
+                                      "type": "string",
+                                      "maxLength": 80,
+                                      "pattern": "^[a-z][a-z0-9_.-]{0,79}$",
+                                    },
+                                  "detail":
+                                    { "type": "string", "maxLength": 512 },
+                                  "stack":
+                                    { "type": "string", "maxLength": 8000 },
+                                  "requestId":
+                                    { "type": "string", "maxLength": 512 },
+                                  "route":
+                                    { "type": "string", "maxLength": 512 },
+                                  "method":
+                                    { "type": "string", "maxLength": 512 },
+                                  "status": { "type": "number", "minimum": 0 },
+                                  "durationMs":
+                                    { "type": "number", "minimum": 0 },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "204": { "description": "Local diagnostic event recorded" },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/diagnostics/export":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "ZIP containing all retained local logs with redaction and a manifest",
+                      "content":
+                        {
+                          "application/zip":
+                            {
+                              "schema":
+                                { "type": "string", "format": "binary" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/journal-ranks/config":
+        {
+          "get":
+            {
+              "summary": "Read local easyScholar settings without the SecretKey",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Settings and known datasets",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "put":
+            {
+              "summary": "Save easyScholar settings; omitted key preserves the saved key",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "enabled": { "type": "boolean" },
+                                  "filterMode":
+                                    {
+                                      "type": "string",
+                                      "enum": ["include", "exclude"],
+                                    },
+                                  "selected":
+                                    {
+                                      "type": "array",
+                                      "items": { "type": "string" },
+                                    },
+                                  "key": { "type": "string" },
+                                },
+                              "required": ["enabled", "selected"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Saved settings",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/journal-rank":
+        {
+          "get":
+            {
+              "summary": "Query or read cached journal indicators for one paper",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "refresh",
+                    "in": "query",
+                    "schema": { "type": "string", "enum": ["1"] },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Journal indicator result",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankResult",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/connector/status":
         {
           "get":
@@ -1012,6 +1412,145 @@
                 ],
             },
         },
+      "/api/documents/{id}/text":
+        {
+          "get":
+            {
+              "description": "Readable text in reading order for the command line. PDFs have text only after layout parsing; units are pages for a PDF and reading-order chapters for an EPUB.",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/DocumentText" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "from",
+                    "required": false,
+                    "schema": { "type": "integer", "minimum": 1 },
+                  },
+                  {
+                    "in": "query",
+                    "name": "to",
+                    "required": false,
+                    "schema": { "type": "integer", "minimum": 1 },
+                  },
+                  {
+                    "in": "query",
+                    "name": "side",
+                    "required": false,
+                    "schema":
+                      {
+                        "type": "string",
+                        "enum": ["source", "translation", "both"],
+                        "default": "source",
+                      },
+                  },
+                ],
+            },
+        },
+      "/api/search":
+        {
+          "get":
+            {
+              "description": "Search the source and translated text of every document. A block matches when it contains all whitespace-separated terms, ignoring case.",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/LibrarySearchHit",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "query",
+                    "name": "q",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "library",
+                    "required": false,
+                    "schema": { "type": "string", "enum": ["books", "papers"] },
+                  },
+                  {
+                    "in": "query",
+                    "name": "document",
+                    "required": false,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "limit",
+                    "required": false,
+                    "schema":
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 20,
+                      },
+                  },
+                ],
+            },
+        },
       "/api/documents/{id}/messages":
         {
           "get":
@@ -1141,6 +1680,11 @@
                                     },
                                   "prompt": { "type": "string" },
                                   "context": { "type": "string" },
+                                  "readingLocation":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentLocation",
+                                      "description": "Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence.",
+                                    },
                                   "references":
                                     {
                                       "type": "array",
@@ -1158,6 +1702,25 @@
                                               "location":
                                                 {
                                                   "$ref": "#/components/schemas/DocumentLocation",
+                                                },
+                                              "sourceId": { "type": "string" },
+                                              "pageImage":
+                                                {
+                                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                                },
+                                              "corpusRevision":
+                                                { "type": "string" },
+                                              "contentHash":
+                                                { "type": "string" },
+                                              "precision":
+                                                {
+                                                  "type": "string",
+                                                  "enum":
+                                                    [
+                                                      "page",
+                                                      "block",
+                                                      "paragraph",
+                                                    ],
                                                 },
                                             },
                                           "required": ["text", "location"],
@@ -1798,7 +2361,8 @@
                     "name": "capability",
                     "in": "query",
                     "description": "Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration.",
-                    "schema": { "type": "string", "enum": ["text", "vision"] },
+                    "schema":
+                      { "type": "string", "enum": ["text", "vision", "tools"] },
                   },
                   {
                     "name": "model",
@@ -2759,705 +3323,6 @@
                 },
             },
         },
-      "/api/lifecycle/drain":
-        {
-          "post":
-            {
-              "responses":
-                {
-                  "202":
-                    {
-                      "description": "Drain started or already active",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "object",
-                                  "properties":
-                                    {
-                                      "id": { "type": "string" },
-                                      "status":
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            "quiescing",
-                                            "drained",
-                                            "cancelled",
-                                          ],
-                                        },
-                                    },
-                                  "required": ["id", "status"],
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-      "/api/lifecycle/drain/{id}":
-        {
-          "get":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Drain progress",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "object",
-                                  "properties":
-                                    {
-                                      "id": { "type": "string" },
-                                      "status":
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            "quiescing",
-                                            "drained",
-                                            "cancelled",
-                                          ],
-                                        },
-                                    },
-                                  "required": ["id", "status"],
-                                },
-                            },
-                        },
-                    },
-                  "404": { "description": "Unknown drain id" },
-                },
-            },
-        },
-      "/api/lifecycle/drain/{id}/cancel":
-        {
-          "post":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Exit intent revoked",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "object",
-                                  "properties":
-                                    {
-                                      "id": { "type": "string" },
-                                      "status":
-                                        {
-                                          "type": "string",
-                                          "enum": [
-                                            "quiescing",
-                                            "drained",
-                                            "cancelled",
-                                          ],
-                                        },
-                                    },
-                                  "required": ["id", "status"],
-                                },
-                            },
-                        },
-                    },
-                  "409": { "description": "Drain already finished" },
-                },
-            },
-        },
-      "/api/collection/tasks":
-        {
-          "get":
-            {
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Discovery tasks",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "array",
-                                  "items":
-                                    { "$ref": "#/components/schemas/CollectionTask" },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-          "post":
-            {
-              "requestBody":
-                {
-                  "content":
-                    {
-                      "application/json":
-                        {
-                          "schema":
-                            {
-                              "type": "object",
-                              "properties":
-                                {
-                                  "name": { "type": "string" },
-                                  "enabled": { "type": "boolean" },
-                                  "priority": { "type": "integer" },
-                                  "config": { "$ref": "#/components/schemas/CollectionTaskConfig" },
-                                },
-                              "required": ["name"],
-                            },
-                        },
-                    },
-                },
-              "responses":
-                {
-                  "201":
-                    {
-                      "description": "Created task",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema": { "$ref": "#/components/schemas/CollectionTask" },
-                            },
-                        },
-                    },
-                  "400": { "description": "Invalid task configuration" },
-                },
-            },
-        },
-      "/api/collection/tasks/{id}":
-        {
-          "put":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "requestBody":
-                {
-                  "content":
-                    {
-                      "application/json":
-                        {
-                          "schema":
-                            {
-                              "type": "object",
-                              "properties":
-                                {
-                                  "name": { "type": "string" },
-                                  "enabled": { "type": "boolean" },
-                                  "priority": { "type": "integer" },
-                                  "config": { "$ref": "#/components/schemas/CollectionTaskConfig" },
-                                  "expectedRevision": { "type": "integer" },
-                                },
-                            },
-                        },
-                    },
-                },
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Updated task",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema": { "$ref": "#/components/schemas/CollectionTask" },
-                            },
-                        },
-                    },
-                  "409": { "description": "Task revision conflict" },
-                },
-            },
-        },
-      "/api/collection/tasks/{id}/runs":
-        {
-          "post":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "202":
-                    {
-                      "description": "Run accepted or shared open run",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema": { "$ref": "#/components/schemas/CollectionRun" },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-      "/api/collection/runs/{id}":
-        {
-          "get":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Run state",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema": { "$ref": "#/components/schemas/CollectionRun" },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-      "/api/collection/runs/{id}/cancel":
-        {
-          "post":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "202": { "description": "Cancel accepted" },
-                },
-            },
-        },
-      "/api/collection/candidates":
-        {
-          "get":
-            {
-              "parameters":
-                [
-                  { "name": "task", "in": "query", "schema": { "type": "string" } },
-                  { "name": "q", "in": "query", "schema": { "type": "string" } },
-                  {
-                    "name": "citation",
-                    "in": "query",
-                    "schema": { "type": "string", "enum": ["known", "unknown"] },
-                  },
-                  {
-                    "name": "sort",
-                    "in": "query",
-                    "schema": { "type": "string", "enum": ["date", "citations", "relevance"] },
-                  },
-                  { "name": "cursor", "in": "query", "schema": { "type": "string" } },
-                  { "name": "limit", "in": "query", "schema": { "type": "integer" } },
-                  { "name": "ignored", "in": "query", "schema": { "type": "string" } },
-                ],
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Candidate page",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "object",
-                                  "properties":
-                                    {
-                                      "items":
-                                        {
-                                          "type": "array",
-                                          "items":
-                                            {
-                                              "type": "object",
-                                              "properties":
-                                                {
-                                                  "candidate": { "$ref": "#/components/schemas/CollectionCandidate" },
-                                                  "score": { "type": "integer" },
-                                                },
-                                            },
-                                        },
-                                      "nextCursor": { "type": "string" },
-                                    },
-                                  "required": ["items"],
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-      "/api/collection/candidates/{id}":
-        {
-          "get":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Candidate detail",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "object",
-                                  "properties":
-                                    {
-                                      "candidate": { "$ref": "#/components/schemas/CollectionCandidate" },
-                                      "citation": { "$ref": "#/components/schemas/CollectionCitation" },
-                                      "analyses": { "type": "array", "items": { "$ref": "#/components/schemas/CollectionAnalysis" } },
-                                      "analysisJob": { "oneOf": [{ "$ref": "#/components/schemas/CollectionAnalysisJob" }, { "type": "null" }] },
-                                      "latestImport": { "oneOf": [{ "$ref": "#/components/schemas/CollectionImportRequest" }, { "type": "null" }] },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-          "patch":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "requestBody":
-                {
-                  "content":
-                    {
-                      "application/json":
-                        {
-                          "schema":
-                            {
-                              "type": "object",
-                              "properties": { "ignored": { "type": "boolean" } },
-                            },
-                        },
-                    },
-                },
-              "responses":
-                {
-                  "200": { "description": "Updated candidate" },
-                },
-            },
-        },
-      "/api/collection/imports":
-        {
-          "get":
-            {
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Active import requests",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "array",
-                                  "items":
-                                    { "$ref": "#/components/schemas/CollectionImportRequest" },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-          "post":
-            {
-              "requestBody":
-                {
-                  "content":
-                    {
-                      "application/json":
-                        {
-                          "schema":
-                            {
-                              "type": "object",
-                              "properties":
-                                {
-                                  "items":
-                                    {
-                                      "type": "array",
-                                      "items":
-                                        {
-                                          "type": "object",
-                                          "properties":
-                                            {
-                                              "arxivId": { "type": "string" },
-                                              "version": { "type": "integer" },
-                                              "expectedContentHash": { "type": "string" },
-                                            },
-                                          "required": ["arxivId", "version"],
-                                        },
-                                    },
-                                },
-                              "required": ["items"],
-                            },
-                        },
-                    },
-                },
-              "responses":
-                {
-                  "202":
-                    {
-                      "description": "Per-item import requests",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema":
-                                {
-                                  "type": "object",
-                                  "properties":
-                                    {
-                                      "items":
-                                        {
-                                          "type": "array",
-                                          "items":
-                                            {
-                                              "type": "object",
-                                              "properties":
-                                                {
-                                                  "requestId": { "type": "string" },
-                                                  "arxivId": { "type": "string" },
-                                                  "error": { "type": "string" },
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-      "/api/collection/imports/{id}":
-        {
-          "get":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Import request state",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema": { "$ref": "#/components/schemas/CollectionImportRequest" },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-      "/api/collection/imports/{id}/confirm":
-        {
-          "post":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "202": { "description": "Commit accepted" },
-                  "409": { "description": "Not confirmable in this state" },
-                },
-            },
-        },
-      "/api/collection/imports/{id}/cancel":
-        {
-          "post":
-            {
-              "parameters":
-                [
-                  {
-                    "name": "id",
-                    "in": "path",
-                    "required": true,
-                    "schema": { "type": "string" },
-                  },
-                ],
-              "responses":
-                {
-                  "200": { "description": "Cancel result" },
-                },
-            },
-        },
-      "/api/collection/settings":
-        {
-          "get":
-            {
-              "responses":
-                {
-                  "200":
-                    {
-                      "description": "Module settings without secrets",
-                      "content":
-                        {
-                          "application/json":
-                            {
-                              "schema": { "$ref": "#/components/schemas/CollectionSettings" },
-                            },
-                        },
-                    },
-                },
-            },
-          "put":
-            {
-              "requestBody":
-                {
-                  "content":
-                    {
-                      "application/json":
-                        {
-                          "schema": { "$ref": "#/components/schemas/CollectionSettings" },
-                        },
-                    },
-                },
-              "responses":
-                {
-                  "200": { "description": "Saved settings" },
-                },
-            },
-        },
-      "/api/collection/pause":
-        {
-          "post":
-            {
-              "responses":
-                {
-                  "200": { "description": "Scheduling paused" },
-                },
-            },
-        },
-      "/api/collection/candidates/{id}/analysis":
-        {
-          "post": {
-            "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-            "responses": {
-              "202": { "description": "Persistent analysis job accepted; duplicate active requests return the same job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CollectionAnalysisJob" } } } },
-              "409": { "description": "Analysis disabled, paused, unavailable, or candidate changed" }
-            }
-          }
-        },
-      "/api/collection/analysis/{id}": {
-        "get": {
-          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-          "responses": {
-            "200": { "description": "Persistent job state", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CollectionAnalysisJob" } } } },
-            "404": { "description": "Analysis job does not exist" }
-          }
-        }
-      },
-      "/api/collection/analysis/{id}/cancel": {
-        "post": {
-          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-          "responses": {
-            "202": { "description": "Job cancellation recorded; terminal jobs remain unchanged", "content": { "application/json": { "schema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } } } } },
-            "404": { "description": "Analysis job does not exist" }
-          }
-        }
-      },
-      "/api/collection/resume":
-        {
-          "post":
-            {
-              "responses":
-                {
-                  "200": { "description": "Scheduling resumed" },
-                },
-            },
-        },
       "/api/trash":
         {
           "get":
@@ -3926,26 +3791,926 @@
                 },
             },
         },
+      "/api/documents/{id}/messages/{message}/sources/{source}":
+        {
+          "get":
+            {
+              "summary": "Validate a persisted original-text citation before navigation",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "source",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Original source is still current",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["valid"],
+                                  "properties":
+                                    { "valid": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "404":
+                    {
+                      "description": "Document, message or source is unavailable",
+                    },
+                  "409":
+                    {
+                      "description": "Original text or citation version has changed",
+                    },
+                },
+            },
+        },
+      "/api/lifecycle/drain":
+        {
+          "post":
+            {
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Drain started or already active",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "id": { "type": "string" },
+                                      "status":
+                                        {
+                                          "type": "string",
+                                          "enum":
+                                            [
+                                              "quiescing",
+                                              "drained",
+                                              "cancelled",
+                                            ],
+                                        },
+                                    },
+                                  "required": ["id", "status"],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/lifecycle/drain/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Drain progress",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "id": { "type": "string" },
+                                      "status":
+                                        {
+                                          "type": "string",
+                                          "enum":
+                                            [
+                                              "quiescing",
+                                              "drained",
+                                              "cancelled",
+                                            ],
+                                        },
+                                    },
+                                  "required": ["id", "status"],
+                                },
+                            },
+                        },
+                    },
+                  "404": { "description": "Unknown drain id" },
+                },
+            },
+        },
+      "/api/lifecycle/drain/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Exit intent revoked",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "id": { "type": "string" },
+                                      "status":
+                                        {
+                                          "type": "string",
+                                          "enum":
+                                            [
+                                              "quiescing",
+                                              "drained",
+                                              "cancelled",
+                                            ],
+                                        },
+                                    },
+                                  "required": ["id", "status"],
+                                },
+                            },
+                        },
+                    },
+                  "409": { "description": "Drain already finished" },
+                },
+            },
+        },
+      "/api/collection/tasks":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Discovery tasks",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/CollectionTask",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "name": { "type": "string" },
+                                  "enabled": { "type": "boolean" },
+                                  "priority": { "type": "integer" },
+                                  "config":
+                                    {
+                                      "$ref": "#/components/schemas/CollectionTaskConfig",
+                                    },
+                                },
+                              "required": ["name"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "201":
+                    {
+                      "description": "Created task",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionTask",
+                                },
+                            },
+                        },
+                    },
+                  "400": { "description": "Invalid task configuration" },
+                },
+            },
+        },
+      "/api/collection/tasks/{id}":
+        {
+          "put":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "name": { "type": "string" },
+                                  "enabled": { "type": "boolean" },
+                                  "priority": { "type": "integer" },
+                                  "config":
+                                    {
+                                      "$ref": "#/components/schemas/CollectionTaskConfig",
+                                    },
+                                  "expectedRevision": { "type": "integer" },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Updated task",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionTask",
+                                },
+                            },
+                        },
+                    },
+                  "409": { "description": "Task revision conflict" },
+                },
+            },
+        },
+      "/api/collection/tasks/{id}/runs":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Run accepted or shared open run",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionRun",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/runs/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Run state",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionRun",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/runs/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses": { "202": { "description": "Cancel accepted" } },
+            },
+        },
+      "/api/collection/candidates":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "task",
+                    "in": "query",
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "q",
+                    "in": "query",
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "citation",
+                    "in": "query",
+                    "schema":
+                      { "type": "string", "enum": ["known", "unknown"] },
+                  },
+                  {
+                    "name": "sort",
+                    "in": "query",
+                    "schema":
+                      {
+                        "type": "string",
+                        "enum": ["date", "citations", "relevance"],
+                      },
+                  },
+                  {
+                    "name": "cursor",
+                    "in": "query",
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "limit",
+                    "in": "query",
+                    "schema": { "type": "integer" },
+                  },
+                  {
+                    "name": "ignored",
+                    "in": "query",
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Candidate page",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "items":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "type": "object",
+                                              "properties":
+                                                {
+                                                  "candidate":
+                                                    {
+                                                      "$ref": "#/components/schemas/CollectionCandidate",
+                                                    },
+                                                  "score":
+                                                    { "type": "integer" },
+                                                },
+                                            },
+                                        },
+                                      "nextCursor": { "type": "string" },
+                                    },
+                                  "required": ["items"],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/candidates/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Candidate detail",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "candidate":
+                                        {
+                                          "$ref": "#/components/schemas/CollectionCandidate",
+                                        },
+                                      "citation":
+                                        {
+                                          "$ref": "#/components/schemas/CollectionCitation",
+                                        },
+                                      "analyses":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "$ref": "#/components/schemas/CollectionAnalysis",
+                                            },
+                                        },
+                                      "analysisJob":
+                                        {
+                                          "oneOf":
+                                            [
+                                              {
+                                                "$ref": "#/components/schemas/CollectionAnalysisJob",
+                                              },
+                                              { "type": "null" },
+                                            ],
+                                        },
+                                      "latestImport":
+                                        {
+                                          "oneOf":
+                                            [
+                                              {
+                                                "$ref": "#/components/schemas/CollectionImportRequest",
+                                              },
+                                              { "type": "null" },
+                                            ],
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "patch":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                { "ignored": { "type": "boolean" } },
+                            },
+                        },
+                    },
+                },
+              "responses": { "200": { "description": "Updated candidate" } },
+            },
+        },
+      "/api/collection/imports":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Active import requests",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/CollectionImportRequest",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "items":
+                                    {
+                                      "type": "array",
+                                      "items":
+                                        {
+                                          "type": "object",
+                                          "properties":
+                                            {
+                                              "arxivId": { "type": "string" },
+                                              "version": { "type": "integer" },
+                                              "expectedContentHash":
+                                                { "type": "string" },
+                                            },
+                                          "required": ["arxivId", "version"],
+                                        },
+                                    },
+                                },
+                              "required": ["items"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Per-item import requests",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "items":
+                                        {
+                                          "type": "array",
+                                          "items":
+                                            {
+                                              "type": "object",
+                                              "properties":
+                                                {
+                                                  "requestId":
+                                                    { "type": "string" },
+                                                  "arxivId":
+                                                    { "type": "string" },
+                                                  "error": { "type": "string" },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/imports/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Import request state",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionImportRequest",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/collection/imports/{id}/confirm":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202": { "description": "Commit accepted" },
+                  "409": { "description": "Not confirmable in this state" },
+                },
+            },
+        },
+      "/api/collection/imports/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses": { "200": { "description": "Cancel result" } },
+            },
+        },
+      "/api/collection/settings":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Module settings without secrets",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionSettings",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "put":
+            {
+              "requestBody":
+                {
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "$ref": "#/components/schemas/CollectionSettings",
+                            },
+                        },
+                    },
+                },
+              "responses": { "200": { "description": "Saved settings" } },
+            },
+        },
+      "/api/collection/pause":
+        {
+          "post":
+            { "responses": { "200": { "description": "Scheduling paused" } } },
+        },
+      "/api/collection/candidates/{id}/analysis":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Persistent analysis job accepted; duplicate active requests return the same job",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionAnalysisJob",
+                                },
+                            },
+                        },
+                    },
+                  "409":
+                    {
+                      "description": "Analysis disabled, paused, unavailable, or candidate changed",
+                    },
+                },
+            },
+        },
+      "/api/collection/analysis/{id}":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Persistent job state",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/CollectionAnalysisJob",
+                                },
+                            },
+                        },
+                    },
+                  "404": { "description": "Analysis job does not exist" },
+                },
+            },
+        },
+      "/api/collection/analysis/{id}/cancel":
+        {
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Job cancellation recorded; terminal jobs remain unchanged",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["id"],
+                                  "properties": { "id": { "type": "string" } },
+                                },
+                            },
+                        },
+                    },
+                  "404": { "description": "Analysis job does not exist" },
+                },
+            },
+        },
+      "/api/collection/resume":
+        {
+          "post":
+            { "responses": { "200": { "description": "Scheduling resumed" } } },
+        },
     },
   "components":
     {
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
-          "CollectionTaskConfig":
+          "OverviewContent":
             {
               "type": "object",
               "properties":
                 {
-                  "v": { "type": "integer" },
-                  "research_topic": { "type": "string" },
-                  "keyword_groups":
-                    {
-                      "type": "array",
-                      "items": { "type": "array", "items": { "type": "string" } },
-                    },
-                  "group_operator_or": { "type": "boolean" },
-                  "authors":
+                  "summary": { "type": "string" },
+                  "findings":
                     {
                       "type": "array",
                       "items":
@@ -3953,65 +4718,201 @@
                           "type": "object",
                           "properties":
                             {
-                              "name": { "type": "string" },
-                              "aliases":
-                                { "type": "array", "items": { "type": "string" } },
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
                             },
+                          "required": ["text", "blockIds"],
                         },
                     },
-                  "categories":
-                    { "type": "array", "items": { "type": "string" } },
-                  "not_interested": { "type": "string" },
-                  "frequency_hours": { "type": "integer" },
-                  "latest_window_days": { "type": "integer" },
-                  "hot_window_months": { "type": "integer" },
+                  "limitations":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "terms": { "type": "array", "items": { "type": "string" } },
                 },
-              "required": ["v"],
+              "required": ["summary", "findings", "limitations", "terms"],
             },
-          "CollectionTask":
+          "OverviewSection":
             {
               "type": "object",
               "properties":
                 {
-                  "id": { "type": "string" },
-                  "name": { "type": "string" },
-                  "enabled": { "type": "boolean" },
-                  "priority": { "type": "integer" },
-                  "config": { "$ref": "#/components/schemas/CollectionTaskConfig" },
-                  "queryRevision": { "type": "integer" },
-                  "semanticHash": { "type": "string" },
-                  "nextRunAt": { "type": "string" },
-                  "createdAt": { "type": "string" },
-                  "updatedAt": { "type": "string" },
-                  "activeRun": { "oneOf": [{ "$ref": "#/components/schemas/CollectionRun" }, { "type": "null" }] },
-                },
-              "required": ["id", "name", "queryRevision"],
-            },
-          "CollectionRun":
-            {
-              "type": "object",
-              "properties":
-                {
-                  "id": { "type": "string" },
-                  "taskId": { "type": "string" },
-                  "queryRevision": { "type": "integer" },
-                  "trigger": { "type": "string" },
-                  "status": { "type": "string" },
-                  "failureClass": { "type": "string" },
-                  "startedAt": { "type": "string" },
-                  "finishedAt": { "type": "string" },
-                },
-              "required": ["id", "taskId", "status"],
-            },
-          "CollectionCandidate":
-            {
-              "type": "object",
-              "properties":
-                {
-                  "arxivId": { "type": "string" },
+                  "key": { "type": "string" },
                   "title": { "type": "string" },
-                  "abstract": { "type": "string" },
-                  "authors":
+                  "firstBlockId": { "type": "string" },
+                  "lastBlockId": { "type": "string" },
+                  "location":
+                    { "type": "object", "additionalProperties": true },
+                  "passageCount": { "type": "integer" },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                },
+              "required":
+                [
+                  "key",
+                  "title",
+                  "firstBlockId",
+                  "lastBlockId",
+                  "location",
+                  "passageCount",
+                  "content",
+                ],
+            },
+          "DocumentOverview":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "stale": { "type": "boolean" },
+                  "sources":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "required": ["blockId", "label", "location"],
+                          "properties":
+                            {
+                              "blockId": { "type": "string" },
+                              "label": { "type": "string" },
+                              "location":
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true,
+                                },
+                            },
+                        },
+                    },
+                  "documentId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "compilerVersion": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                  "sections":
+                    {
+                      "type": "array",
+                      "items":
+                        { "$ref": "#/components/schemas/OverviewSection" },
+                    },
+                  "coverage":
+                    {
+                      "type": "object",
+                      "properties":
+                        {
+                          "status": { "type": "string" },
+                          "totalUnits": { "type": "integer" },
+                          "searchableUnits": { "type": "integer" },
+                          "missingRanges":
+                            { "type": "array", "items": { "type": "string" } },
+                          "warnings":
+                            { "type": "array", "items": { "type": "string" } },
+                        },
+                      "required":
+                        [
+                          "status",
+                          "totalUnits",
+                          "searchableUnits",
+                          "missingRanges",
+                          "warnings",
+                        ],
+                    },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                  "updatedAt": { "type": "string" },
+                  "error": { "type": "string" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "corpusRevision",
+                  "compilerVersion",
+                  "status",
+                  "sections",
+                  "coverage",
+                  "compiledPassages",
+                  "totalPassages",
+                  "updatedAt",
+                ],
+            },
+          "OverviewJob":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "status",
+                  "error",
+                  "compiledPassages",
+                  "totalPassages",
+                ],
+            },
+          "JournalRankConfig":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "enabled": { "type": "boolean" },
+                  "hasKey": { "type": "boolean" },
+                  "filterMode":
+                    { "type": "string", "enum": ["include", "exclude"] },
+                  "selected":
+                    { "type": "array", "items": { "type": "string" } },
+                  "available":
                     {
                       "type": "array",
                       "items":
@@ -4019,117 +4920,54 @@
                           "type": "object",
                           "properties":
                             {
+                              "key": { "type": "string" },
                               "name": { "type": "string" },
-                              "affiliation": { "type": "string" },
                             },
+                          "required": ["key", "name"],
                         },
                     },
-                  "categories":
-                    { "type": "array", "items": { "type": "string" } },
-                  "publishedAt": { "type": "string" },
-                  "updatedAt": { "type": "string" },
-                  "latestVersion": { "type": "integer" },
-                  "doi": { "type": "string" },
-                  "journalRef": { "type": "string" },
-                  "contentHash": { "type": "string" },
-                  "firstSeenAt": { "type": "string" },
-                  "lastSeenAt": { "type": "string" },
-                  "ignored": { "type": "boolean" },
                 },
-              "required": ["arxivId", "title", "abstract", "latestVersion"],
+              "required":
+                ["enabled", "hasKey", "filterMode", "selected", "available"],
             },
-          "CollectionCitation":
+          "JournalRankResult":
             {
               "type": "object",
               "properties":
                 {
-                  "arxivId": { "type": "string" },
-                  "servicePaperID": { "type": "string" },
-                  "count": { "type": "integer", "nullable": true },
-                  "successAt": { "type": "string" },
-                  "attemptedAt": { "type": "string" },
-                  "error": { "type": "string" },
-                  "stale": { "type": "boolean" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "found",
+                          "notFound",
+                          "notApplicable",
+                          "noVenue",
+                          "disabled",
+                        ],
+                    },
+                  "checkedAt": { "type": "string" },
+                  "badges":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                              "value": { "type": "string" },
+                              "subject": { "type": "string" },
+                              "year": { "type": "string" },
+                            },
+                          "required": ["key", "name", "value"],
+                        },
+                    },
                 },
+              "required": ["status", "badges"],
             },
-          "CollectionImportRequest":
-            {
-              "type": "object",
-              "properties":
-                {
-                  "requestId": { "type": "string" },
-                  "arxivId": { "type": "string" },
-                  "downloadVersion": { "type": "integer" },
-                  "status": { "type": "string" },
-                  "actualSha256": { "type": "string" },
-                  "documentId": { "type": "string" },
-                  "library": { "type": "string" },
-                  "confirmPages": { "type": "integer" },
-                  "error": { "type": "string" },
-                  "condition": { "type": "string" },
-                  "documentState": { "type": "string", "description": "Detail-view only: active, trash or missing for the linked document." },
-                },
-              "required": ["requestId", "arxivId", "downloadVersion", "status"],
-            },
-          "CollectionSettings":
-            {
-              "type": "object",
-              "properties":
-                {
-                  "analysisEnabled": { "type": "boolean" },
-                  "analysisProvider": { "type": "string" },
-                  "analysisModel": { "type": "string" },
-                  "analysisEffort": { "type": "string" },
-                  "dailyLimit": { "type": "integer", "minimum": 0 },
-                  "requestRpm": { "type": "integer", "minimum": 0 },
-                  "paused": { "type": "boolean" },
-                  "configVersion": { "type": "integer" },
-                  "hasCitationsKey": { "type": "boolean" },
-                  "quota": {
-                    "type": "object", "readOnly": true,
-                    "required": ["utcDay", "sent", "reserved", "uncertain"],
-                    "properties": {
-                      "utcDay": { "type": "string" },
-                      "sent": { "type": "integer", "minimum": 0 },
-                      "reserved": { "type": "integer", "minimum": 0 },
-                      "uncertain": { "type": "integer", "minimum": 0 }
-                    }
-                  },
-                },
-            },
-          "CollectionAnalysisJob": {
-            "type": "object",
-            "required": ["id", "arxivId", "expectedContentHash", "status", "createdAt"],
-            "properties": {
-              "id": { "type": "string" },
-              "arxivId": { "type": "string" },
-              "expectedContentHash": { "type": "string" },
-              "status": { "type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"] },
-              "error": { "type": "string" },
-              "createdAt": { "type": "string" },
-              "finishedAt": { "type": "string" }
-            }
-          },
-          "CollectionAnalysis": {
-            "type": "object",
-            "required": ["cacheKey", "arxivId", "contentHash", "profileHash", "modelFingerprint", "promptVersion", "resultVersion", "status", "attempt", "createdAt", "updatedAt"],
-            "properties": {
-              "cacheKey": { "type": "string" }, "arxivId": { "type": "string" }, "contentHash": { "type": "string" }, "profileHash": { "type": "string" }, "modelFingerprint": { "type": "string" },
-              "promptVersion": { "type": "integer" }, "resultVersion": { "type": "integer" }, "status": { "type": "string", "enum": ["pending", "running", "succeeded", "failed", "interrupted", "blocked"] },
-              "error": { "type": "string" }, "attempt": { "type": "integer" }, "retryAt": { "type": "string" }, "createdAt": { "type": "string" }, "updatedAt": { "type": "string" },
-              "result": { "$ref": "#/components/schemas/CollectionAnalysisResult" }
-            }
-          },
-          "CollectionAnalysisResult": {
-            "type": "object", "required": ["schema_version", "title_zh", "abstract_zh", "assessments"],
-            "properties": {
-              "schema_version": { "type": "integer", "enum": [1] }, "title_zh": { "type": "string" }, "abstract_zh": { "type": "string" },
-              "assessments": { "type": "array", "items": { "type": "object", "required": ["taskId", "profileHash", "relevance_score", "reason_zh", "evidence"], "properties": {
-                "taskId": { "type": "string" }, "profileHash": { "type": "string" }, "relevance_score": { "type": "integer", "minimum": 0, "maximum": 100 }, "reason_zh": { "type": "string" },
-                "evidence": { "type": "array", "items": { "type": "object", "required": ["field", "quote"], "properties": { "field": { "type": "string", "enum": ["title", "abstract"] }, "quote": { "type": "string" } } } }
-              } } }
-            }
-          },
           "ZoteroEntry":
             {
               "type": "object",
@@ -4196,6 +5034,30 @@
                 },
               "required":
                 ["documentId", "status", "notes", "annotations", "warnings"],
+            },
+          "PageImageEvidence":
+            {
+              "type": "object",
+              "required":
+                [
+                  "page",
+                  "width",
+                  "height",
+                  "bytes",
+                  "sourceId",
+                  "corpusRevision",
+                  "contentHash",
+                ],
+              "properties":
+                {
+                  "page": { "type": "integer", "minimum": 1 },
+                  "width": { "type": "integer" },
+                  "height": { "type": "integer" },
+                  "bytes": { "type": "integer" },
+                  "sourceId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                },
             },
           "DocumentLocation":
             {
@@ -4395,6 +5257,93 @@
                   },
                 ],
             },
+          "DocumentText":
+            {
+              "type": "object",
+              "required": ["documentId", "type", "units", "parsed", "blocks"],
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "type": { "type": "string", "enum": ["epub", "pdf"] },
+                  "units":
+                    {
+                      "type": "integer",
+                      "description": "Page count of a PDF or chapter count of an EPUB.",
+                    },
+                  "parsed":
+                    {
+                      "type": "boolean",
+                      "description": "False for a PDF without a layout index; it then has no blocks.",
+                    },
+                  "parsedPages":
+                    {
+                      "type": "array",
+                      "items": { "type": "integer" },
+                      "description": "Parsed pages of a partly parsed book; absent means all.",
+                    },
+                  "blocks":
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TextBlock" },
+                    },
+                },
+            },
+          "TextBlock":
+            {
+              "type": "object",
+              "required": ["id", "unit", "label", "text"],
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "unit":
+                    {
+                      "type": "integer",
+                      "description": "Page or chapter, starting at 1.",
+                    },
+                  "href":
+                    {
+                      "type": "string",
+                      "description": "EPUB chapter resource.",
+                    },
+                  "label": { "type": "string" },
+                  "text":
+                    {
+                      "type": "string",
+                      "description": "Source text, or a figure caption; empty on the translation side.",
+                    },
+                  "translation":
+                    {
+                      "type": "string",
+                      "description": "Completed translation, when requested.",
+                    },
+                },
+            },
+          "LibrarySearchHit":
+            {
+              "type": "object",
+              "required":
+                [
+                  "documentId",
+                  "title",
+                  "type",
+                  "unit",
+                  "blockId",
+                  "side",
+                  "excerpt",
+                ],
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "title": { "type": "string" },
+                  "type": { "type": "string", "enum": ["epub", "pdf"] },
+                  "unit": { "type": "integer" },
+                  "href": { "type": "string" },
+                  "blockId": { "type": "string" },
+                  "side":
+                    { "type": "string", "enum": ["source", "translation"] },
+                  "excerpt": { "type": "string" },
+                },
+            },
           "SearchResult":
             {
               "type": "object",
@@ -4416,8 +5365,18 @@
                   "documentId": { "type": "string" },
                   "role": { "enum": ["user", "assistant"] },
                   "content": { "type": "string" },
+                  "reasoning":
+                    {
+                      "type": "string",
+                      "description": "Provider-returned thinking displayed separately from the final answer.",
+                    },
                   "createdAt": { "type": "string" },
                   "context": { "type": "string" },
+                  "readingLocation":
+                    {
+                      "$ref": "#/components/schemas/DocumentLocation",
+                      "description": "Original reading position at send time, retained independently of current navigation and source citations.",
+                    },
                   "attachments":
                     {
                       "type": "array",
@@ -4447,6 +5406,18 @@
                               "location":
                                 {
                                   "$ref": "#/components/schemas/DocumentLocation",
+                                },
+                              "sourceId": { "type": "string" },
+                              "pageImage":
+                                {
+                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                },
+                              "corpusRevision": { "type": "string" },
+                              "contentHash": { "type": "string" },
+                              "precision":
+                                {
+                                  "type": "string",
+                                  "enum": ["page", "block", "paragraph"],
                                 },
                             },
                           "required": ["text", "location"],
@@ -4479,6 +5450,38 @@
                 [
                   {
                     "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "reasoning" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text"],
+                            "properties": { "text": { "type": "string" } },
+                          },
+                      },
+                  },
+                  {
+                    "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "draft" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text", "reset"],
+                            "properties":
+                              {
+                                "text": { "type": "string" },
+                                "reset": { "type": "boolean" },
+                              },
+                          },
+                      },
+                  },
+                  {
+                    "type": "object",
                     "additionalProperties": false,
                     "required": ["event", "data"],
                     "properties":
@@ -4496,6 +5499,31 @@
                                     "type": "string",
                                     "enum": ["reading", "reading-image"],
                                   },
+                              },
+                          },
+                      },
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "type": "string", "enum": ["activity"] },
+                        "data":
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["phase", "message"],
+                            "properties":
+                              {
+                                "phase":
+                                  {
+                                    "type": "string",
+                                    "enum": ["indexing", "reading", "writing"],
+                                  },
+                                "message": { "type": "string" },
+                                "tool": { "type": "string" },
                               },
                           },
                       },
@@ -4687,6 +5715,18 @@
                   "vision": { "type": "boolean" },
                   "checkedAt": { "type": "string" },
                   "error": { "type": "string" },
+                  "tools":
+                    {
+                      "type": "string",
+                      "enum": ["passed", "unsupported", "failed"],
+                      "description": "Independent structured tool-call capability; missing means not checked.",
+                    },
+                  "toolError": { "type": "string" },
+                  "toolSchemaVersion":
+                    {
+                      "type": "string",
+                      "description": "Server-owned fingerprint of the checked tool protocol and schemas.",
+                    },
                 },
               "required": ["text", "vision", "checkedAt"],
             },
@@ -4695,6 +5735,12 @@
               "type": "object",
               "properties":
                 {
+                  "protocol":
+                    {
+                      "type": "string",
+                      "enum": ["auto", "openai", "anthropic"],
+                      "default": "auto",
+                    },
                   "url": { "type": "string" },
                   "model": { "type": "string" },
                   "key": { "type": "string", "writeOnly": true },
@@ -4708,6 +5754,31 @@
               "required": ["id", "name", "description", "isDefault"],
               "properties":
                 {
+                  "contextWindow":
+                    {
+                      "type": "integer",
+                      "description": "Provider-reported context capacity; omitted when unavailable",
+                    },
+                  "maxOutputTokens": { "type": "integer" },
+                  "effortInfo":
+                    {
+                      "type": "object",
+                      "required": ["mode", "note"],
+                      "properties":
+                        {
+                          "mode":
+                            {
+                              "type": "string",
+                              "enum": ["levels", "budget", "fixed", "unknown"],
+                            },
+                          "note": { "type": "string" },
+                          "mappings":
+                            {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" },
+                            },
+                        },
+                    },
                   "id": { "type": "string" },
                   "name": { "type": "string" },
                   "description": { "type": "string" },
@@ -4742,9 +5813,19 @@
               "type": "object",
               "properties":
                 {
-                  "citationsApiKey": { "type": "string", "writeOnly": true, "description": "Semantic Scholar key; omitted or empty preserves the stored key." },
+                  "citationsApiKey":
+                    {
+                      "type": "string",
+                      "writeOnly": true,
+                      "description": "Semantic Scholar key; omitted or empty preserves the stored key.",
+                    },
                   "hasCitationsKey": { "type": "boolean", "readOnly": true },
-                  "clearCitationsKey": { "type": "boolean", "writeOnly": true, "description": "Explicitly removes the Semantic Scholar key; cannot be combined with a new key." },
+                  "clearCitationsKey":
+                    {
+                      "type": "boolean",
+                      "writeOnly": true,
+                      "description": "Explicitly removes the Semantic Scholar key; cannot be combined with a new key.",
+                    },
                   "primary": { "type": "string" },
                   "models":
                     {
@@ -5298,6 +6379,324 @@
                   "image": { "type": "string" },
                 },
               "required": ["id", "label", "text", "location"],
+            },
+          "CollectionTaskConfig":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "v": { "type": "integer" },
+                  "research_topic": { "type": "string" },
+                  "keyword_groups":
+                    {
+                      "type": "array",
+                      "items":
+                        { "type": "array", "items": { "type": "string" } },
+                    },
+                  "group_operator_or": { "type": "boolean" },
+                  "authors":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "name": { "type": "string" },
+                              "aliases":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                        },
+                    },
+                  "categories":
+                    { "type": "array", "items": { "type": "string" } },
+                  "not_interested": { "type": "string" },
+                  "frequency_hours": { "type": "integer" },
+                  "latest_window_days": { "type": "integer" },
+                  "hot_window_months": { "type": "integer" },
+                },
+              "required": ["v"],
+            },
+          "CollectionTask":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "name": { "type": "string" },
+                  "enabled": { "type": "boolean" },
+                  "priority": { "type": "integer" },
+                  "config":
+                    { "$ref": "#/components/schemas/CollectionTaskConfig" },
+                  "queryRevision": { "type": "integer" },
+                  "semanticHash": { "type": "string" },
+                  "nextRunAt": { "type": "string" },
+                  "createdAt": { "type": "string" },
+                  "updatedAt": { "type": "string" },
+                  "activeRun":
+                    {
+                      "oneOf":
+                        [
+                          { "$ref": "#/components/schemas/CollectionRun" },
+                          { "type": "null" },
+                        ],
+                    },
+                },
+              "required": ["id", "name", "queryRevision"],
+            },
+          "CollectionRun":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "taskId": { "type": "string" },
+                  "queryRevision": { "type": "integer" },
+                  "trigger": { "type": "string" },
+                  "status": { "type": "string" },
+                  "failureClass": { "type": "string" },
+                  "startedAt": { "type": "string" },
+                  "finishedAt": { "type": "string" },
+                },
+              "required": ["id", "taskId", "status"],
+            },
+          "CollectionCandidate":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "arxivId": { "type": "string" },
+                  "title": { "type": "string" },
+                  "abstract": { "type": "string" },
+                  "authors":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "name": { "type": "string" },
+                              "affiliation": { "type": "string" },
+                            },
+                        },
+                    },
+                  "categories":
+                    { "type": "array", "items": { "type": "string" } },
+                  "publishedAt": { "type": "string" },
+                  "updatedAt": { "type": "string" },
+                  "latestVersion": { "type": "integer" },
+                  "doi": { "type": "string" },
+                  "journalRef": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                  "firstSeenAt": { "type": "string" },
+                  "lastSeenAt": { "type": "string" },
+                  "ignored": { "type": "boolean" },
+                },
+              "required": ["arxivId", "title", "abstract", "latestVersion"],
+            },
+          "CollectionCitation":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "arxivId": { "type": "string" },
+                  "servicePaperID": { "type": "string" },
+                  "count": { "type": "integer", "nullable": true },
+                  "successAt": { "type": "string" },
+                  "attemptedAt": { "type": "string" },
+                  "error": { "type": "string" },
+                  "stale": { "type": "boolean" },
+                },
+            },
+          "CollectionImportRequest":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "requestId": { "type": "string" },
+                  "arxivId": { "type": "string" },
+                  "downloadVersion": { "type": "integer" },
+                  "status": { "type": "string" },
+                  "actualSha256": { "type": "string" },
+                  "documentId": { "type": "string" },
+                  "library": { "type": "string" },
+                  "confirmPages": { "type": "integer" },
+                  "error": { "type": "string" },
+                  "condition": { "type": "string" },
+                  "documentState":
+                    {
+                      "type": "string",
+                      "description": "Detail-view only: active, trash or missing for the linked document.",
+                    },
+                },
+              "required": ["requestId", "arxivId", "downloadVersion", "status"],
+            },
+          "CollectionSettings":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "analysisEnabled": { "type": "boolean" },
+                  "analysisProvider": { "type": "string" },
+                  "analysisModel": { "type": "string" },
+                  "analysisEffort": { "type": "string" },
+                  "dailyLimit": { "type": "integer", "minimum": 0 },
+                  "requestRpm": { "type": "integer", "minimum": 0 },
+                  "paused": { "type": "boolean" },
+                  "configVersion": { "type": "integer" },
+                  "hasCitationsKey": { "type": "boolean" },
+                  "quota":
+                    {
+                      "type": "object",
+                      "readOnly": true,
+                      "required": ["utcDay", "sent", "reserved", "uncertain"],
+                      "properties":
+                        {
+                          "utcDay": { "type": "string" },
+                          "sent": { "type": "integer", "minimum": 0 },
+                          "reserved": { "type": "integer", "minimum": 0 },
+                          "uncertain": { "type": "integer", "minimum": 0 },
+                        },
+                    },
+                },
+            },
+          "CollectionAnalysisJob":
+            {
+              "type": "object",
+              "required":
+                ["id", "arxivId", "expectedContentHash", "status", "createdAt"],
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "arxivId": { "type": "string" },
+                  "expectedContentHash": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "queued",
+                          "running",
+                          "succeeded",
+                          "failed",
+                          "cancelled",
+                          "interrupted",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "createdAt": { "type": "string" },
+                  "finishedAt": { "type": "string" },
+                },
+            },
+          "CollectionAnalysis":
+            {
+              "type": "object",
+              "required":
+                [
+                  "cacheKey",
+                  "arxivId",
+                  "contentHash",
+                  "profileHash",
+                  "modelFingerprint",
+                  "promptVersion",
+                  "resultVersion",
+                  "status",
+                  "attempt",
+                  "createdAt",
+                  "updatedAt",
+                ],
+              "properties":
+                {
+                  "cacheKey": { "type": "string" },
+                  "arxivId": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                  "profileHash": { "type": "string" },
+                  "modelFingerprint": { "type": "string" },
+                  "promptVersion": { "type": "integer" },
+                  "resultVersion": { "type": "integer" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "pending",
+                          "running",
+                          "succeeded",
+                          "failed",
+                          "interrupted",
+                          "blocked",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "attempt": { "type": "integer" },
+                  "retryAt": { "type": "string" },
+                  "createdAt": { "type": "string" },
+                  "updatedAt": { "type": "string" },
+                  "result":
+                    { "$ref": "#/components/schemas/CollectionAnalysisResult" },
+                },
+            },
+          "CollectionAnalysisResult":
+            {
+              "type": "object",
+              "required":
+                ["schema_version", "title_zh", "abstract_zh", "assessments"],
+              "properties":
+                {
+                  "schema_version": { "type": "integer", "enum": [1] },
+                  "title_zh": { "type": "string" },
+                  "abstract_zh": { "type": "string" },
+                  "assessments":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "required":
+                            [
+                              "taskId",
+                              "profileHash",
+                              "relevance_score",
+                              "reason_zh",
+                              "evidence",
+                            ],
+                          "properties":
+                            {
+                              "taskId": { "type": "string" },
+                              "profileHash": { "type": "string" },
+                              "relevance_score":
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 100,
+                                },
+                              "reason_zh": { "type": "string" },
+                              "evidence":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "type": "object",
+                                      "required": ["field", "quote"],
+                                      "properties":
+                                        {
+                                          "field":
+                                            {
+                                              "type": "string",
+                                              "enum": ["title", "abstract"],
+                                            },
+                                          "quote": { "type": "string" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             },
         },
     },
