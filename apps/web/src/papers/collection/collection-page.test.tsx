@@ -552,3 +552,54 @@ it("ignores a stale poll response after a new import claims the slot", async () 
   expect(host.textContent).toContain("排队");
   expect(host.textContent).not.toContain("旧响应");
 });
+
+it("keeps a terminal import when the same request's stale snapshot lands late", async () => {
+  // Mount GET imports captures the same request as downloaded and delays;
+  // meanwhile the server commits and the detail restores imported/active.
+  const snapshot = deferred<Record<string, unknown>[]>();
+  activeImports.mockImplementation(() => snapshot.promise);
+  candidates.mockImplementation(async () => terminalRows);
+  api.candidate.mockImplementation(async (id: string) => ({
+    candidate: { arxivId: id, title: "论文乙", authors: [], categories: [] },
+    citation: {},
+    analyses: [],
+    analysisJob: null,
+    latestImport: {
+      requestId: "req-1",
+      arxivId: id,
+      status: "imported",
+      documentId: "d1",
+      documentState: "active",
+      downloadVersion: 2,
+    },
+  }));
+  await remount();
+  const rows = Array.from(host.querySelectorAll("button.min-w-0"));
+  await act(async () => {
+    (rows[1] as HTMLElement).click();
+  });
+  expect(
+    Array.from(host.querySelectorAll("button")).some((b) =>
+      b.textContent?.includes("打开"),
+    ),
+  ).toBe(true);
+  // The delayed snapshot carries the same requestId but an older status;
+  // it must not roll the slot back to downloaded.
+  snapshot.resolve([
+    {
+      requestId: "req-1",
+      arxivId: "2301.00002",
+      status: "downloaded",
+      downloadVersion: 2,
+    },
+  ]);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(host.textContent).not.toContain("已下载");
+  expect(
+    Array.from(host.querySelectorAll("button")).some((b) =>
+      b.textContent?.includes("打开"),
+    ),
+  ).toBe(true);
+});

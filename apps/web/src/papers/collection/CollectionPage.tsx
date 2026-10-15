@@ -400,15 +400,15 @@ export function CollectionPage({
   const aliveRef = useRef(true);
   useEffect(() => {
     aliveRef.current = true;
+    // Snapshot restore fills empty slots or refreshes its own request; it
+    // never replaces the map or rolls back a newer command. The generation
+    // is fixed before the fetch starts so a slow snapshot cannot outrank
+    // writes accepted while it was in flight — even for the same requestId.
+    const issued = ++importSeq.current;
     collectionApi
       .activeImports()
       .then((reqs) => {
         if (!aliveRef.current) return;
-        // Snapshot restore fills empty slots or refreshes its own request;
-        // it never replaces the map or rolls back a newer command. The
-        // generation is fixed at fetch start so a slow snapshot cannot
-        // outrank writes that happened while it was in flight.
-        const issued = ++importSeq.current;
         for (const req of reqs) {
           writeImport(
             req.arxivId,
