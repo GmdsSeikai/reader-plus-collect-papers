@@ -7,10 +7,10 @@
 | 编号 | 必须交付的行为 | 最小证据 | 当前状态 |
 | --- | --- | --- | --- |
 | R01 无 AI 采集 | 创建任务、运行发现、查看完整原文、现有筛选、选择固定版本入库并打开 PDF；原自动发现/引用/恢复继续可用 | 生产 HTTP/隔离 SQLite/下载协议回归，实际 React 行为测试；提供隔离预览与人工操作步骤 | passed（2026-10-14：TestCollectionManualDiscoveryLoop、TestCollectionCandidateImportFlow、TestDuplicateCollectionImportPreservesExistingFile 等生产 HTTP/隔离 SQLite 回归通过；CollectionPage/TaskForm React 行为测试通过；导入行展示固定版本 vN。人工 UI 与实际安装另行记录，不冒充通过） |
-| R02 状态与取消 | 切页不停止服务任务；返回后恢复开放运行和候选最新导入状态；指定取消不影响其他任务，不伪报提交中项已取消；失败可见并可主动重试 | 实际 API 派生状态、React 返回页面/迟到响应/取消行为测试 | passed（2026-10-14：GET tasks 派生 activeRun、GET candidate 派生 latestImport（created_at+request_id 最新）与 documentState；TestCollectionTasksListDerivesActiveRun、TestCollectionCandidateDetailDerivesLatestImport；React 测试覆盖返回页面恢复运行/导入状态、取消按 API 真实状态更新（importing 不伪报 cancelled）、失败重试入口） |
+| R02 状态与取消 | 切页不停止服务任务；返回后恢复开放运行和候选最新导入状态；指定取消不影响其他任务，不伪报提交中项已取消；失败可见并可主动重试 | 实际 API 派生状态、React 返回页面/迟到响应/取消行为测试 | passed（2026-10-15 复核后：API 派生 activeRun/latestImport/documentState 与既有测试不变；Round-6 修复导入槽位请求归属+代次（41e069d），迟到详情/挂载快照/旧轮询响应不再覆盖当前请求；新增 3 项确定性竞态回归（迟到详情不回退重试、迟到空快照不擦除终态、旧响应不覆盖新请求），夹具按 activeImports 仅非终态合同修正；8/8 页面测试通过） |
 | R03 数据与确认 | 重复导入及中断恢复无重复文档、不丢笔记/标注/进度；不覆盖未知文件、不自动恢复回收站；长论文与回收站恢复分别明确确认 | 复用仍有效的导入/恢复/数据保护正式测试，追加页数/恢复条件确认及部分失败测试 | passed（2026-10-14：TestDuplicateCollectionImportPreservesExistingFile、TestRecoverNeverRestoresTrash、TestImportCancelIsTerminalAndOwned 等数据保护回归通过；新增 TestCollectionImportBatchPartialFailure（一项失败不终止整批）、TestCollectionImportTrashRestoreNeedsConfirm（回收站恢复需显式确认；条件经 claimImport 持久化缺陷已修 fcc8474）、TestDoubleConfirmClaimsOnce（长论文页数确认单次认领）；UI 按 condition 区分「确认入库（N 页）/确认恢复回收站文档」，回收站文档不提供可打开按钮） |
 | R04 手动 AI | 后台 tick 零自动分析发送；主动提交可查询、取消并保存完整结果；缓存命中零发送，额度零拒绝，页面退出不取消服务任务；应用发起请求预占/计数/恢复准确 | 生产 adapter 受控协议与真实 SQLite、生命周期及 React 回归；真实账号调用另记 | passed（2026-10-14：后台调度已移除（d377181 删除 collection_analysis_scheduler.go 及公平调度专属测试）；新增 TestCollectionTickSendsNoAutomaticAnalysis 证明真实 tick 零自动发送且手动发送可用；TestPaperAnalysisProductionAPIAndCache（缓存零发送、额度计数）、AnalysisPanel 生命周期测试（页面退出不取消服务命令）、StartupSettlesAttemptsExactlyOnce 等恢复计量回归通过。真实账号/账单不冒充验证） |
-| R05 Windows 交付 | 当前源码检查通过；Windows x64 安装包构建及包内运行检查通过；安装包、SHA-256、源码提交、工具与命令记录齐全 | api:generate/typecheck/test/diff checks；pnpm package 内置完整 build 与 package smoke；隔离预览和人工步骤 | passed（2026-10-14 Windows：api:generate 无漂移、typecheck 通过、pnpm test EXIT=0（Go 全量 + Vitest 108 文件/569 项，2 文件跳过为原有基线）、diff checks 干净。pnpm package EXIT=0：release/Reader-0.5.1-win-x64.exe（173,006,841 字节），SHA-256 81f43729a68ce963e0f387883e35f89a39fc9e30923cc9ed2be8be5c738b8314；包内 smoke 通过 PDF.js/ONNX 与 Go 服务/SQLite/鉴权/web 资源检查；源码 HEAD d866f28 clean，工具 Node 24.19.0/pnpm 10.30.3/Go 1.26.5/Electron 44.5.1。人工步骤见本文件末节；隔离预览用任务 worktree `pnpm dev`（数据根为 worktree 内 .reader）。实际安装与人工视觉验收待用户执行，不冒充通过；macOS 延期） |
+| R05 Windows 交付 | 当前源码检查通过；Windows x64 安装包构建及包内运行检查通过；安装包、SHA-256、源码提交、工具与命令记录齐全 | api:generate/typecheck/test/diff checks；pnpm package 内置完整 build 与 package smoke；隔离预览和人工步骤 | passed（2026-10-15 修复版重建：api:generate 无漂移、typecheck 通过、pnpm test EXIT=0（Go 全量 + Vitest 108 文件/572 项，2 文件跳过为原有基线）、diff checks 干净。pnpm package EXIT=0：release/Reader-0.5.1-win-x64.exe（173,007,084 字节），SHA-256 5e963bcf446321df4a4e36e370b3a3de525d28d542cb1b0eb0171f37af72e687；包内 smoke 通过 PDF.js/ONNX 与 Go 服务/SQLite/鉴权/web 资源检查；源码 HEAD 41e069d clean，工具 Node 24.19.0/pnpm 10.30.3/Go 1.26.5/Electron 44.5.1。隔离预览已实际启动（数据根为任务 archive 下独立测试库 preview-data，非 worktree .reader/用户库；就绪 JSON 与鉴权检查 401/200 通过；入口/停止方式见首版人工验证步骤节，token 不入文档）。实际安装与人工视觉验收待用户执行，不冒充通过；macOS 延期） |
 
 手动 AI 额度按应用发起的分析请求计量，不保证对应 CLI 内部尝试或提供商账单次数。保留现有连接与可选 RPM，不验收新增公平调度、分连接优先级或原生内部重试逐次计量。
 
@@ -71,6 +71,19 @@
 先验证 A27–A32 的导入/数据/关闭边界，再验证无 AI 闭环 A01–A08、A14、A23–A26；接着验证引用、完整恢复、AI/额度/公平；最后真实来源/模型、人工 UI、正式构建与安装。每阶段复用仍有效证据，新修改触及 owner 时重跑相关条目。
 
 项目检查为 `pnpm typecheck`、`pnpm test`、`pnpm build`；API 变更后执行 `pnpm api:generate` 并检查生成结果。测试不访问正式 `.reader` 或已安装书库，不读取 CLI 凭据；真实模型验证仅使用已登录 CLI 的正常调用且单独记下实际请求数量。
+
+## 首版人工验证步骤（R01–R05，基于隔离预览或安装包）
+
+预览入口：任务交付方已启动本机隔离预览（数据根为独立测试库，非用户日常书库）；访问地址与 token 见终端输出或 `preview-ready.txt`（token 不写入本文档与报告，不分享带 token 的地址）。停止方式：结束 `reader-server` 预览进程（或关闭终端）。
+
+1. 打开入口，确认论文采集页可进入、空库有引导文案。
+2. 建一个关键词任务、一个纯作者任务，手动运行；核对发现列表、原始摘要、筛选仍在。切到读书页再返回，确认运行状态与导入状态被恢复（任务仍在推进、已入库项仍可打开）。
+3. 选两篇正常 PDF 下载入库并打开；对一篇下载失败样例确认错误可见、点重试后出现新排队项（旧失败不回跳）。
+4. 对一篇长论文（>50 页）确认「确认入库（N 页）」与普通确认不同；对回收站重复件确认「确认恢复回收站文档」，且未确认前回收站文档不被静默恢复、不提供「打开」按钮。
+5. 显式启用手动摘要分析（费用确认文案写明仅手动），主动提交一篇，核对完整中文译文与任务依据；退出页面再确认服务端任务不被取消。
+6. 安装包（`release/Reader-0.5.1-win-x64.exe`）在 Windows 正式安装后重复 2–3 的闭环；浅色/深色/长标题/键盘操作按需抽查。
+
+以上视觉与安装验收由人工完成，不用浏览器自动化替代；未执行项如实记录 not run。
 
 ## 原完整范围的人工步骤（首版仅执行对应 R01–R05 的部分）
 
